@@ -1,22 +1,33 @@
 import streamlit as st
 import pandas as pd
 
-# Sayfa Yapılandırması
 st.set_page_config(
     page_title="MetEntegre - E-Ticaret Yönetim Paneli", 
     page_icon="⚡", 
     layout="wide"
 )
 
-# Session state ile sayfa / menü takibi
 if 'selected_menu' not in st.session_state:
-    st.session_state.selected_menu = "Genel Bakış"
+    st.session_state.selected_menu = "Anasayfa"
 
-# Sidebar Navigasyon Menüsü
 st.sidebar.title("🚀 MetEntegre Paneli")
-menu_options = ["Genel Bakış", "Trendyol İşlemleri", "Hepsiburada İşlemleri", "Trendyol API Ayarları", "Siparişler"]
+menu_options = [
+    "Anasayfa",
+    "Destek Taleplerim",
+    "Bildirimler",
+    "Duyurular",
+    "Sistemdeki Ürünler",
+    "Oto Kritik Stok",
+    "Trendyol",
+    "Çiçeksepeti",
+    "N11",
+    "E-PTT AVM",
+    "Hepsiburada",
+    "Pazarama",
+    "İdefix",
+    "Ayarlar"
+]
 
-# Eğer session state'den gelen menü listede varsa onu seç
 try:
     default_index = menu_options.index(st.session_state.selected_menu)
 except ValueError:
@@ -25,30 +36,32 @@ except ValueError:
 selected_menu = st.sidebar.selectbox("Menü", menu_options, index=default_index)
 st.session_state.selected_menu = selected_menu
 
-if st.session_state.selected_menu == "Genel Bakış":
+if st.session_state.selected_menu == "Anasayfa":
     st.subheader("📊 Mağaza ve Sipariş Durumu")
     
-    # Üst Tıklanabilir Pazaryeri Kutuları (Grid Yapısı)
     col1, col2, col3, col4 = st.columns(4)
     with col1:
         if st.button("🛒 HEPSİBURADA\n\n1 Kargoda", use_container_width=True):
-            st.session_state.selected_menu = "Hepsiburada İşlemleri"
+            st.session_state.selected_menu = "Hepsiburada"
             st.rerun()
     with col2:
         if st.button("📦 TRENDYOL\n\nSipariş yok", use_container_width=True):
-            st.session_state.selected_menu = "Trendyol İşlemleri"
+            st.session_state.selected_menu = "Trendyol"
             st.rerun()
     with col3:
         if st.button("🌸 ÇİÇEKSEPETİ\n\nSipariş yok", use_container_width=True):
-            st.warning("Çiçeksepeti modülü yakında aktifleşecek.")
+            st.session_state.selected_menu = "Çiçeksepeti"
+            st.rerun()
     with col4:
         if st.button("🏢 PTT AVM\n\nSipariş yok", use_container_width=True):
-            st.warning("PTT AVM modülü yakında aktifleşecek.")
+            st.session_state.selected_menu = "E-PTT AVM"
+            st.rerun()
 
     col5, col6, col7 = st.columns(3)
     with col5:
         if st.button("🟠 N11\n\nSipariş yok", use_container_width=True):
-            st.warning("N11 modülü yakında aktifleşecek.")
+            st.session_state.selected_menu = "N11"
+            st.rerun()
     with col6:
         st.button("🚀 PAZARAMA\n\nÇok Yakında", use_container_width=True, disabled=True)
     with col7:
@@ -56,7 +69,6 @@ if st.session_state.selected_menu == "Genel Bakış":
 
     st.markdown("---")
     
-    # Fatura Bilgileri ve Abonelik Bilgileri Bölümü
     col_fat, col_sub = st.columns([1.2, 1])
     
     with col_fat:
@@ -65,80 +77,175 @@ if st.session_state.selected_menu == "Genel Bakış":
         st.text_input("Email", value="sah1357sah@gmail.com", disabled=True)
         st.text_input("Telefon", value="05346944235", disabled=True)
         st.text_input("Vergi Numarası", value="9800650692", disabled=True)
+        st.text_input("Vergi Dairesi", value="Kadifekale", disabled=True)
+        st.text_input("TC Kimlik No", value="34510406564", disabled=True)
         st.text_input("Adres", value="Sevgi mah. 4642 sok no 4/1 Karabağlar İzmir", disabled=True)
+        
+        if st.button("Düzenle"):
+            st.info("Fatura bilgileri düzenleme modu aktif.")
     
     with col_sub:
         st.subheader("⭐ Abonelik Bilgileri")
-        st.metric(label="Kalan Gün", value="78 Gün", delta="Aktif")
-        st.write("**Paket Durumu:** Aktif")
+        st.metric(label="Kalan Gün Sayaç", value="78 Gün", delta="Aktif")
+        st.write("**Sipariş ID:** SA1707418640181936")
+        st.write("**Tutar:** 0 ₺")
         st.write("**Son Tarih:** 27.11.2026")
+        st.write("**Durum:** Aktif")
+        
+        st.info("Abonelik uzatma: Süre uzatma işlemleri yöneticimiz tarafından yapılmaktadır. Süreniz dolmadan önce lütfen destek talebi oluşturarak bize ulaşın.")
         if st.button("Destek Talebi Oluştur"):
             st.success("Destek talebiniz oluşturuldu.")
 
     st.markdown("---")
     
-    # Mağazalara Yüklenebilir Ürün Adetleri
     st.subheader("📦 Mağaza Ürün Limitleri")
-    lim1, lim2, lim3 = st.columns(3)
-    lim1.metric("Trendyol Yüklenebilir Ürün", "21210")
-    lim2.metric("Çiçeksepeti Yüklenebilir Ürün", "32351")
-    lim3.metric("N11 Yüklenebilir Ürün", "33890")
-    
-    lim4, lim5 = st.columns(2)
-    lim4.metric("Hepsiburada Yüklenebilir Ürün", "42662")
-    lim5.metric("EPtt AVM Yüklenebilir Ürün", "39231")
+    lim1, lim2 = st.columns(2)
+    with lim1:
+        st.metric("Trendyol Mağazanıza yüklenebilir ürün adedi", "20243")
+        st.metric("N11 Mağazanıza yüklenebilir ürün adedi", "31920")
+        st.metric("EPtt AVM Mağazanıza yüklenebilir ürün adedi", "37116")
+    with lim2:
+        st.metric("Çiçeksepeti Mağazanıza yüklenebilir ürün adedi", "30453")
+        st.metric("Hepsiburada Mağazanıza yüklenebilir ürün adedi", "39868")
 
-elif st.session_state.selected_menu == "Trendyol İşlemleri":
-    st.subheader("🛍️ Trendyol Tüm İşlemler")
+    st.markdown("---")
+    st.subheader("📢 Duyurularım")
+    st.success("Sistem güncellemeleri ve duyurular burada yer almaktadır. (Toplam: 1)")
+
+elif st.session_state.selected_menu == "Destek Taleplerim":
+    st.subheader("📌 Destek Taleplerim")
+    st.info("Destek talebi geçmişiniz ve durumları.")
+    if st.button("➕ Yeni Destek Talebi Aç"):
+        st.success("Destek formu açıldı.")
+
+elif st.session_state.selected_menu == "Bildirimler":
+    st.subheader("🔔 Bildirimler")
+    st.info("Sistem bildirimleri listelenmektedir.")
+
+elif st.session_state.selected_menu == "Duyurular":
+    st.subheader("📢 Duyurular")
+    st.success("Tüm sistem duyuruları burada yer alır.")
+
+elif st.session_state.selected_menu == "Sistemdeki Ürünler":
+    st.subheader("📦 Sistemdeki Ürünler")
+    st.text_input("🔍 SKU veya Ürün Adı ile Ara...", placeholder="Arama yapın...")
+    st.dataframe(pd.DataFrame({
+        "SKU": ["SKU-001", "SKU-002"],
+        "Ürün Adı": ["Örnek Ürün A", "Örnek Ürün B"],
+        "Kategori": ["Elektronik", "Giyim"],
+        "Stok": [150, 42],
+        "Fiyat": ["500 ₺", "250 ₺"]
+    }), use_container_width=True)
+
+elif st.session_state.selected_menu == "Oto Kritik Stok":
+    st.subheader("⚙️ Oto Kritik Stok Yönetimi")
+    st.number_input("Kritik Stok Eşiği", value=5)
+    if st.button("💾 Kritik Stok Ayarlarını Kaydet"):
+        st.success("Kritik stok ayarları güncellendi.")
+
+elif st.session_state.selected_menu == "Trendyol":
+    st.subheader("🛍️ Trendyol Ürünlerim")
     
-    cols = st.columns(6)
-    with cols[0]: st.button("Tüm Senkronizasyon")
-    with cols[1]: st.button("Kritik Stok Silindir")
-    with cols[2]: st.button("Tüm Barkodları Güncelle")
-    with cols[3]: st.button("Stok Tutmayanları Güncelle")
-    with cols[4]: st.button("Toplu Ürün Gönder")
-    with cols[5]: st.button("Toplu Ürün Gönder (Riskli)")
+    with st.expander("⚠️ Önemli Bilgilendirme", expanded=False):
+        st.warning("Trendyol entegrasyonu ve ürün yönetimi ile ilgili tüm toplu işlemler bu alandan gerçekleştirilir.")
+
+    st.markdown("##### 📁 Arşivleme İşlemleri")
+    ar1, ar2, ar3, ar4 = st.columns(4)
+    with ar1:
+        if st.button("Tümünü Arşivle", use_container_width=True):
+            st.warning("Tüm ürünler arşive gönderiliyor...")
+    with ar2:
+        if st.button("Kapatılanı Arşivle", use_container_width=True):
+            st.info("Kapatılan ürünler arşivlendi.")
+    with ar3:
+        if st.button("Satıştaki Arşivle", use_container_width=True):
+            st.info("Satıştaki ürünler arşivlendi.")
+    with ar4:
+        if st.button("Stok 0 Arşivle", use_container_width=True):
+            st.info("Stoku 0 olan ürünler arşivlendi.")
+
+    st.markdown("##### 🗑️ Silme İşlemleri & Veri Yönetimi")
+    sil1, sil2, ver1, ver2 = st.columns(4)
+    with sil1:
+        if st.button("Onay Sürecini Sil", use_container_width=True):
+            st.error("Onay sürecindeki ürünler silindi.")
+    with sil2:
+        if st.button("Arşivledikleri Sil", use_container_width=True):
+            st.error("Arşivlenenler kalıcı olarak silindi.")
+    with ver1:
+        if st.button("Trendyol'dan Çek", use_container_width=True):
+            st.success("Ürünler Trendyol'dan başarıyla çekildi!")
+    with ver2:
+        if st.button("Listeyi Yenile", use_container_width=True):
+            st.rerun()
+
+    st.markdown("---")
+    
+    st.markdown("##### 🔍 Ürün Filtreleme ve Arama")
+    if st.button("🔄 TRENDYOL ÜRÜNLERİMİ GÜNCELLE", type="primary", use_container_width=True):
+        st.success("Trendyol ürün listesi güncelleniyor...")
+        
+    st.text_input("🔍 Ürün adı, barkod veya model kodu ile ara...", placeholder="Arama yapın...")
+
+    # Filtre Butonları (Görseldeki renkli filtre barı)
+    f_cols = st.columns(7)
+    with f_cols[0]: st.button("Tümü (4029)")
+    with f_cols[1]: st.button("Satışta")
+    with f_cols[2]: st.button("Eşleşmeyenler")
+    with f_cols[3]: st.button("Satışa Kapalı")
+    with f_cols[4]: st.button("Arşivde")
+    with f_cols[5]: st.button("Onaylı")
+    with f_cols[6]: st.button("Onay Bekliyor")
+
+    f_cols2 = st.columns(3)
+    with f_cols2[0]: st.button("Reddedilen")
+    with f_cols2[1]: st.button("Blacklist")
+    with f_cols2[2]: st.button("Kilitli")
 
     st.markdown("---")
 
-    m1, m2, m3 = st.columns(3)
-    m1.metric("Toplam TY Ürün", "5.782")
-    m2.metric("Senkronize Edilmiş", "2.300")
-    m3.metric("Senkronize Edilememiş", "3.482")
-
-    m4, m5 = st.columns(2)
-    m4.metric("TY Aktif", "906")
-    m5.metric("Stok Tutmayanlar", "5.233")
+    # Ürün Tablosu (Görseldeki gerçekçi liste formatı)
+    ty_table = pd.DataFrame({
+        "Barkod": ["8697577754265107681282837", "8697577752520107681282837", "8697577793107681282837"],
+        "Ürün Adı": [
+            "8Bitdo Retro R8 Fare, Şarj Yuvası, PAW 3...",
+            "Aula S98 Pro 3 Modlu RGB Hot Swap Me...",
+            "USB to USB C Gen2 2.5\" Hard Disk Kutus..."
+        ],
+        "Satış Fiyatı": ["10137 TL", "8002.14 TL", "0 TL"],
+        "Trendyol Stok": [0, 0, 0],
+        "M.Entegre Stok": [0, 0, 0],
+        "Durum": ["Onaylı", "Satışa Kapalı", "Blacklist"]
+    })
+    st.dataframe(ty_table, use_container_width=True)
 
     st.markdown("---")
-    
-    tab_tumu, tab_eslesen, tab_eslesmeyen, tab_stoksuz = st.tabs(["Tümü", "Eşleşmiş", "Eşleşmemiş", "Stok Tutmayanlar"])
-    
-    with tab_tumu:
-        st.text_input("🔍 SKU veya Ürün Adı ile ara...", placeholder="Arama yapın...")
-        
-        table_data = pd.DataFrame({
-            "Merchant SKU": ["CYRE-879524-4L", "CYRE-798837-L/XL", "CYRE-679542-STANDARD"],
-            "Ürün Adı": ["Kamuflaj Fantezi Asker Kostümü", "Mavi Siyah Dantelli Jartiyer Takım", "Siyah Kırmızı Fantezi Jartiyer Takım"],
-            "Mağaza Stok": [-1, -1, -1],
-            "MetEntegre Stok": [384, 191, 87],
-            "Mağaza Fiyat": ["-", "-", "-"],
-            "MetEntegre Fiyat": ["310,20 ₺", "264,00 ₺", "264,00 ₺"],
-            "Eşleşme Durumu": ["Eşleşti", "Eşleşti", "Eşleşti"],
-            "Son Güncelleme": ["08.09.2026 17:30", "08.09.2026 17:30", "08.09.2026 17:30"]
-        })
-        st.dataframe(table_data, use_container_width=True)
-        
-    with tab_eslesen:
-        st.info("Eşleşen ürünler burada listelenir.")
-    with tab_eslesmeyen:
-        st.warning("Eşleşmeyen ürünler burada listelenir.")
-    with tab_stoksuz:
-        st.error("Stok tutmayan ürünler burada listelenir.")
+    st.subheader("⚙️ Trendyol API Ayarları ve Entegrasyon")
+    st.text_input("🔑 API KEY", value="8AJFfnpGxxZCZp98Dc8")
+    st.text_input("🔒 API SECRET", type="password", value="LZ4cNgROhsbHBeNUKWzC")
+    st.text_input("🏢 MAĞAZA ID", value="1282837")
+    if st.button("💾 Ayarları Kaydet"):
+        st.success("API ayarları kaydedildi.")
 
-elif st.session_state.selected_menu == "Hepsiburada İşlemleri":
+elif st.session_state.selected_menu == "Çiçeksepeti":
+    st.subheader("🌸 Çiçeksepeti Yönetim Paneli")
+    st.info("Çiçeksepeti ürün ve sipariş yönetimi aktif.")
+    if st.button("Ürünleri Çiçeksepeti'ne Gönder"):
+        st.success("Ürünler aktarıldı.")
+
+elif st.session_state.selected_menu == "N11":
+    st.subheader("🟠 N11 Yönetim Paneli")
+    st.info("N11 ürün ve sipariş yönetimi aktif.")
+    if st.button("N11 Stok Senkronizasyonu"):
+        st.success("Stoklar senkronize edildi.")
+
+elif st.session_state.selected_menu == "E-PTT AVM":
+    st.subheader("🏢 E-PTT AVM Yönetim Paneli")
+    st.info("E-PTT AVM ürün ve sipariş yönetimi aktif.")
+
+elif st.session_state.selected_menu == "Hepsiburada":
     st.subheader("🛒 Hepsiburada Yönetim Paneli")
-    st.info("Hepsiburada mağazanıza ait siparişler ve ürün senkronizasyon alanları burada yer almaktadır.")
+    st.info("Hepsiburada mağazanıza ait siparişler ve ürün senkronizasyon alanları.")
     hb_data = pd.DataFrame({
         "HB SKU": ["HB-9912", "HB-9913"],
         "Ürün Adı": ["Örnek HB Ürün 1", "Örnek HB Ürün 2"],
@@ -147,39 +254,17 @@ elif st.session_state.selected_menu == "Hepsiburada İşlemleri":
     })
     st.dataframe(hb_data, use_container_width=True)
 
-elif st.session_state.selected_menu == "Trendyol API Ayarları":
-    st.subheader("⚙️ Trendyol API ve Entegrasyon Ayarları")
-    
-    st.info("Değerli Kullanıcımız, Trendyol entegrasyonunu başlatmak için öncelikle bağlantı bilgilerinizin test edilmesi gerekmektedir.")
-    
-    st.text_input("🔑 API KEY", value="8AJFfnpGxxZCZp98Dc8")
-    st.text_input("🔒 API SECRET", type="password", value="LZ4cNgROhsbHBeNUKWzC")
-    st.text_input("🏢 MAĞAZA ID", value="1282837")
-    
-    st.markdown("---")
-    st.text_input("MARKA ARAMA VE MARKA TANIMLAMA", value="")
-    st.text_input("Seçilen Marka", value="colezium", disabled=True)
-    
-    col_set1, col_set2 = st.columns(2)
-    with col_set1:
-        st.text_input("BARCODE BAŞLANGICI", value="CYRE")
-        st.text_input("TRENDYOL HİZMET BEDELİ (TL)", value="12")
-    with col_set2:
-        st.text_input("SABİT KARGO FİYATI", value="120")
-        st.text_input("FİYAT ARTIŞ ORANI (%)", value="60")
-        
-    st.markdown("---")
-    st.subheader("🤖 Otomatik Ürün Yükleme")
-    auto_status = st.toggle("Otomatik Yükleme Sistemi", value=True)
-    if auto_status:
-        st.success("Otomatik yükleme aktif. Ürünler otomatik olarak Trendyol'a yüklenecektir.")
-    else:
-        st.warning("Otomatik yükleme pasif.")
-        
-    if st.button("Ayarları Güncelle"):
-        st.success("Ayarlar başarıyla güncellendi!")
+elif st.session_state.selected_menu == "Pazarama":
+    st.subheader("🚀 Pazarama Yönetim Paneli")
+    st.info("Pazarama entegrasyonu yakında aktifleşecektir.")
 
-elif st.session_state.selected_menu == "Siparişler":
-    st.subheader("🛒 Gelen Sipariş Yönetimi")
-    st.write("Tüm pazaryerlerinden düşen siparişlerin listesi.")
-    st.dataframe(pd.DataFrame(columns=["Sipariş No", "Pazaryeri", "Müşteri Adı", "Toplam Tutar", "Kargo Durumu"]))
+elif st.session_state.selected_menu == "İdefix":
+    st.subheader("🚀 İdefix Yönetim Paneli")
+    st.info("İdefix entegrasyonu yakında aktifleşecektir.")
+
+elif st.session_state.selected_menu == "Ayarlar":
+    st.subheader("⚙️ Genel Sistem Ayarları")
+    st.text_input("Firma Adı", value="Şahin Yiğit E-Ticaret")
+    st.text_input("Bildirim E-postası", value="sah1357sah@gmail.com")
+    if st.button("Genel Ayarları Kaydet"):
+        st.success("Ayarlar başarıyla kaydedildi!")
