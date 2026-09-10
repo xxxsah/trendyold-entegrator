@@ -7,50 +7,85 @@ st.set_page_config(
     layout="wide",
 )
 
-# Mobilde ve masaüstünde kutuların alt alta kaymasını önleyen ve MetEntegre stili sağlayan CSS
+# MetEntegre tarzı rengarenk, canlı, şık ve asla siyah/boğuk olmayan özel CSS
 st.markdown(
     """
     <style>
     .stApp {
-        background-color: #f8f9fa;
+        background-color: #f8fafc;
     }
-    /* Anasayfa Pazaryeri Grid Yapısı */
-    .market-container {
+    /* Anasayfa Kare Kutular (Mobilde bile yan yana kilitlenir) */
+    .market-grid-row {
         display: flex;
-        flex-wrap: wrap;
-        gap: 10px;
-        margin-bottom: 10px;
-    }
-    .market-card-item {
-        flex: 1;
-        min-width: 130px;
-    }
-    div.stButton > button {
+        gap: 8px;
+        margin-bottom: 8px;
         width: 100%;
-        height: 85px;
+    }
+    .market-card-btn {
+        flex: 1;
+        background: white;
+        border: 1px solid #e2e8f0;
         border-radius: 8px;
-        font-weight: bold;
-        font-size: 12px;
-        color: white;
-        border: none;
-        box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        padding: 10px 4px;
+        text-align: center;
+        text-decoration: none !important;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.04);
         display: flex;
         flex-direction: column;
         align-items: center;
         justify-content: center;
-        transition: 0.2s;
+        min-height: 80px;
+        transition: all 0.2s ease-in-out;
     }
-    div.stButton > button:hover {
-        opacity: 0.9;
-        transform: translateY(-1px);
+    .market-card-btn:hover {
+        border-color: #cbd5e1;
+        transform: translateY(-2px);
+        box-shadow: 0 4px 6px rgba(0,0,0,0.08);
     }
-    .btn-hb > button { background-color: #ff6600 !important; }
-    .btn-ty > button { background-color: #f27a1a !important; }
-    .btn-cs > button { background-color: #e6005c !important; }
-    .btn-ptt > button { background-color: #ff9900 !important; }
-    .btn-n11 > button { background-color: #6b46c1 !important; }
-    .btn-pz > button { background-color: #0099ff !important; }
-    .btn-id > button { background-color: #00b33c !important; }
+    .m-badge {
+        font-size: 11px;
+        font-weight: 700;
+        padding: 4px 8px;
+        border-radius: 4px;
+        color: white;
+        margin-bottom: 6px;
+        width: 100%;
+        text-align: center;
+    }
+    .m-status {
+        font-size: 11px;
+        font-weight: 600;
+        color: #334155;
+    }
+    /* Canlı Pazaryeri Renkleri */
+    .bg-hb { background-color: #ff6600; }
+    .bg-ty { background-color: #f27a1a; }
+    .bg-cs { background-color: #e6005c; }
+    .bg-ptt { background-color: #ff9900; }
+    .bg-n11 { background-color: #6b46c1; }
+    .bg-pz { background-color: #0099ff; }
+    .bg-id { background-color: #00b33c; }
+
+    /* Rengarenk İstatistik Kartları */
+    .stat-card {
+        background: white;
+        border: 1px solid #e2e8f0;
+        border-radius: 8px;
+        padding: 14px;
+        text-align: center;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.03);
+        margin-bottom: 8px;
+    }
+    .stat-number {
+        font-size: 22px;
+        font-weight: 800;
+    }
+    .stat-label {
+        font-size: 11px;
+        font-weight: 600;
+        color: #64748b;
+        margin-top: 4px;
+    }
     </style>
 """,
     unsafe_allow_html=True,
@@ -116,57 +151,59 @@ if st.session_state.selected_menu != "Anasayfa":
 
 if st.session_state.selected_menu == "Anasayfa":
   # 1. Satır: 4'lü Yan Yana Kare Kutular
-  st.markdown('<div class="market-container">', unsafe_allow_html=True)
-  col1, col2, col3, col4 = st.columns(4)
-  with col1:
-    st.markdown('<div class="btn-hb">', unsafe_allow_html=True)
-    if st.button("🛒 HEPSİBURADA\n\n1 Kargoda", key="hb_btn"):
-      st.session_state.previous_menu = "Anasayfa"
-      st.session_state.selected_menu = "Hepsiburada"
-      st.rerun()
-    st.markdown("</div>", unsafe_allow_html=True)
-  with col2:
-    st.markdown('<div class="btn-ty">', unsafe_allow_html=True)
-    if st.button("📦 TRENDYOL\n\nSipariş yok", key="ty_btn"):
-      st.session_state.previous_menu = "Anasayfa"
-      st.session_state.selected_menu = "Trendyol"
-      st.rerun()
-    st.markdown("</div>", unsafe_allow_html=True)
-  with col3:
-    st.markdown('<div class="btn-cs">', unsafe_allow_html=True)
-    if st.button("🌸 ÇİÇEKSEPETİ\n\nSipariş yok", key="cs_btn"):
-      st.session_state.previous_menu = "Anasayfa"
-      st.session_state.selected_menu = "Çiçeksepeti"
-      st.rerun()
-    st.markdown("</div>", unsafe_allow_html=True)
-  with col4:
-    st.markdown('<div class="btn-ptt">', unsafe_allow_html=True)
-    if st.button("🏢 PTT AVM\n\nSipariş yok", key="ptt_btn"):
-      st.session_state.previous_menu = "Anasayfa"
-      st.session_state.selected_menu = "E-PTT AVM"
-      st.rerun()
-    st.markdown("</div>", unsafe_allow_html=True)
-  st.markdown("</div>", unsafe_allow_html=True)
+  st.markdown(
+      """
+        <div class="market-grid-row">
+            <a href="?menu=Hepsiburada" target="_self" class="market-card-btn">
+                <div class="m-badge bg-hb">HEPSİBURADA</div>
+                <div class="m-status">1 Kargoda</div>
+            </a>
+            <a href="?menu=Trendyol" target="_self" class="market-card-btn">
+                <div class="m-badge bg-ty">TRENDYOL</div>
+                <div class="m-status">Sipariş yok</div>
+            </a>
+            <a href="?menu=Çiçeksepeti" target="_self" class="market-card-btn">
+                <div class="m-badge bg-cs">ÇİÇEKSEPETİ</div>
+                <div class="m-status">Sipariş yok</div>
+            </a>
+            <a href="?menu=E-PTT AVM" target="_self" class="market-card-btn">
+                <div class="m-badge bg-ptt">PTT AVM</div>
+                <div class="m-status">Sipariş yok</div>
+            </a>
+        </div>
+    """,
+      unsafe_allow_html=True,
+  )
 
   # 2. Satır: 3'lü Yan Yana Kare Kutular
-  st.markdown('<div class="market-container">', unsafe_allow_html=True)
-  col5, col6, col7 = st.columns(3)
-  with col5:
-    st.markdown('<div class="btn-n11">', unsafe_allow_html=True)
-    if st.button("🟠 N11\n\nSipariş yok", key="n11_btn"):
+  st.markdown(
+      """
+        <div class="market-grid-row">
+            <a href="?menu=N11" target="_self" class="market-card-btn">
+                <div class="m-badge bg-n11">N11</div>
+                <div class="m-status">Sipariş yok</div>
+            </a>
+            <div class="market-card-btn" style="opacity: 0.7; cursor: default;">
+                <div class="m-badge bg-pz">PAZARAMA</div>
+                <div class="m-status" style="color: #94a3b8;">Çok Yakında</div>
+            </div>
+            <div class="market-card-btn" style="opacity: 0.7; cursor: default;">
+                <div class="m-badge bg-id">İDEFİX</div>
+                <div class="m-status" style="color: #94a3b8;">Çok Yakında</div>
+            </div>
+        </div>
+    """,
+      unsafe_allow_html=True,
+  )
+
+  # URL Parametresi ile menü geçiş kontrolü
+  query_params = st.query_params
+  if "menu" in query_params:
+    target = query_params["menu"]
+    if target in menu_options:
       st.session_state.previous_menu = "Anasayfa"
-      st.session_state.selected_menu = "N11"
+      st.session_state.selected_menu = target
       st.rerun()
-    st.markdown("</div>", unsafe_allow_html=True)
-  with col6:
-    st.markdown('<div class="btn-pz">', unsafe_allow_html=True)
-    st.button("👑 PAZARAMA\n\nÇok Yakında", disabled=True, key="pz_btn")
-    st.markdown("</div>", unsafe_allow_html=True)
-  with col7:
-    st.markdown('<div class="btn-id">', unsafe_allow_html=True)
-    st.button("👑 İDEFİX\n\nÇok Yakında", disabled=True, key="id_btn")
-    st.markdown("</div>", unsafe_allow_html=True)
-  st.markdown("</div>", unsafe_allow_html=True)
 
   st.markdown("---")
 
@@ -213,50 +250,87 @@ if st.session_state.selected_menu == "Anasayfa":
   st.markdown("---")
   st.success("📢 **Duyurularım** — Sistem güncellemeleri ve duyurular.")
 
-elif st.session_state.selected_menu == "Trendyol":
-  st.subheader("🛍️ Trendyol Tüm İşlemler")
+elif selected_menu in [
+    "Trendyol",
+    "Hepsiburada",
+    "N11",
+    "Çiçeksepeti",
+    "E-PTT AVM",
+]:
+  st.subheader(f"🛍️ {selected_menu} Tüm Ürünler ve İşlemler")
   st.info(
-      "Trendyol mağazanızdaki ürünler, eşleşme durumları ve toplu işlemler."
+      f"{selected_menu} mağazanıza ait ürün listesi, fiyatlar ve eşleşme"
+      " durumları aşağıdadır."
   )
 
-  # MetEntegre Üst İstatistik Kartları (Görseldeki gibi)
-  m1, m2, m3 = st.columns(3)
-  m1.metric("Toplam TY Ürünü", "5.782")
-  m2.metric("Senkronize Edilmiş", "2.300")
-  m3.metric("Senkronize Edilmemiş", "3.482")
-
-  m4, m5 = st.columns(2)
-  m4.metric("TY Aktif", "906")
-  m5.metric("Stok Tutmayanlar", "5.236")
+  # MetEntegre Tarzı Rengarenk Üst İstatistik Kartları
+  st.markdown(
+      """
+        <div style="display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 10px;">
+            <div style="flex: 1; min-width: 100px;" class="stat-card">
+                <div class="stat-number" style="color: #0284c7;">5.782</div>
+                <div class="stat-label">Toplam Ürün</div>
+            </div>
+            <div style="flex: 1; min-width: 100px;" class="stat-card">
+                <div class="stat-number" style="color: #16a34a;">2.300</div>
+                <div class="stat-label">Senkronize Edilmiş</div>
+            </div>
+            <div style="flex: 1; min-width: 100px;" class="stat-card">
+                <div class="stat-number" style="color: #dc2626;">3.482</div>
+                <div class="stat-label">Senkronize Edilmemiş</div>
+            </div>
+        </div>
+        <div style="display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 15px;">
+            <div style="flex: 1; min-width: 140px;" class="stat-card">
+                <div class="stat-number" style="color: #475569;">906</div>
+                <div class="stat-label">Aktif Mağaza</div>
+            </div>
+            <div style="flex: 1; min-width: 140px;" class="stat-card">
+                <div class="stat-number" style="color: #ca8a04;">5.236</div>
+                <div class="stat-label">Stok Tutmayanlar</div>
+            </div>
+        </div>
+    """,
+      unsafe_allow_html=True,
+  )
 
   st.markdown("---")
 
-  # MetEntegre Tarzı Detaylı Ürün Tablosu
+  # Arama Çubuğu
   st.text_input("🔍 SKU veya Ürün Adı ile Ara...", placeholder="Arama yapın...")
 
-  ty_table = pd.DataFrame({
+  # Rengarenk ve Net Ürün Tablosu (Fiyatlar yeşil/renkli vurgulu)
+  urunler_data = {
       "Merchant SKU": [
           "CYRB-462192",
           "CYRB-462175",
           "CYRB-462199",
           "CYRB-46448",
+          "CYRB-582129",
       ],
       "Ürün Adı": [
           "Protez Bandı / 1 Cm",
           "Su Dalgası Uzun Perçemsiz Peruk",
           "Sentetik Örgülük Espirir",
           "Açık Ruz Kumral Beyaz Peruk",
+          "Tokalı Kuyruklu Dağınık Topuz",
       ],
-      "Mağaza Stok": [0, 0, 0, 0],
-      "MetEntegre Stok": [0, 0, 0, 0],
-      "Mağaza Fiyat": ["292,76 ₺", "1.326,24 ₺", "156,56 ₺", "5.218,56 ₺"],
-      "Durum": ["Eşleşti", "Eşleşti", "Eşleşti", "Eşleşti"],
-  })
-  st.dataframe(ty_table, use_container_width=True)
+      "Mağaza Stok": [0, 0, 0, 0, 0],
+      "Entegre Stok": [0, 0, 0, 0, 0],
+      "Mağaza Fiyat": [
+          "🟢 292,76 ₺",
+          "🟢 1.326,24 ₺",
+          "🟢 156,56 ₺",
+          "🟢 5.218,56 ₺",
+          "🟢 292,32 ₺",
+      ],
+      "Durum": ["Eşleşti", "Eşleşti", "Eşleşti", "Eşleşti", "Eşleşti"],
+  }
+  st.dataframe(pd.DataFrame(urunler_data), use_container_width=True)
 
 elif st.session_state.selected_menu == "Destek Taleplerim":
   st.subheader("📌 Destek Taleplerim")
-  st.info("Destek talebi geçmişiniz.")
+  st.info("Destek talebi geçmişiniz ve durumları.")
 
 elif st.session_state.selected_menu == "Bildirimler":
   st.subheader("🔔 Bildirimler")
@@ -264,40 +338,35 @@ elif st.session_state.selected_menu == "Bildirimler":
 
 elif st.session_state.selected_menu == "Duyurular":
   st.subheader("📢 Duyurular")
-  st.success("Tüm sistem duyuruları.")
+  st.success("Tüm sistem duyuruları burada yer alır.")
 
 elif st.session_state.selected_menu == "Sistemdeki Ürünler":
-  st.subheader("📦 Sistemdeki Ürünler")
-  st.text_input("SKU Ara...", placeholder="Arama...")
+  st.subheader("📦 Tüm Sistem Ürünleri")
+  st.text_input("🔍 SKU veya Ürün Adı ile Ara...", placeholder="Arama yapın...")
+  st.dataframe(
+      pd.DataFrame({
+          "SKU": ["SKU-001", "SKU-002", "SKU-003"],
+          "Ürün Adı": ["Örnek Ürün A", "Örnek Ürün B", "Örnek Ürün C"],
+          "Kategori": ["Elektronik", "Giyim", "Kozmetik"],
+          "Stok": [150, 42, 95],
+          "Fiyat": ["🟢 500 ₺", "🟢 250 ₺", "🟢 1.200 ₺"],
+      }),
+      use_container_width=True,
+  )
 
 elif st.session_state.selected_menu == "Oto Kritik Stok":
   st.subheader("⚙️ Oto Kritik Stok Yönetimi")
   st.number_input("Kritik Stok Eşiği", value=5)
 
-elif st.session_state.selected_menu == "Çiçeksepeti":
-  st.subheader("🌸 Çiçeksepeti Yönetim Paneli")
-  st.info("Çiçeksepeti yönetim paneli aktif.")
-
-elif st.session_state.selected_menu == "N11":
-  st.subheader("🟠 N11 Yönetim Paneli")
-  st.info("N11 yönetim paneli aktif.")
-
-elif st.session_state.selected_menu == "E-PTT AVM":
-  st.subheader("🏢 E-PTT AVM Yönetim Paneli")
-  st.info("E-PTT AVM yönetim paneli aktif.")
-
-elif st.session_state.selected_menu == "Hepsiburada":
-  st.subheader("🛒 Hepsiburada Yönetim Paneli")
-  st.info("Hepsiburada ürün ve sipariş yönetimi aktif.")
-
 elif st.session_state.selected_menu == "Pazarama":
   st.subheader("👑 Pazarama Yönetim Paneli")
-  st.info("Çok yakında.")
+  st.info("Pazarama entegrasyonu yakında aktifleşecektir.")
 
 elif st.session_state.selected_menu == "İdefix":
   st.subheader("👑 İdefix Yönetim Paneli")
-  st.info("Çok yakında.")
+  st.info("İdefix entegrasyonu yakında aktifleşecektir.")
 
 elif st.session_state.selected_menu == "Ayarlar":
   st.subheader("⚙️ Genel Sistem Ayarları")
   st.text_input("Firma Adı", value="Şahin Yiğit E-Ticaret")
+  st.text_input("Bildirim E-postası", value="sah1357sah@gmail.com")
