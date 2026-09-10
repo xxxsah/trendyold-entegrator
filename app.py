@@ -7,23 +7,33 @@ st.set_page_config(
     layout="wide",
 )
 
-# Pazaryeri butonlarını tam kare, renkli ve tıklanabilir kutulara dönüştüren özel CSS
+# Mobilde ve masaüstünde kutuların alt alta kaymasını önleyen ve MetEntegre stili sağlayan CSS
 st.markdown(
     """
     <style>
     .stApp {
         background-color: #f8f9fa;
     }
-    /* Streamlit butonlarını kare pazaryeri kutularına benzetiyoruz */
+    /* Anasayfa Pazaryeri Grid Yapısı */
+    .market-container {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        margin-bottom: 10px;
+    }
+    .market-card-item {
+        flex: 1;
+        min-width: 130px;
+    }
     div.stButton > button {
         width: 100%;
-        height: 95px;
-        border-radius: 10px;
+        height: 85px;
+        border-radius: 8px;
         font-weight: bold;
-        font-size: 13px;
+        font-size: 12px;
         color: white;
         border: none;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        box-shadow: 0 1px 3px rgba(0,0,0,0.1);
         display: flex;
         flex-direction: column;
         align-items: center;
@@ -32,9 +42,8 @@ st.markdown(
     }
     div.stButton > button:hover {
         opacity: 0.9;
-        transform: translateY(-2px);
+        transform: translateY(-1px);
     }
-    /* Pazaryeri özel renkleri (Göz yormayan, canlı ve şık tonlar) */
     .btn-hb > button { background-color: #ff6600 !important; }
     .btn-ty > button { background-color: #f27a1a !important; }
     .btn-cs > button { background-color: #e6005c !important; }
@@ -53,7 +62,7 @@ if "selected_menu" not in st.session_state:
 if "previous_menu" not in st.session_state:
   st.session_state.previous_menu = "Anasayfa"
 
-# Sidebar Başlığı (Şah büyük ve farklı, entegre ayrı)
+# Sidebar Başlığı
 st.sidebar.markdown(
     """
     <div style="text-align: center; padding: 10px 0; margin-bottom: 10px;">
@@ -106,61 +115,58 @@ if st.session_state.selected_menu != "Anasayfa":
   st.markdown("---")
 
 if st.session_state.selected_menu == "Anasayfa":
-  # 1. Satır: 4'lü Yan Yana Kare Kutular (Hepsiburada, Trendyol, Çiçeksepeti, PTT AVM)
-  c1, c2, c3, c4 = st.columns(4)
-
-  with c1:
+  # 1. Satır: 4'lü Yan Yana Kare Kutular
+  st.markdown('<div class="market-container">', unsafe_allow_html=True)
+  col1, col2, col3, col4 = st.columns(4)
+  with col1:
     st.markdown('<div class="btn-hb">', unsafe_allow_html=True)
     if st.button("🛒 HEPSİBURADA\n\n1 Kargoda", key="hb_btn"):
       st.session_state.previous_menu = "Anasayfa"
       st.session_state.selected_menu = "Hepsiburada"
       st.rerun()
     st.markdown("</div>", unsafe_allow_html=True)
-
-  with c2:
+  with col2:
     st.markdown('<div class="btn-ty">', unsafe_allow_html=True)
     if st.button("📦 TRENDYOL\n\nSipariş yok", key="ty_btn"):
       st.session_state.previous_menu = "Anasayfa"
       st.session_state.selected_menu = "Trendyol"
       st.rerun()
     st.markdown("</div>", unsafe_allow_html=True)
-
-  with c3:
+  with col3:
     st.markdown('<div class="btn-cs">', unsafe_allow_html=True)
     if st.button("🌸 ÇİÇEKSEPETİ\n\nSipariş yok", key="cs_btn"):
       st.session_state.previous_menu = "Anasayfa"
       st.session_state.selected_menu = "Çiçeksepeti"
       st.rerun()
     st.markdown("</div>", unsafe_allow_html=True)
-
-  with c4:
+  with col4:
     st.markdown('<div class="btn-ptt">', unsafe_allow_html=True)
     if st.button("🏢 PTT AVM\n\nSipariş yok", key="ptt_btn"):
       st.session_state.previous_menu = "Anasayfa"
       st.session_state.selected_menu = "E-PTT AVM"
       st.rerun()
     st.markdown("</div>", unsafe_allow_html=True)
+  st.markdown("</div>", unsafe_allow_html=True)
 
-  # 2. Satır: 3'lü Yan Yana Kare Kutular (N11, Pazarama, İdefix)
-  c5, c6, c7 = st.columns(3)
-
-  with c5:
+  # 2. Satır: 3'lü Yan Yana Kare Kutular
+  st.markdown('<div class="market-container">', unsafe_allow_html=True)
+  col5, col6, col7 = st.columns(3)
+  with col5:
     st.markdown('<div class="btn-n11">', unsafe_allow_html=True)
     if st.button("🟠 N11\n\nSipariş yok", key="n11_btn"):
       st.session_state.previous_menu = "Anasayfa"
       st.session_state.selected_menu = "N11"
       st.rerun()
     st.markdown("</div>", unsafe_allow_html=True)
-
-  with c6:
+  with col6:
     st.markdown('<div class="btn-pz">', unsafe_allow_html=True)
     st.button("👑 PAZARAMA\n\nÇok Yakında", disabled=True, key="pz_btn")
     st.markdown("</div>", unsafe_allow_html=True)
-
-  with c7:
+  with col7:
     st.markdown('<div class="btn-id">', unsafe_allow_html=True)
     st.button("👑 İDEFİX\n\nÇok Yakında", disabled=True, key="id_btn")
     st.markdown("</div>", unsafe_allow_html=True)
+  st.markdown("</div>", unsafe_allow_html=True)
 
   st.markdown("---")
 
@@ -191,15 +197,9 @@ if st.session_state.selected_menu == "Anasayfa":
   with ab_col2:
     st.metric(label="Kalan Gün", value="78 Gün", delta="Aktif")
 
-  st.info(
-      "Abonelik uzatma: Süre uzatma işlemleri yönetimimiz tarafından"
-      " yapılmaktadır. Süreniz dolmadan önce lütfen destek talebi oluşturarak"
-      " bize ulaşın."
-  )
-
   st.markdown("---")
 
-  # Mağaza Yüklenebilir Ürün Adetleri
+  # Mağaza Ürün Limitleri
   st.markdown("### 📦 Mağaza Ürün Limitleri")
   p1, p2 = st.columns(2)
   with p1:
@@ -211,14 +211,52 @@ if st.session_state.selected_menu == "Anasayfa":
     st.metric("Hepsiburada Mağazanıza yüklenebilir ürün adedi", "42662")
 
   st.markdown("---")
-  st.success(
-      "📢 **Duyurularım** — Sistem güncellemeleri ve duyurular burada yer"
-      " almaktadır. (Toplam: 1)"
+  st.success("📢 **Duyurularım** — Sistem güncellemeleri ve duyurular.")
+
+elif st.session_state.selected_menu == "Trendyol":
+  st.subheader("🛍️ Trendyol Tüm İşlemler")
+  st.info(
+      "Trendyol mağazanızdaki ürünler, eşleşme durumları ve toplu işlemler."
   )
+
+  # MetEntegre Üst İstatistik Kartları (Görseldeki gibi)
+  m1, m2, m3 = st.columns(3)
+  m1.metric("Toplam TY Ürünü", "5.782")
+  m2.metric("Senkronize Edilmiş", "2.300")
+  m3.metric("Senkronize Edilmemiş", "3.482")
+
+  m4, m5 = st.columns(2)
+  m4.metric("TY Aktif", "906")
+  m5.metric("Stok Tutmayanlar", "5.236")
+
+  st.markdown("---")
+
+  # MetEntegre Tarzı Detaylı Ürün Tablosu
+  st.text_input("🔍 SKU veya Ürün Adı ile Ara...", placeholder="Arama yapın...")
+
+  ty_table = pd.DataFrame({
+      "Merchant SKU": [
+          "CYRB-462192",
+          "CYRB-462175",
+          "CYRB-462199",
+          "CYRB-46448",
+      ],
+      "Ürün Adı": [
+          "Protez Bandı / 1 Cm",
+          "Su Dalgası Uzun Perçemsiz Peruk",
+          "Sentetik Örgülük Espirir",
+          "Açık Ruz Kumral Beyaz Peruk",
+      ],
+      "Mağaza Stok": [0, 0, 0, 0],
+      "MetEntegre Stok": [0, 0, 0, 0],
+      "Mağaza Fiyat": ["292,76 ₺", "1.326,24 ₺", "156,56 ₺", "5.218,56 ₺"],
+      "Durum": ["Eşleşti", "Eşleşti", "Eşleşti", "Eşleşti"],
+  })
+  st.dataframe(ty_table, use_container_width=True)
 
 elif st.session_state.selected_menu == "Destek Taleplerim":
   st.subheader("📌 Destek Taleplerim")
-  st.info("Destek talebi geçmişiniz ve durumları.")
+  st.info("Destek talebi geçmişiniz.")
 
 elif st.session_state.selected_menu == "Bildirimler":
   st.subheader("🔔 Bildirimler")
@@ -226,79 +264,40 @@ elif st.session_state.selected_menu == "Bildirimler":
 
 elif st.session_state.selected_menu == "Duyurular":
   st.subheader("📢 Duyurular")
-  st.success("Tüm sistem duyuruları burada yer alır.")
+  st.success("Tüm sistem duyuruları.")
 
 elif st.session_state.selected_menu == "Sistemdeki Ürünler":
   st.subheader("📦 Sistemdeki Ürünler")
-  st.text_input("🔍 SKU veya Ürün Adı ile Ara...", placeholder="Arama yapın...")
-  st.dataframe(
-      pd.DataFrame({
-          "SKU": ["SKU-001", "SKU-002"],
-          "Ürün Adı": ["Örnek Ürün A", "Örnek Ürün B"],
-          "Kategori": ["Elektronik", "Giyim"],
-          "Stok": [150, 42],
-          "Fiyat": ["500 ₺", "250 ₺"],
-      }),
-      use_container_width=True,
-  )
+  st.text_input("SKU Ara...", placeholder="Arama...")
 
 elif st.session_state.selected_menu == "Oto Kritik Stok":
   st.subheader("⚙️ Oto Kritik Stok Yönetimi")
   st.number_input("Kritik Stok Eşiği", value=5)
 
-elif st.session_state.selected_menu == "Trendyol":
-  st.subheader("🛍️ Trendyol Ürünlerim ve Siparişleri")
-  with st.expander("⚠️ Önemli Bilgilendirme", expanded=False):
-    st.warning(
-        "Trendyol entegrasyonu ve ürün yönetimi ile ilgili tüm toplu işlemler bu"
-        " alandan gerçekleştirilir."
-    )
-  ty_table = pd.DataFrame({
-      "Barkod": [
-          "8697577754265107681282837",
-          "8697577752520107681282837",
-      ],
-      "Ürün Adı": ["8Bitdo Retro R8 Fare", "Aula S98 Pro 3 Modlu RGB"],
-      "Satış Fiyatı": ["10137 TL", "8002.14 TL"],
-      "Durum": ["Onaylı", "Satışa Kapalı"],
-  })
-  st.dataframe(ty_table, use_container_width=True)
-
 elif st.session_state.selected_menu == "Çiçeksepeti":
   st.subheader("🌸 Çiçeksepeti Yönetim Paneli")
-  st.info("Çiçeksepeti ürün ve sipariş yönetimi aktif.")
+  st.info("Çiçeksepeti yönetim paneli aktif.")
 
 elif st.session_state.selected_menu == "N11":
   st.subheader("🟠 N11 Yönetim Paneli")
-  st.info("N11 ürün ve sipariş yönetimi aktif.")
+  st.info("N11 yönetim paneli aktif.")
 
 elif st.session_state.selected_menu == "E-PTT AVM":
   st.subheader("🏢 E-PTT AVM Yönetim Paneli")
-  st.info("E-PTT AVM ürün ve sipariş yönetimi aktif.")
+  st.info("E-PTT AVM yönetim paneli aktif.")
 
 elif st.session_state.selected_menu == "Hepsiburada":
-  st.subheader("🛒 Hepsiburada Yönetim Paneli (1 Kargoda)")
-  st.info(
-      "Hepsiburada mağazanıza ait aktif kargo ve sipariş detayları"
-      " listelenmektedir."
-  )
-  hb_table = pd.DataFrame({
-      "Sipariş ID": ["4284984074"],
-      "Ürün": ["Örnek Elektronik Parça"],
-      "Durum": ["1 Kargoda Hazırlanıyor"],
-      "Tutar": ["1.250 ₺"],
-  })
-  st.dataframe(hb_table, use_container_width=True)
+  st.subheader("🛒 Hepsiburada Yönetim Paneli")
+  st.info("Hepsiburada ürün ve sipariş yönetimi aktif.")
 
 elif st.session_state.selected_menu == "Pazarama":
   st.subheader("👑 Pazarama Yönetim Paneli")
-  st.info("Pazarama entegrasyonu yakında aktifleşecektir.")
+  st.info("Çok yakında.")
 
 elif st.session_state.selected_menu == "İdefix":
   st.subheader("👑 İdefix Yönetim Paneli")
-  st.info("İdefix entegrasyonu yakında aktifleşecektir.")
+  st.info("Çok yakında.")
 
 elif st.session_state.selected_menu == "Ayarlar":
   st.subheader("⚙️ Genel Sistem Ayarları")
   st.text_input("Firma Adı", value="Şahin Yiğit E-Ticaret")
-  st.text_input("Bildirim E-postası", value="sah1357sah@gmail.com")
