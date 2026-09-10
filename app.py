@@ -8,31 +8,51 @@ st.set_page_config(
     layout="wide"
 )
 
+# Session state ile sayfa / menü takibi
+if 'selected_menu' not in st.session_state:
+    st.session_state.selected_menu = "Genel Bakış"
+
 # Sidebar Navigasyon Menüsü
 st.sidebar.title("🚀 MetEntegre Paneli")
-menu = st.sidebar.selectbox("Menü", ["Genel Bakış", "Trendyol İşlemleri", "Trendyol API Ayarları", "Siparişler"])
+menu_options = ["Genel Bakış", "Trendyol İşlemleri", "Hepsiburada İşlemleri", "Trendyol API Ayarları", "Siparişler"]
 
-if menu == "Genel Bakış":
+# Eğer session state'den gelen menü listede varsa onu seç
+try:
+    default_index = menu_options.index(st.session_state.selected_menu)
+except ValueError:
+    default_index = 0
+
+selected_menu = st.sidebar.selectbox("Menü", menu_options, index=default_index)
+st.session_state.selected_menu = selected_menu
+
+if st.session_state.selected_menu == "Genel Bakış":
     st.subheader("📊 Mağaza ve Sipariş Durumu")
     
-    # Pazaryeri Sipariş Durum Kutuları
+    # Üst Tıklanabilir Pazaryeri Kutuları (Grid Yapısı)
     col1, col2, col3, col4 = st.columns(4)
     with col1:
-        st.error("🛒 **HEPSİBURADA**\n\n 1 Kargoda")
+        if st.button("🛒 HEPSİBURADA\n\n1 Kargoda", use_container_width=True):
+            st.session_state.selected_menu = "Hepsiburada İşlemleri"
+            st.rerun()
     with col2:
-        st.info("📦 **TRENDYOL**\n\n Sipariş yok")
+        if st.button("📦 TRENDYOL\n\nSipariş yok", use_container_width=True):
+            st.session_state.selected_menu = "Trendyol İşlemleri"
+            st.rerun()
     with col3:
-        st.warning("🌸 **ÇİÇEKSEPETİ**\n\n Sipariş yok")
+        if st.button("🌸 ÇİÇEKSEPETİ\n\nSipariş yok", use_container_width=True):
+            st.warning("Çiçeksepeti modülü yakında aktifleşecek.")
     with col4:
-        st.success("🏢 **PTT AVM**\n\n Sipariş yok")
+        if st.button("🏢 PTT AVM\n\nSipariş yok", use_container_width=True):
+            st.warning("PTT AVM modülü yakında aktifleşecek.")
 
     col5, col6, col7 = st.columns(3)
     with col5:
-        st.info("🟠 **N11**\n\n Sipariş yok")
+        if st.button("🟠 N11\n\nSipariş yok", use_container_width=True):
+            st.warning("N11 modülü yakında aktifleşecek.")
     with col6:
-        st.markdown("🚀 **PAZARAMA**\n\n Çok Yakında")
+        st.button("🚀 PAZARAMA\n\nÇok Yakında", use_container_width=True, disabled=True)
     with col7:
-        st.markdown("🚀 **İDEFİX**\n\n Çok Yakında")
+        st.button("🚀 İDEFİX\n\nÇok Yakında", use_container_width=True, disabled=True)
 
     st.markdown("---")
     
@@ -60,18 +80,17 @@ if menu == "Genel Bakış":
     # Mağazalara Yüklenebilir Ürün Adetleri
     st.subheader("📦 Mağaza Ürün Limitleri")
     lim1, lim2, lim3 = st.columns(3)
-    lim1.metric("Trendyol Yüklenebilir Ürün", "20243")
-    lim2.metric("Çiçeksepeti Yüklenebilir Ürün", "30453")
-    lim3.metric("N11 Yüklenebilir Ürün", "31920")
+    lim1.metric("Trendyol Yüklenebilir Ürün", "21210")
+    lim2.metric("Çiçeksepeti Yüklenebilir Ürün", "32351")
+    lim3.metric("N11 Yüklenebilir Ürün", "33890")
     
     lim4, lim5 = st.columns(2)
-    lim4.metric("Hepsiburada Yüklenebilir Ürün", "39868")
-    lim5.metric("EPtt AVM Yüklenebilir Ürün", "37116")
+    lim4.metric("Hepsiburada Yüklenebilir Ürün", "42662")
+    lim5.metric("EPtt AVM Yüklenebilir Ürün", "39231")
 
-elif menu == "Trendyol İşlemleri":
+elif st.session_state.selected_menu == "Trendyol İşlemleri":
     st.subheader("🛍️ Trendyol Tüm İşlemler")
     
-    # Üst İşlem Butonları
     cols = st.columns(6)
     with cols[0]: st.button("Tüm Senkronizasyon")
     with cols[1]: st.button("Kritik Stok Silindir")
@@ -82,7 +101,6 @@ elif menu == "Trendyol İşlemleri":
 
     st.markdown("---")
 
-    # Metrik Özet Kutuları
     m1, m2, m3 = st.columns(3)
     m1.metric("Toplam TY Ürün", "5.782")
     m2.metric("Senkronize Edilmiş", "2.300")
@@ -94,7 +112,6 @@ elif menu == "Trendyol İşlemleri":
 
     st.markdown("---")
     
-    # Ürün Filtreleme Sekmeleri (Görseldeki gibi)
     tab_tumu, tab_eslesen, tab_eslesmeyen, tab_stoksuz = st.tabs(["Tümü", "Eşleşmiş", "Eşleşmemiş", "Stok Tutmayanlar"])
     
     with tab_tumu:
@@ -119,7 +136,18 @@ elif menu == "Trendyol İşlemleri":
     with tab_stoksuz:
         st.error("Stok tutmayan ürünler burada listelenir.")
 
-elif menu == "Trendyol API Ayarları":
+elif st.session_state.selected_menu == "Hepsiburada İşlemleri":
+    st.subheader("🛒 Hepsiburada Yönetim Paneli")
+    st.info("Hepsiburada mağazanıza ait siparişler ve ürün senkronizasyon alanları burada yer almaktadır.")
+    hb_data = pd.DataFrame({
+        "HB SKU": ["HB-9912", "HB-9913"],
+        "Ürün Adı": ["Örnek HB Ürün 1", "Örnek HB Ürün 2"],
+        "Fiyat": ["450.00 ₺", "850.00 ₺"],
+        "Durum": ["Aktif", "Aktif"]
+    })
+    st.dataframe(hb_data, use_container_width=True)
+
+elif st.session_state.selected_menu == "Trendyol API Ayarları":
     st.subheader("⚙️ Trendyol API ve Entegrasyon Ayarları")
     
     st.info("Değerli Kullanıcımız, Trendyol entegrasyonunu başlatmak için öncelikle bağlantı bilgilerinizin test edilmesi gerekmektedir.")
@@ -151,7 +179,7 @@ elif menu == "Trendyol API Ayarları":
     if st.button("Ayarları Güncelle"):
         st.success("Ayarlar başarıyla güncellendi!")
 
-elif menu == "Siparişler":
+elif st.session_state.selected_menu == "Siparişler":
     st.subheader("🛒 Gelen Sipariş Yönetimi")
     st.write("Tüm pazaryerlerinden düşen siparişlerin listesi.")
     st.dataframe(pd.DataFrame(columns=["Sipariş No", "Pazaryeri", "Müşteri Adı", "Toplam Tutar", "Kargo Durumu"]))
