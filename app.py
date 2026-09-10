@@ -3,9 +3,33 @@ import pandas as pd
 
 st.set_page_config(
     page_title="Şahentegre - E-Ticaret Yönetim Paneli", 
-    page_icon="⚡", 
+    page_icon="👑", 
     layout="wide"
 )
+
+# Streamlit karanlık mod/tema farkından ötürü taban renklerinin tam beyaz görünmesi için CSS ekliyoruz
+st.markdown("""
+    <style>
+    .stApp {
+        background-color: #f8f9fa;
+    }
+    .market-card {
+        background-color: #ffffff;
+        border-radius: 8px;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        margin-bottom: 12px;
+        overflow: hidden;
+        border: 1px solid #e0e0e0;
+    }
+    .market-header {
+        color: white;
+        padding: 8px;
+        font-weight: bold;
+        text-align: center;
+        font-size: 14px;
+    }
+    </style>
+""", unsafe_allow_html=True)
 
 if 'selected_menu' not in st.session_state:
     st.session_state.selected_menu = "Anasayfa"
@@ -13,7 +37,7 @@ if 'selected_menu' not in st.session_state:
 if 'previous_menu' not in st.session_state:
     st.session_state.previous_menu = "Anasayfa"
 
-st.sidebar.title("🚀 Şahentegre Paneli")
+st.sidebar.title("👑 Şahentegre Paneli")
 menu_options = [
     "Anasayfa",
     "Destek Taleplerim",
@@ -53,52 +77,57 @@ if st.session_state.selected_menu != "Anasayfa":
     st.markdown("---")
 
 if st.session_state.selected_menu == "Anasayfa":
-    # 1. Satır: 4 Pazaryeri (Hepsiburada, Trendyol, Çiçeksepeti, PTT AVM) - Renkli Başlık + Beyaz Taban
-    col1, col2, col3, col4 = st.columns(4)
-    with col1:
-        st.markdown('<div style="background-color: #ff6000; color: white; padding: 6px; border-top-left-radius: 6px; border-top-right-radius: 6px; font-weight: bold; text-align: center; font-size: 13px;">🛒 HEPSİBURADA</div>', unsafe_allow_html=True)
-        if st.button("1 Kargoda", use_container_width=True, key="btn_hb"):
-            st.session_state.previous_menu = "Anasayfa"
-            st.session_state.selected_menu = "Hepsiburada"
-            st.rerun()
-            
-    with col2:
-        st.markdown('<div style="background-color: #f27a1a; color: white; padding: 6px; border-top-left-radius: 6px; border-top-right-radius: 6px; font-weight: bold; text-align: center; font-size: 13px;">📦 TRENDYOL</div>', unsafe_allow_html=True)
-        if st.button("Sipariş yok", use_container_width=True, key="btn_ty"):
-            st.session_state.previous_menu = "Anasayfa"
-            st.session_state.selected_menu = "Trendyol"
-            st.rerun()
-            
-    with col3:
-        st.markdown('<div style="background-color: #e6005c; color: white; padding: 6px; border-top-left-radius: 6px; border-top-right-radius: 6px; font-weight: bold; text-align: center; font-size: 13px;">🌸 ÇİÇEKSEPETİ</div>', unsafe_allow_html=True)
-        if st.button("Sipariş yok", use_container_width=True, key="btn_cs"):
-            st.session_state.previous_menu = "Anasayfa"
-            st.session_state.selected_menu = "Çiçeksepeti"
-            st.rerun()
-            
-    with col4:
-        st.markdown('<div style="background-color: #ff9900; color: white; padding: 6px; border-top-left-radius: 6px; border-top-right-radius: 6px; font-weight: bold; text-align: center; font-size: 13px;">🏢 PTT AVM</div>', unsafe_allow_html=True)
-        if st.button("Sipariş yok", use_container_width=True, key="btn_ptt"):
-            st.session_state.previous_menu = "Anasayfa"
-            st.session_state.selected_menu = "E-PTT AVM"
-            st.rerun()
-
-    # 2. Satır: 3 Pazaryeri (N11, Pazarama, İdefix) - Renkli Başlık + Beyaz Taban
-    col5, col6, col7 = st.columns(3)
-    with col5:
-        st.markdown('<div style="background-color: #5d3ebc; color: white; padding: 6px; border-top-left-radius: 6px; border-top-right-radius: 6px; font-weight: bold; text-align: center; font-size: 13px;">🟠 N11</div>', unsafe_allow_html=True)
-        if st.button("Sipariş yok", use_container_width=True, key="btn_n11"):
-            st.session_state.previous_menu = "Anasayfa"
-            st.session_state.selected_menu = "N11"
-            st.rerun()
-            
-    with col6:
-        st.markdown('<div style="background-color: #0099ff; color: white; padding: 6px; border-top-left-radius: 6px; border-top-right-radius: 6px; font-weight: bold; text-align: center; font-size: 13px;">🚀 PAZARAMA</div>', unsafe_allow_html=True)
-        st.button("Çok Yakında", use_container_width=True, disabled=True, key="btn_pz")
-        
-    with col7:
-        st.markdown('<div style="background-color: #00b33c; color: white; padding: 6px; border-top-left-radius: 6px; border-top-right-radius: 6px; font-weight: bold; text-align: center; font-size: 13px;">🚀 İDEFİX</div>', unsafe_allow_html=True)
-        st.button("Çok Yakında", use_container_width=True, disabled=True, key="btn_id")
+    # Gönderdiğin görseldeki gibi tam genişlikte (full-width) alt alta büyük kartlar ve beyaz tabanlı yapı
+    
+    # 1. Hepsiburada
+    st.markdown('<div class="market-card"><div class="market-header" style="background-color: #ff6000;">🛒 HEPSİBURADA</div>', unsafe_allow_html=True)
+    if st.button("1 Kargoda", use_container_width=True, key="btn_hb"):
+        st.session_state.previous_menu = "Anasayfa"
+        st.session_state.selected_menu = "Hepsiburada"
+        st.rerun()
+    st.markdown('</div>', unsafe_allow_html=True)
+    
+    # 2. Trendyol
+    st.markdown('<div class="market-card"><div class="market-header" style="background-color: #f27a1a;">📦 TRENDYOL</div>', unsafe_allow_html=True)
+    if st.button("Sipariş yok", use_container_width=True, key="btn_ty"):
+        st.session_state.previous_menu = "Anasayfa"
+        st.session_state.selected_menu = "Trendyol"
+        st.rerun()
+    st.markdown('</div>', unsafe_allow_html=True)
+    
+    # 3. Çiçeksepeti
+    st.markdown('<div class="market-card"><div class="market-header" style="background-color: #e6005c;">🌸 ÇİÇEKSEPETİ</div>', unsafe_allow_html=True)
+    if st.button("Sipariş yok", use_container_width=True, key="btn_cs"):
+        st.session_state.previous_menu = "Anasayfa"
+        st.session_state.selected_menu = "Çiçeksepeti"
+        st.rerun()
+    st.markdown('</div>', unsafe_allow_html=True)
+    
+    # 4. PTT AVM
+    st.markdown('<div class="market-card"><div class="market-header" style="background-color: #ff9900;">🏢 PTT AVM</div>', unsafe_allow_html=True)
+    if st.button("Sipariş yok", use_container_width=True, key="btn_ptt"):
+        st.session_state.previous_menu = "Anasayfa"
+        st.session_state.selected_menu = "E-PTT AVM"
+        st.rerun()
+    st.markdown('</div>', unsafe_allow_html=True)
+    
+    # 5. N11
+    st.markdown('<div class="market-card"><div class="market-header" style="background-color: #5d3ebc;">🟠 N11</div>', unsafe_allow_html=True)
+    if st.button("Sipariş yok", use_container_width=True, key="btn_n11"):
+        st.session_state.previous_menu = "Anasayfa"
+        st.session_state.selected_menu = "N11"
+        st.rerun()
+    st.markdown('</div>', unsafe_allow_html=True)
+    
+    # 6. Pazarama (Taç 👑 ikonlu)
+    st.markdown('<div class="market-card"><div class="market-header" style="background-color: #0099ff;">👑 PAZARAMA</div>', unsafe_allow_html=True)
+    st.button("Çok Yakında", use_container_width=True, disabled=True, key="btn_pz")
+    st.markdown('</div>', unsafe_allow_html=True)
+    
+    # 7. İdefix (Taç 👑 ikonlu)
+    st.markdown('<div class="market-card"><div class="market-header" style="background-color: #00b33c;">👑 İDEFİX</div>', unsafe_allow_html=True)
+    st.button("Çok Yakında", use_container_width=True, disabled=True, key="btn_id")
+    st.markdown('</div>', unsafe_allow_html=True)
 
     st.markdown("---")
     
@@ -202,11 +231,11 @@ elif st.session_state.selected_menu == "Hepsiburada":
     st.info("Hepsiburada mağazanıza ait siparişler ve ürün senkronizasyon alanları.")
 
 elif st.session_state.selected_menu == "Pazarama":
-    st.subheader("🚀 Pazarama Yönetim Paneli")
+    st.subheader("👑 Pazarama Yönetim Paneli")
     st.info("Pazarama entegrasyonu yakında aktifleşecektir.")
 
 elif st.session_state.selected_menu == "İdefix":
-    st.subheader("🚀 İdefix Yönetim Paneli")
+    st.subheader("👑 İdefix Yönetim Paneli")
     st.info("İdefix entegrasyonu yakında aktifleşecektir.")
 
 elif st.session_state.selected_menu == "Ayarlar":
