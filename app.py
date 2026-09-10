@@ -14,9 +14,9 @@ st.title("📦 Trendyol Stok & Fiyat Senkronizasyon Paneli")
 st.write("Trendyol API bilgilerinizi girerek stok ve fiyat güncellemelerinizi buradan yönetebilirsiniz.")
 
 st.sidebar.header("⚙️ Trendyol API Bilgileri")
-supplier_id = st.sidebar.text_input("Trendyol Satıcı ID (Supplier ID)")
-api_key = st.sidebar.text_input("Trendyol API Key", type="password")
-api_secret = st.sidebar.text_input("Trendyol API Secret", type="password")
+supplier_id = st.sidebar.text_input("Trendyol Satıcı ID (Cari ID)")
+ref_code = st.sidebar.text_input("Entegrasyon Referans Kodu", type="password")
+api_secret = st.sidebar.text_input("API Secret", type="password")
 
 sync_button = st.sidebar.button("🚀 Senkronizasyonu Başlat")
 
@@ -48,15 +48,15 @@ def get_logs():
     return rows
 
 if sync_button:
-    if not supplier_id or not api_key or not api_secret:
-        st.sidebar.error("Lütfen tüm API bilgilerini eksiksiz girin!")
+    if not supplier_id or not ref_code or not api_secret:
+        st.sidebar.error("Lütfen tüm alanları eksiksiz girin!")
     else:
         with st.spinner("Trendyol API bağlantısı test ediliyor..."):
             try:
-                # Trendyol ürün listeleme endpoint'i
                 url = f"https://api.trendyol.com/sapigw/suppliers/{supplier_id}/products?page=0&size=1"
                 
-                user_pass = f"{api_key}:{api_secret}"
+                # Entegrasyon Referans Kodu ve Secret ile yetkilendirme
+                user_pass = f"{ref_code}:{api_secret}"
                 encoded_credentials = base64.b64encode(user_pass.encode()).decode()
                 
                 headers = {
@@ -72,7 +72,7 @@ if sync_button:
                     st.sidebar.success(msg)
                     add_log(msg, "success")
                 else:
-                    msg = f"Bağlantı Hatası! Kod: {response.status_code} - Yanıt: {response.text[:200]}"
+                    msg = f"Bağlantı Hatası! Kod: {response.status_code}"
                     st.sidebar.error(msg)
                     add_log(msg, "error")
             except Exception as e:
