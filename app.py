@@ -16,6 +16,7 @@ st.write("Trendyol API bilgilerinizi girerek stok ve fiyat güncellemelerinizi b
 st.sidebar.header("⚙️ Trendyol API Bilgileri")
 supplier_id = st.sidebar.text_input("Trendyol Satıcı ID (Cari ID)")
 ref_code = st.sidebar.text_input("Entegrasyon Referans Kodu", type="password")
+api_key = st.sidebar.text_input("API Key", type="password")
 api_secret = st.sidebar.text_input("API Secret", type="password")
 
 sync_button = st.sidebar.button("🚀 Senkronizasyonu Başlat")
@@ -48,21 +49,24 @@ def get_logs():
     return rows
 
 if sync_button:
-    if not supplier_id or not ref_code or not api_secret:
-        st.sidebar.error("Lütfen tüm alanları eksiksiz girin!")
+    if not supplier_id or not api_secret:
+        st.sidebar.error("Lütfen Satıcı ID ve API Secret alanlarını doldurun!")
     else:
         with st.spinner("Trendyol API bağlantısı test ediliyor..."):
             try:
                 url = f"https://api.trendyol.com/sapigw/suppliers/{supplier_id}/products?page=0&size=1"
                 
-                user_pass = f"{ref_code}:{api_secret}"
+                # Trendyol genellikle API Key ile Secret veya Referans Kodu ile Secret kullanır.
+                # Hangisi doluysa onu önceliklendirerek kimlik oluşturalım:
+                username = api_key if api_key else ref_code
+                
+                user_pass = f"{username}:{api_secret}"
                 encoded_credentials = base64.b64encode(user_pass.encode()).decode()
                 
-                # Trendyol'un kesinlikle istediği User-Agent formatı
                 headers = {
-                    "User-Agent": f"{supplier_id} - SelfIntegration",
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
                     "Authorization": f"Basic {encoded_credentials}",
-                    "Content-Type": "application/json"
+                    "Accept": "application/json, text/plain, */*"
                 }
                 
                 response = requests.get(url, headers=headers)
@@ -72,7 +76,7 @@ if sync_button:
                     st.sidebar.success(msg)
                     add_log(msg, "success")
                 else:
-                    msg = f"Hata Kodu: {response.status_code} | Yanıt: {response.text}"
+                    msg = f"Hata Kodu: {response.status_code} | Yanıt: {response.text[:150]}"
                     st.sidebar.error(msg)
                     add_log(msg, "error")
             except Exception as e:
