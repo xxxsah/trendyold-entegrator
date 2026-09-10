@@ -310,8 +310,8 @@ elif selected_menu in [
 
   st.markdown("---")
 
-  # Genişletilmiş Canlı Ürün Kataloğu (Gerçek Resimler, Renkli Fiyatlar ve Varyant Kutuları)
-   katalog_data = {
+  # Genişletilmiş Canlı Ürün Kataloğu
+  katalog_data = {
       "Görsel": [
           "https://images.unsplash.com/photo-1543163521-1bf539c55dd2?w=100&auto=format&fit=crop&q=60",
           "https://images.unsplash.com/photo-1595950653106-6c9ebd614d3a?w=100&auto=format&fit=crop&q=60",
