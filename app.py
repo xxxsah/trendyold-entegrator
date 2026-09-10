@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 
 st.set_page_config(
-    page_title="MetEntegre - E-Ticaret Yönetim Paneli", 
+    page_title="Şahentegre - E-Ticaret Yönetim Paneli", 
     page_icon="⚡", 
     layout="wide"
 )
@@ -13,7 +13,7 @@ if 'selected_menu' not in st.session_state:
 if 'previous_menu' not in st.session_state:
     st.session_state.previous_menu = "Anasayfa"
 
-st.sidebar.title("🚀 MetEntegre Paneli")
+st.sidebar.title("🚀 Şahentegre Paneli")
 menu_options = [
     "Anasayfa",
     "Destek Taleplerim",
