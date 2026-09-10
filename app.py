@@ -55,14 +55,14 @@ if sync_button:
             try:
                 url = f"https://api.trendyol.com/sapigw/suppliers/{supplier_id}/products?page=0&size=1"
                 
-                # Entegrasyon Referans Kodu ve Secret ile yetkilendirme
                 user_pass = f"{ref_code}:{api_secret}"
                 encoded_credentials = base64.b64encode(user_pass.encode()).decode()
                 
+                # Trendyol'un kesinlikle istediği User-Agent formatı
                 headers = {
                     "User-Agent": f"{supplier_id} - SelfIntegration",
                     "Authorization": f"Basic {encoded_credentials}",
-                    "Accept": "application/json"
+                    "Content-Type": "application/json"
                 }
                 
                 response = requests.get(url, headers=headers)
@@ -72,7 +72,7 @@ if sync_button:
                     st.sidebar.success(msg)
                     add_log(msg, "success")
                 else:
-                    msg = f"Bağlantı Hatası! Kod: {response.status_code}"
+                    msg = f"Hata Kodu: {response.status_code} | Yanıt: {response.text}"
                     st.sidebar.error(msg)
                     add_log(msg, "error")
             except Exception as e:
