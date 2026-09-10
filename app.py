@@ -53,16 +53,16 @@ if sync_button:
     else:
         with st.spinner("Trendyol API bağlantısı test ediliyor..."):
             try:
-                url = f"https://api.trendyol.com/sapigw/suppliers/{supplier_id}/products"
+                # Trendyol ürün listeleme endpoint'i
+                url = f"https://api.trendyol.com/sapigw/suppliers/{supplier_id}/products?page=0&size=1"
                 
-                # Trendyol'un resmi API dokümanına uygun Base64 Basic Auth yetkilendirmesi
                 user_pass = f"{api_key}:{api_secret}"
                 encoded_credentials = base64.b64encode(user_pass.encode()).decode()
                 
                 headers = {
-                    "User-Agent": f"{supplier_id} - Self",
+                    "User-Agent": f"{supplier_id} - SelfIntegration",
                     "Authorization": f"Basic {encoded_credentials}",
-                    "Content-Type": "application/json"
+                    "Accept": "application/json"
                 }
                 
                 response = requests.get(url, headers=headers)
@@ -72,7 +72,7 @@ if sync_button:
                     st.sidebar.success(msg)
                     add_log(msg, "success")
                 else:
-                    msg = f"Bağlantı Hatası! Kod: {response.status_code} - Detay: {response.text[:100]}"
+                    msg = f"Bağlantı Hatası! Kod: {response.status_code} - Yanıt: {response.text[:200]}"
                     st.sidebar.error(msg)
                     add_log(msg, "error")
             except Exception as e:
@@ -87,4 +87,3 @@ if logs:
         st.text(f"[{log[0]}] {status_color} {log[2].upper()}: {log[1]}")
 else:
     st.info("Henüz kayıtlı bir log bulunmuyor.")
-
