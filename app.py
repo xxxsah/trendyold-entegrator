@@ -1,70 +1,58 @@
+import streamlit as st
 import sqlite3
 import requests
 from bs4 import BeautifulSoup
-import streamlit as st
 
-# Veritabani Kurulumu
-def init_db():
-  conn = sqlite3.connect("trendyol_sync.db", check_same_thread=False)
-  cursor = conn.cursor()
-  cursor.execute("""
-        CREATE TABLE IF NOT EXISTS sync_logs (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
-            status TEXT,
-            message TEXT
-        )
-    """)
-  conn.commit()
-  return conn, cursor
+# Sayfa Yapılandırması
+st.set_page_config(
+    page_title="Trendyol XML Entegrasyon Paneli",
+    page_icon="📦",
+    layout="wide"
+)
 
-conn, cursor = init_db()
-
-st.title("Trendyol XML Entegrasyon Paneli")
+st.title("📦 Trendyol XML Entegrasyon Paneli")
 st.write("Bu panel sayesinde Trendyol API bilgilerinizi girerek XML senkronizasyon işlemlerinizi 7/24 kesintisiz yürütebilirsiniz.")
 
-# Sidebar - Kimlik Dogrulama ve Ayarlar
-st.sidebar.header("API Kimlik Bilgileri")
-supplier_id = st.sidebar.text_input("Supplier ID")
-api_key = st.sidebar.text_input("API Key", type="password")
-api_secret = st.sidebar.text_input("API Secret", type="password")
+# Yan Menü / Ayarlar Alanı
+st.sidebar.header("⚙️ Ayarlar & API Bilgileri")
+supplier_id = st.sidebar.text_input("Trendyol Satıcı ID (Supplier ID)")
+api_key = st.sidebar.text_input("Trendyol API Key", type="password")
+api_secret = st.sidebar.text_input("Trendyol API Secret", type="password")
+xml_url = st.sidebar.text_input("Tedarikçi XML Linki")
 
-st.sidebar.header("Islemler")
-sync_button = st.sidebar.button("Senkronizasyonu Baslat")
+sync_button = st.sidebar.button("🚀 Senkronizasyonu Başlat")
+
+# Ana Ekran - Loglar ve Durum
+st.subheader("📋 Geçmiş Senkronizasyon Logları")
+
+# Veritabanı ve Log Yapısı
+def init_db():
+    conn = sqlite3.connect('sync_logs.db')
+    c = conn.cursor()
+    c.execute('''CREATE TABLE IF NOT EXISTS logs 
+                 (id INTEGER PRIMARY KEY AUTOINCREMENT, timestamp DATETIME DEFAULT CURRENT_TIMESTAMP, message TEXT, status TEXT)''')
+    conn.commit()
+    conn.close()
+
+init_db()
+
+def get_logs():
+    conn = sqlite3.connect('sync_logs.db')
+    c = conn.cursor()
+    c.execute("SELECT timestamp, message, status FROM logs ORDER BY id DESC LIMIT 50")
+    rows = c.fetchall()
+    conn.close()
+    return rows
 
 if sync_button:
-  if not supplier_id or not api_key or not api_secret:
-    st.error("Lutfen tum API kimlik bilgilerini eksiksiz girin!")
-  else:
-    with st.spinner("Senkronizasyon gerceklestiriliyor..."):
-      try:
-        url = f"https://api.trendyol.com/sapigw/suppliers/{supplier_id}/products"
-        headers = {"User-Agent": f"{supplier_id} - Self"}
-        response = requests.get(url, headers=headers, auth=(api_key, api_secret))
+    if not supplier_id or not api_key or not api_secret or not xml_url:
+        st.sidebar.error("Lütfen tüm alanları eksiksiz doldurun!")
+    else:
+        st.sidebar.success("Bilgiler alındı, senkronizasyon simülasyonu başlatılıyor...")
 
-        if response.status_code == 200:
-          st.success("Senkronizasyon basariyla tamamlandi!")
-          cursor.execute("INSERT INTO sync_logs (status, message) VALUES (?, ?)", ("BASARILI", "XML verileri basariyla senkronize edildi."))
-          conn.commit()
-        else:
-          err_msg = f"API Hatasi! Durum Kodu: {response.status_code} - {response.text}"
-          st.error(err_msg)
-          cursor.execute("INSERT INTO sync_logs (status, message) VALUES (?, ?)", ("HATA", err_msg))
-          conn.commit()
-
-      except Exception as e:
-        err_msg = f"Bir hata olustu: {str(e)}"
-        st.error(err_msg)
-        cursor.execute("INSERT INTO sync_logs (status, message) VALUES (?, ?)", ("HATA", err_msg))
-        conn.commit()
-
-# Gecmis Loglari Goster
-st.subheader("Gecmis Senkronizasyon Loglari")
-cursor.execute("SELECT timestamp, status, message FROM sync_logs ORDER BY id DESC LIMIT 10")
-logs = cursor.fetchall()
-
+logs = get_logs()
 if logs:
-  for log in logs:
-    st.text(f"[{log[0]}] {log[1]} - {log[2]}")
+    for log in logs:
+        st.text(f"[{log[0]}] {log[2].upper()}: {log[1]}")
 else:
-  st.info("Henuz kayitli bir log bulunmuyor.")
+    st.info("Henüz kayıtlı bir log bulunmuyor. Ayarları girip senkronizasyonu başlatabilirsiniz.")
