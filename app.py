@@ -10,7 +10,6 @@ st.set_page_config(
 if 'selected_menu' not in st.session_state:
     st.session_state.selected_menu = "Anasayfa"
 
-# Önceki sayfayı takip etmek için state
 if 'previous_menu' not in st.session_state:
     st.session_state.previous_menu = "Anasayfa"
 
@@ -44,7 +43,6 @@ if selected_menu != st.session_state.selected_menu:
     st.session_state.selected_menu = selected_menu
     st.rerun()
 
-# Sayfa içlerinde hızlıca geri dönmek için yardımcı fonksiyon
 def go_back():
     st.session_state.selected_menu = st.session_state.previous_menu
     st.rerun()
@@ -55,41 +53,56 @@ if st.session_state.selected_menu != "Anasayfa":
     st.markdown("---")
 
 if st.session_state.selected_menu == "Anasayfa":
+    # 1. Satır: 4 Pazaryeri (Hepsiburada, Trendyol, Çiçeksepeti, PTT AVM) - Renkli Başlık + Beyaz Taban
     col1, col2, col3, col4 = st.columns(4)
     with col1:
-        if st.button("🛒 HEPSİBURADA\n\n1 Kargoda", use_container_width=True):
+        st.markdown('<div style="background-color: #ff6000; color: white; padding: 6px; border-top-left-radius: 6px; border-top-right-radius: 6px; font-weight: bold; text-align: center; font-size: 13px;">🛒 HEPSİBURADA</div>', unsafe_allow_html=True)
+        if st.button("1 Kargoda", use_container_width=True, key="btn_hb"):
             st.session_state.previous_menu = "Anasayfa"
             st.session_state.selected_menu = "Hepsiburada"
             st.rerun()
+            
     with col2:
-        if st.button("📦 TRENDYOL\n\nSipariş yok", use_container_width=True):
+        st.markdown('<div style="background-color: #f27a1a; color: white; padding: 6px; border-top-left-radius: 6px; border-top-right-radius: 6px; font-weight: bold; text-align: center; font-size: 13px;">📦 TRENDYOL</div>', unsafe_allow_html=True)
+        if st.button("Sipariş yok", use_container_width=True, key="btn_ty"):
             st.session_state.previous_menu = "Anasayfa"
             st.session_state.selected_menu = "Trendyol"
             st.rerun()
+            
     with col3:
-        if st.button("🌸 ÇİÇEKSEPETİ\n\nSipariş yok", use_container_width=True):
+        st.markdown('<div style="background-color: #e6005c; color: white; padding: 6px; border-top-left-radius: 6px; border-top-right-radius: 6px; font-weight: bold; text-align: center; font-size: 13px;">🌸 ÇİÇEKSEPETİ</div>', unsafe_allow_html=True)
+        if st.button("Sipariş yok", use_container_width=True, key="btn_cs"):
             st.session_state.previous_menu = "Anasayfa"
             st.session_state.selected_menu = "Çiçeksepeti"
             st.rerun()
+            
     with col4:
-        if st.button("🏢 PTT AVM\n\nSipariş yok", use_container_width=True):
+        st.markdown('<div style="background-color: #ff9900; color: white; padding: 6px; border-top-left-radius: 6px; border-top-right-radius: 6px; font-weight: bold; text-align: center; font-size: 13px;">🏢 PTT AVM</div>', unsafe_allow_html=True)
+        if st.button("Sipariş yok", use_container_width=True, key="btn_ptt"):
             st.session_state.previous_menu = "Anasayfa"
             st.session_state.selected_menu = "E-PTT AVM"
             st.rerun()
 
+    # 2. Satır: 3 Pazaryeri (N11, Pazarama, İdefix) - Renkli Başlık + Beyaz Taban
     col5, col6, col7 = st.columns(3)
     with col5:
-        if st.button("🟠 N11\n\nSipariş yok", use_container_width=True):
+        st.markdown('<div style="background-color: #5d3ebc; color: white; padding: 6px; border-top-left-radius: 6px; border-top-right-radius: 6px; font-weight: bold; text-align: center; font-size: 13px;">🟠 N11</div>', unsafe_allow_html=True)
+        if st.button("Sipariş yok", use_container_width=True, key="btn_n11"):
             st.session_state.previous_menu = "Anasayfa"
             st.session_state.selected_menu = "N11"
             st.rerun()
+            
     with col6:
-        st.button("🚀 PAZARAMA\n\nÇok Yakında", use_container_width=True, disabled=True)
+        st.markdown('<div style="background-color: #0099ff; color: white; padding: 6px; border-top-left-radius: 6px; border-top-right-radius: 6px; font-weight: bold; text-align: center; font-size: 13px;">🚀 PAZARAMA</div>', unsafe_allow_html=True)
+        st.button("Çok Yakında", use_container_width=True, disabled=True, key="btn_pz")
+        
     with col7:
-        st.button("🚀 İDEFİX\n\nÇok Yakında", use_container_width=True, disabled=True)
+        st.markdown('<div style="background-color: #00b33c; color: white; padding: 6px; border-top-left-radius: 6px; border-top-right-radius: 6px; font-weight: bold; text-align: center; font-size: 13px;">🚀 İDEFİX</div>', unsafe_allow_html=True)
+        st.button("Çok Yakında", use_container_width=True, disabled=True, key="btn_id")
 
     st.markdown("---")
     
+    # Fatura Bilgileri
     st.markdown("### 👤 Fatura Bilgileri")
     st.text_input("İsim:", value="Şahin Yiğit", disabled=True)
     st.text_input("Email:", value="sah1357sah@gmail.com", disabled=True)
@@ -103,6 +116,7 @@ if st.session_state.selected_menu == "Anasayfa":
 
     st.markdown("---")
 
+    # Abonelik Bilgileri
     st.markdown("### ⭐ Abonelik Bilgileri")
     ab_col1, ab_col2 = st.columns([3, 1])
     with ab_col1:
@@ -117,6 +131,7 @@ if st.session_state.selected_menu == "Anasayfa":
 
     st.markdown("---")
     
+    # Mağaza Yüklenebilir Ürün Adetleri
     st.markdown("### 📦 Mağaza Ürün Limitleri")
     p1, p2 = st.columns(2)
     with p1:
