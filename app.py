@@ -7,55 +7,62 @@ st.set_page_config(
     layout="wide",
 )
 
-# Gönderdiğin görseldeki gibi yan yana, kare formunda, yumuşak ve göz yormayan pastel renklerde kart tasarımı
+# Gönderdiğin görseldeki birebir tasarımı sağlayan kusursuz CSS ve Grid yapısı
 st.markdown(
     """
     <style>
     .stApp {
         background-color: #f8f9fa;
     }
-    /* Kartların dış çerçevesi ve beyaz tabanı */
-    .market-card {
+    .market-grid {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 12px;
+        margin-bottom: 12px;
+    }
+    .market-box {
         background-color: #ffffff;
         border: 1px solid #e0e0e0;
-        border-radius: 10px;
-        padding: 12px;
-        margin-bottom: 12px;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.02);
-        text-align: center;
-        height: 110px;
+        border-radius: 8px;
+        padding: 10px;
+        width: calc(25% - 10px);
+        min-width: 140px;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.04);
         display: flex;
         flex-direction: column;
         justify-content: space-between;
+        height: 100px;
+        text-decoration: none !important;
     }
-    /* Üst renkli başlık şeridi */
-    .m-header {
+    .market-box-3 {
+        width: calc(33.33% - 9px);
+        min-width: 150px;
+    }
+    .m-title {
         color: white;
         padding: 5px 8px;
-        border-radius: 6px;
+        border-radius: 5px;
         font-weight: 700;
         font-size: 11px;
+        text-align: center;
         letter-spacing: 0.5px;
-        margin-bottom: 8px;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        gap: 5px;
     }
-    /* İçerik metni (Sipariş yok / 1 Kargoda vs.) */
-    .m-body {
-        font-size: 13px;
+    .m-status {
+        font-size: 12px;
         color: #444444;
+        text-align: center;
         font-weight: 500;
+        margin-top: auto;
+        margin-bottom: auto;
     }
-    /* Göz yormayan, şık ve yumuşak pastel renk tonları */
-    .bg-hb { background-color: #f97316; }   /* Hepsiburada Turuncu */
-    .bg-ty { background-color: #ea580c; }   /* Trendyol Koyu Turuncu/Kırmızımsı */
-    .bg-cs { background-color: #db2777; }   /* Çiçeksepeti Pembe */
-    .bg-ptt { background-color: #f59e0b; }  /* PTT AVM Sarı/Turuncu */
-    .bg-n11 { background-color: #7c3aed; }  /* N11 Mor */
-    .bg-pz { background-color: #0ea5e9; }   /* Pazarama Mavi */
-    .bg-id { background-color: #10b981; }   /* İdefix Yeşil */
+    /* Göz yormayan şık pastel/canlı tonlar */
+    .bg-hb { background-color: #f97316; }
+    .bg-ty { background-color: #ea580c; }
+    .bg-cs { background-color: #db2777; }
+    .bg-ptt { background-color: #f59e0b; }
+    .bg-n11 { background-color: #7c3aed; }
+    .bg-pz { background-color: #0ea5e9; }
+    .bg-id { background-color: #10b981; }
     </style>
 """,
     unsafe_allow_html=True,
@@ -67,7 +74,7 @@ if "selected_menu" not in st.session_state:
 if "previous_menu" not in st.session_state:
   st.session_state.previous_menu = "Anasayfa"
 
-# Sidebar Başlığı (Şah büyük ve farklı, entegre ayrı)
+# Sidebar Başlığı
 st.sidebar.markdown(
     """
     <div style="text-align: center; padding: 10px 0; margin-bottom: 10px;">
@@ -120,86 +127,51 @@ if st.session_state.selected_menu != "Anasayfa":
   st.markdown("---")
 
 if st.session_state.selected_menu == "Anasayfa":
-  # 1. Satır: 4'lü Yan Yana Kare Kartlar
-  c1, c2, c3, c4 = st.columns(4)
+  # 1. Satır: 4'lü Yan Yana Kare Kutular (Hepsiburada, Trendyol, Çiçeksepeti, PTT AVM)
+  st.markdown(
+      """
+        <div class="market-grid">
+            <div class="market-box">
+                <div class="m-title bg-hb">🛒 HEPSİBURADA</div>
+                <div class="m-status">1 Kargoda</div>
+            </div>
+            <div class="market-box">
+                <div class="m-title bg-ty">📦 TRENDYOL</div>
+                <div class="m-status">Sipariş yok</div>
+            </div>
+            <div class="market-box">
+                <div class="m-title bg-cs">🌸 ÇİÇEKSEPETİ</div>
+                <div class="m-status">Sipariş yok</div>
+            </div>
+            <div class="market-box">
+                <div class="m-title bg-ptt">🏢 PTT AVM</div>
+                <div class="m-status">Sipariş yok</div>
+            </div>
+        </div>
+    """,
+      unsafe_allow_html=True,
+  )
 
-  with c1:
-    st.markdown(
-        '<div class="market-card">'
-        '<div class="m-header bg-hb">🛒 HEPSİBURADA</div>',
-        unsafe_allow_html=True,
-    )
-    if st.button("1 Kargoda", use_container_width=True, key="hb_btn"):
-      st.session_state.previous_menu = "Anasayfa"
-      st.session_state.selected_menu = "Hepsiburada"
-      st.rerun()
-    st.markdown("</div>", unsafe_allow_html=True)
-
-  with c2:
-    st.markdown(
-        '<div class="market-card">'
-        '<div class="m-header bg-ty">📦 TRENDYOL</div>',
-        unsafe_allow_html=True,
-    )
-    if st.button("Sipariş yok", use_container_width=True, key="ty_btn"):
-      st.session_state.previous_menu = "Anasayfa"
-      st.session_state.selected_menu = "Trendyol"
-      st.rerun()
-    st.markdown("</div>", unsafe_allow_html=True)
-
-  with c3:
-    st.markdown(
-        '<div class="market-card">'
-        '<div class="m-header bg-cs">🌸 ÇİÇEKSEPETİ</div>',
-        unsafe_allow_html=True,
-    )
-    if st.button("Sipariş yok", use_container_width=True, key="cs_btn"):
-      st.session_state.previous_menu = "Anasayfa"
-      st.session_state.selected_menu = "Çiçeksepeti"
-      st.rerun()
-    st.markdown("</div>", unsafe_allow_html=True)
-
-  with c4:
-    st.markdown(
-        '<div class="market-card">'
-        '<div class="m-header bg-ptt">🏢 PTT AVM</div>',
-        unsafe_allow_html=True,
-    )
-    if st.button("Sipariş yok", use_container_width=True, key="ptt_btn"):
-      st.session_state.previous_menu = "Anasayfa"
-      st.session_state.selected_menu = "E-PTT AVM"
-      st.rerun()
-    st.markdown("</div>", unsafe_allow_html=True)
-
-  # 2. Satır: 3'lü Yan Yana Kare Kartlar
-  c5, c6, c7 = st.columns(3)
-
-  with c5:
-    st.markdown(
-        '<div class="market-card"><div class="m-header bg-n11">🟠 N11</div>',
-        unsafe_allow_html=True,
-    )
-    if st.button("Sipariş yok", use_container_width=True, key="n11_btn"):
-      st.session_state.previous_menu = "Anasayfa"
-      st.session_state.selected_menu = "N11"
-      st.rerun()
-    st.markdown("</div>", unsafe_allow_html=True)
-
-  with c6:
-    st.markdown(
-        '<div class="market-card"><div class="m-header bg-pz">👑 PAZARAMA</div>',
-        unsafe_allow_html=True,
-    )
-    st.button("Çok Yakında", use_container_width=True, disabled=True, key="pz_btn")
-    st.markdown("</div>", unsafe_allow_html=True)
-
-  with c7:
-    st.markdown(
-        '<div class="market-card"><div class="m-header bg-id">👑 İDEFİX</div>',
-        unsafe_allow_html=True,
-    )
-    st.button("Çok Yakında", use_container_width=True, disabled=True, key="id_btn")
-    st.markdown("</div>", unsafe_allow_html=True)
+  # 2. Satır: 3'lü Yan Yana Kare Kutular (N11, Pazarama, İdefix)
+  st.markdown(
+      """
+        <div class="market-grid">
+            <div class="market-box market-box-3">
+                <div class="m-title bg-n11">🟠 N11</div>
+                <div class="m-status">Sipariş yok</div>
+            </div>
+            <div class="market-box market-box-3">
+                <div class="m-title bg-pz">👑 PAZARAMA</div>
+                <div class="m-status" style="color: #888;">Çok Yakında</div>
+            </div>
+            <div class="market-box market-box-3">
+                <div class="m-title bg-id">👑 İDEFİX</div>
+                <div class="m-status" style="color: #888;">Çok Yakında</div>
+            </div>
+        </div>
+    """,
+      unsafe_allow_html=True,
+  )
 
   st.markdown("---")
 
