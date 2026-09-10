@@ -7,29 +7,55 @@ st.set_page_config(
     layout="wide",
 )
 
-# Özelleştirilmiş şık başlık ve kart tasarımları için CSS
+# Gönderdiğin görseldeki gibi yan yana, kare formunda, yumuşak ve göz yormayan pastel renklerde kart tasarımı
 st.markdown(
     """
     <style>
     .stApp {
-        background-color: #f4f6f9;
+        background-color: #f8f9fa;
     }
-    .market-box {
+    /* Kartların dış çerçevesi ve beyaz tabanı */
+    .market-card {
         background-color: #ffffff;
-        border: 1px solid #dcdcdc;
-        border-radius: 8px;
-        padding: 4px;
-        margin-bottom: 10px;
-        box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+        border: 1px solid #e0e0e0;
+        border-radius: 10px;
+        padding: 12px;
+        margin-bottom: 12px;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.02);
         text-align: center;
+        height: 110px;
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
     }
-    .market-title-hb { background-color: #ff6000; color: white; padding: 6px; border-top-left-radius: 6px; border-top-right-radius: 6px; font-weight: bold; font-size: 12px; }
-    .market-title-ty { background-color: #f27a1a; color: white; padding: 6px; border-top-left-radius: 6px; border-top-right-radius: 6px; font-weight: bold; font-size: 12px; }
-    .market-title-cs { background-color: #e6005c; color: white; padding: 6px; border-top-left-radius: 6px; border-top-right-radius: 6px; font-weight: bold; font-size: 12px; }
-    .market-title-ptt { background-color: #ff9900; color: white; padding: 6px; border-top-left-radius: 6px; border-top-right-radius: 6px; font-weight: bold; font-size: 12px; }
-    .market-title-n11 { background-color: #5d3ebc; color: white; padding: 6px; border-top-left-radius: 6px; border-top-right-radius: 6px; font-weight: bold; font-size: 12px; }
-    .market-title-pz { background-color: #0099ff; color: white; padding: 6px; border-top-left-radius: 6px; border-top-right-radius: 6px; font-weight: bold; font-size: 12px; }
-    .market-title-id { background-color: #00b33c; color: white; padding: 6px; border-top-left-radius: 6px; border-top-right-radius: 6px; font-weight: bold; font-size: 12px; }
+    /* Üst renkli başlık şeridi */
+    .m-header {
+        color: white;
+        padding: 5px 8px;
+        border-radius: 6px;
+        font-weight: 700;
+        font-size: 11px;
+        letter-spacing: 0.5px;
+        margin-bottom: 8px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 5px;
+    }
+    /* İçerik metni (Sipariş yok / 1 Kargoda vs.) */
+    .m-body {
+        font-size: 13px;
+        color: #444444;
+        font-weight: 500;
+    }
+    /* Göz yormayan, şık ve yumuşak pastel renk tonları */
+    .bg-hb { background-color: #f97316; }   /* Hepsiburada Turuncu */
+    .bg-ty { background-color: #ea580c; }   /* Trendyol Koyu Turuncu/Kırmızımsı */
+    .bg-cs { background-color: #db2777; }   /* Çiçeksepeti Pembe */
+    .bg-ptt { background-color: #f59e0b; }  /* PTT AVM Sarı/Turuncu */
+    .bg-n11 { background-color: #7c3aed; }  /* N11 Mor */
+    .bg-pz { background-color: #0ea5e9; }   /* Pazarama Mavi */
+    .bg-id { background-color: #10b981; }   /* İdefix Yeşil */
     </style>
 """,
     unsafe_allow_html=True,
@@ -41,11 +67,11 @@ if "selected_menu" not in st.session_state:
 if "previous_menu" not in st.session_state:
   st.session_state.previous_menu = "Anasayfa"
 
-# Sidebar Başlığı (Şah yazısı özel ve büyük, entegre ayrı)
+# Sidebar Başlığı (Şah büyük ve farklı, entegre ayrı)
 st.sidebar.markdown(
     """
     <div style="text-align: center; padding: 10px 0; margin-bottom: 10px;">
-        <span style="font-size: 34px; font-weight: 800; font-family: 'Georgia', serif; font-style: italic; color: #f27a1a; text-shadow: 1px 1px 2px rgba(0,0,0,0.1);">Şah</span>
+        <span style="font-size: 34px; font-weight: 800; font-family: 'Georgia', serif; font-style: italic; color: #ea580c; text-shadow: 1px 1px 2px rgba(0,0,0,0.1);">Şah</span>
         <span style="font-size: 20px; font-weight: 600; letter-spacing: 1.5px; margin-left: 4px;">ENTEGRE</span>
         <div style="font-size: 12px; color: #888; margin-top: 4px;">👑 Yönetim Paneli</div>
     </div>
@@ -94,13 +120,13 @@ if st.session_state.selected_menu != "Anasayfa":
   st.markdown("---")
 
 if st.session_state.selected_menu == "Anasayfa":
-  # 1. Satır: 4'lü Grid (Hepsiburada, Trendyol, Çiçeksepeti, PTT AVM)
-  col1, col2, col3, col4 = st.columns(4)
+  # 1. Satır: 4'lü Yan Yana Kare Kartlar
+  c1, c2, c3, c4 = st.columns(4)
 
-  with col1:
+  with c1:
     st.markdown(
-        '<div class="market-box"><div class="market-title-hb">🛒'
-        " HEPSİBURADA</div>",
+        '<div class="market-card">'
+        '<div class="m-header bg-hb">🛒 HEPSİBURADA</div>',
         unsafe_allow_html=True,
     )
     if st.button("1 Kargoda", use_container_width=True, key="hb_btn"):
@@ -109,10 +135,10 @@ if st.session_state.selected_menu == "Anasayfa":
       st.rerun()
     st.markdown("</div>", unsafe_allow_html=True)
 
-  with col2:
+  with c2:
     st.markdown(
-        '<div class="market-box"><div class="market-title-ty">📦'
-        " TRENDYOL</div>",
+        '<div class="market-card">'
+        '<div class="m-header bg-ty">📦 TRENDYOL</div>',
         unsafe_allow_html=True,
     )
     if st.button("Sipariş yok", use_container_width=True, key="ty_btn"):
@@ -121,10 +147,10 @@ if st.session_state.selected_menu == "Anasayfa":
       st.rerun()
     st.markdown("</div>", unsafe_allow_html=True)
 
-  with col3:
+  with c3:
     st.markdown(
-        '<div class="market-box"><div class="market-title-cs">🌸'
-        " ÇİÇEKSEPETİ</div>",
+        '<div class="market-card">'
+        '<div class="m-header bg-cs">🌸 ÇİÇEKSEPETİ</div>',
         unsafe_allow_html=True,
     )
     if st.button("Sipariş yok", use_container_width=True, key="cs_btn"):
@@ -133,9 +159,10 @@ if st.session_state.selected_menu == "Anasayfa":
       st.rerun()
     st.markdown("</div>", unsafe_allow_html=True)
 
-  with col4:
+  with c4:
     st.markdown(
-        '<div class="market-box"><div class="market-title-ptt">🏢 PTT AVM</div>',
+        '<div class="market-card">'
+        '<div class="m-header bg-ptt">🏢 PTT AVM</div>',
         unsafe_allow_html=True,
     )
     if st.button("Sipariş yok", use_container_width=True, key="ptt_btn"):
@@ -144,12 +171,12 @@ if st.session_state.selected_menu == "Anasayfa":
       st.rerun()
     st.markdown("</div>", unsafe_allow_html=True)
 
-  # 2. Satır: 3'lü Grid (N11, Pazarama, İdefix)
-  col5, col6, col7 = st.columns(3)
+  # 2. Satır: 3'lü Yan Yana Kare Kartlar
+  c5, c6, c7 = st.columns(3)
 
-  with col5:
+  with c5:
     st.markdown(
-        '<div class="market-box"><div class="market-title-n11">🟠 N11</div>',
+        '<div class="market-card"><div class="m-header bg-n11">🟠 N11</div>',
         unsafe_allow_html=True,
     )
     if st.button("Sipariş yok", use_container_width=True, key="n11_btn"):
@@ -158,17 +185,17 @@ if st.session_state.selected_menu == "Anasayfa":
       st.rerun()
     st.markdown("</div>", unsafe_allow_html=True)
 
-  with col6:
+  with c6:
     st.markdown(
-        f'<div class="market-box"><div class="market-title-pz">👑 PAZARAMA</div>',
+        '<div class="market-card"><div class="m-header bg-pz">👑 PAZARAMA</div>',
         unsafe_allow_html=True,
     )
     st.button("Çok Yakında", use_container_width=True, disabled=True, key="pz_btn")
     st.markdown("</div>", unsafe_allow_html=True)
 
-  with col7:
+  with c7:
     st.markdown(
-        f'<div class="market-box"><div class="market-title-id">👑 İDEFİX</div>',
+        '<div class="market-card"><div class="m-header bg-id">👑 İDEFİX</div>',
         unsafe_allow_html=True,
     )
     st.button("Çok Yakında", use_container_width=True, disabled=True, key="id_btn")
