@@ -2,6 +2,7 @@ import streamlit as st
 import sqlite3
 import requests
 from datetime import datetime
+import base64
 
 st.set_page_config(
     page_title="Trendyol Stok & Fiyat Senkronizasyon Paneli",
@@ -53,18 +54,25 @@ if sync_button:
         with st.spinner("Trendyol API bağlantısı test ediliyor..."):
             try:
                 url = f"https://api.trendyol.com/sapigw/suppliers/{supplier_id}/products"
+                
+                # Trendyol'un resmi API dokümanına uygun Base64 Basic Auth yetkilendirmesi
+                user_pass = f"{api_key}:{api_secret}"
+                encoded_credentials = base64.b64encode(user_pass.encode()).decode()
+                
                 headers = {
                     "User-Agent": f"{supplier_id} - Self",
+                    "Authorization": f"Basic {encoded_credentials}",
                     "Content-Type": "application/json"
                 }
-                response = requests.get(url, headers=headers, auth=(api_key, api_secret))
+                
+                response = requests.get(url, headers=headers)
                 
                 if response.status_code == 200:
                     msg = "Trendyol API bağlantısı başarılı!"
                     st.sidebar.success(msg)
                     add_log(msg, "success")
                 else:
-                    msg = f"Bağlantı Hatası! Kod: {response.status_code}"
+                    msg = f"Bağlantı Hatası! Kod: {response.status_code} - Detay: {response.text[:100]}"
                     st.sidebar.error(msg)
                     add_log(msg, "error")
             except Exception as e:
@@ -79,3 +87,4 @@ if logs:
         st.text(f"[{log[0]}] {status_color} {log[2].upper()}: {log[1]}")
 else:
     st.info("Henüz kayıtlı bir log bulunmuyor.")
+
