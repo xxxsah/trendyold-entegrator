@@ -3,7 +3,7 @@ import pandas as pd
 import streamlit as st
 
 st.set_page_config(
-    page_title="MetEntegre - Profesyonel E-Ticaret Entegrasyon Platformu",
+    page_title="Şah Entegre - Profesyonel E-Ticaret Entegrasyon Platformu",
     page_icon="⚡",
     layout="wide",
 )
@@ -33,7 +33,7 @@ if "komisyon_orani" not in st.session_state:
 if "kargo_ucreti" not in st.session_state:
   st.session_state.kargo_ucreti = 40.0
 if "marka_adi" not in st.session_state:
-  st.session_state.marka_adi = "MetEntegre Store"
+  st.session_state.marka_adi = "Şah Entegre Store"
 
 if "api_anahtarlari" not in st.session_state:
   st.session_state.api_anahtarlari = {
@@ -118,7 +118,7 @@ ust_col1, ust_col2 = st.columns([3, 2])
 with ust_col1:
   st.markdown(
       "<span style='font-size: 18px; font-weight: 800; color:"
-      " #0f172a;'>⚡ METENTEGRE - Kurumsal E-Ticaret Otomasyon"
+      " #0f172a;'>⚡ ŞAH ENTEGRE - Kurumsal E-Ticaret Otomasyon"
       " Platformu</span>",
       unsafe_allow_html=True,
   )
@@ -142,7 +142,7 @@ st.markdown("---")
 st.sidebar.markdown(
     """
     <div style="text-align: center; padding: 12px 0; margin-bottom: 15px;">
-        <span style="font-size: 26px; font-weight: 900; color: #2563eb;">MET</span>
+        <span style="font-size: 26px; font-weight: 900; color: #2563eb;">ŞAH</span>
         <span style="font-size: 20px; font-weight: 700; color: #0f172a;">ENTEGRE</span>
         <div style="font-size: 11px; color: #64748b; margin-top: 4px;">Uçtan Uca Pazaryeri Yönetimi</div>
     </div>
@@ -215,7 +215,7 @@ elif secilen_profil_islem == "📄 Lisans ve Sürüm Bilgisi":
   st.subheader("📄 Lisans ve Abonelik Detayları")
   st.dataframe(
       pd.DataFrame([{
-          "Paket Türü": "MetEntegre Kurumsal Sınırsız",
+          "Paket Türü": "Şah Entegre Kurumsal Sınırsız",
           "Kapsam": "Tüm Pazaryerleri Dahil",
           "Durum": "Aktif / Sorunsuz",
           "Otomatik Stok Döngüsü": "Aktif (6 Saatte Bir)",
@@ -228,7 +228,7 @@ elif secilen_profil_islem == "👤 Mağaza & Bayi Bilgileri":
   st.subheader("👤 Mağaza ve Hesap Bilgileri")
   st.text_input("İşletme Unvanı", value="Şah E-Ticaret Bilişim Ltd. Şti.")
   st.text_input("Sistem Kullanıcısı", value="Şahin Yiğit")
-  st.text_input("E-posta Adresi", value="sahin@metentegre.com")
+  st.text_input("E-posta Adresi", value="sahin@sahentegre.com")
   if st.button("Bilgileri Güncelle"):
     st.success("Bilgiler güncellendi.")
 
@@ -344,7 +344,7 @@ elif aktif_sayfa == "📦 Ürünler & Hazır Eşleme":
       else:
         st.error("Lütfen ürün adı ve barkod alanlarını doldurun.")
 
-   arama = st.text_input(
+  arama = st.text_input(
       "🔍 Ürün Ara", placeholder="Ürün adı veya barkod girin..."
   )
   aktif_df = st.session_state.urun_havuzu.copy()
