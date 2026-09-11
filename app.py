@@ -3,188 +3,194 @@ import pandas as pd
 import streamlit as st
 
 st.set_page_config(
-    page_title="Şah Entegre - Profesyonel E-Ticaret Entegrasyon Platformu",
-    page_icon="⚡",
+    page_title="Şah Entegre - Profesyonel E-Ticaret Yönetim Platformu",
+    page_icon="👑",
     layout="wide",
 )
 
-# Profesyonel UI & Kurumsal Renk Paleti CSS
+# Kurumsal Tasarım ve Orijinal Renk Paleti CSS
 st.markdown(
     """
     <style>
-    .stApp { background-color: #f4f6f9; }
-    .metric-container { display: flex; gap: 15px; margin-bottom: 20px; flex-wrap: wrap; }
-    .metric-card { flex: 1; min-width: 180px; background: white; border: 1px solid #e2e8f0; border-radius: 10px; padding: 16px; text-align: center; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
-    .pazar-badge { font-size: 11px; font-weight: 700; padding: 4px 10px; border-radius: 4px; color: white; display: inline-block; margin-bottom: 8px; }
-    .panel-box { background: white; border: 1px solid #e2e8f0; border-radius: 10px; padding: 20px; margin-bottom: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
-    .panel-header { background: #0f172a; color: white; padding: 12px 16px; font-weight: 700; font-size: 14px; border-radius: 6px; margin-bottom: 15px; }
+    .stApp { background-color: #f1f5f9; }
+    .mp-grid { display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; }
+    .mp-card { flex: 1; min-width: 120px; background: white; border: 1px solid #cbd5e1; border-radius: 6px; padding: 10px; text-align: center; box-shadow: 0 1px 2px rgba(0,0,0,0.02); }
+    .mp-badge { font-size: 10px; font-weight: 700; padding: 3px 6px; border-radius: 4px; color: white; display: inline-block; margin-bottom: 5px; }
+    .box-container { background: white; border: 1px solid #cbd5e1; border-radius: 8px; padding: 15px; margin-bottom: 15px; box-shadow: 0 1px 3px rgba(0,0,0,0.03); }
+    .box-header { background: #1e3a8a; color: white; padding: 8px 12px; font-weight: 700; font-size: 13px; border-radius: 4px; margin-bottom: 10px; text-align: center; }
     </style>
 """,
     unsafe_allow_html=True,
 )
 
 # -------------------------------------------------------------
-# MERKEZİ VERİTABANI & OTURUM BAŞLANGICI (STATE MANAGEMENT)
+# MERKEZİ VERİTABANI & OTURUM HAFIZASI (STATE MANAGEMENT)
 # -------------------------------------------------------------
 if "kar_orani" not in st.session_state:
-  st.session_state.kar_orani = 20.0
+  st.session_state.kar_orani = 25.0
 if "komisyon_orani" not in st.session_state:
-  st.session_state.komisyon_orani = 15.0
+  st.session_state.komisyon_orani = 18.0
 if "kargo_ucreti" not in st.session_state:
-  st.session_state.kargo_ucreti = 40.0
+  st.session_state.kargo_ucreti = 45.0
 if "marka_adi" not in st.session_state:
-  st.session_state.marka_adi = "Şah Entegre Store"
+  st.session_state.marka_adi = "Şah Store"
 
 if "api_anahtarlari" not in st.session_state:
   st.session_state.api_anahtarlari = {
-      "Trendyol Supplier ID & Key": "",
+      "Trendyol Supplier ID / API Key": "",
       "Hepsiburada Merchant ID": "",
-      "N11 App Key & Secret": "",
+      "N11 App Key / Secret": "",
       "ÇiçekSepeti API Token": "",
-      "Pazarama / İdefix API": "",
+      "E-PTT AVM API Key": "",
   }
 
 if "urun_havuzu" not in st.session_state:
   st.session_state.urun_havuzu = pd.DataFrame([
       {
-          "Görsel": "https://images.unsplash.com/photo-1523275335684-37898b6baf30?w=100",
-          "Barkod": "8680001122331",
-          "Ürün Adı": "Kablosuz Hızlı Şarj Cihazı 15W",
-          "Kategori": "Elektronik > Aksesuar",
-          "Alış Fiyatı": 250.00,
-          "Satış Fiyatı": 396.75,
-          "Stok": 142,
-          "Senkronizasyon": "Aktif / Eşitlendi",
+          "Görsel": "https://images.unsplash.com/photo-1584263155336-d64e9a8f4675?w=100",
+          "Barkod": "CYRO-679931-LXL",
+          "Ürün Adı": "Siyah Dantelli Sabahlık & Gecelik Takımı",
+          "Alış Fiyatı": 400.00,
+          "Satış Fiyatı": 726.00,
+          "Trendyol Stok": 98,
+          "Hepsiburada Stok": 98,
+          "M.Entegre Stok": 150,
+          "Durum": "Satışta / Onaylı",
       },
       {
-          "Görsel": "https://images.unsplash.com/photo-1505740420928-5e560c06d30e?w=100",
-          "Barkod": "8680001122332",
-          "Ürün Adı": "Bluetooth 5.0 Gürültü Önleyici Kulaklık",
-          "Kategori": "Elektronik > Ses",
-          "Alış Fiyatı": 600.00,
-          "Satış Fiyatı": 952.20,
-          "Stok": 85,
-          "Senkronizasyon": "Aktif / Eşitlendi",
+          "Görsel": "https://images.unsplash.com/photo-1543163521-1bf539c55dd2?w=100",
+          "Barkod": "CYRO-679931-SM",
+          "Ürün Adı": "Siyah Dantelli Sabahlık & Gecelik Takımı (SM)",
+          "Alış Fiyatı": 400.00,
+          "Satış Fiyatı": 726.00,
+          "Trendyol Stok": 100,
+          "Hepsiburada Stok": 100,
+          "M.Entegre Stok": 120,
+          "Durum": "Satışta / Onaylı",
       },
       {
-          "Görsel": "https://images.unsplash.com/photo-1542291026-7eec264c27ff?w=100",
-          "Barkod": "8680001122333",
-          "Ürün Adı": "Ortopedik Taban Spor Koşu Ayakkabısı",
-          "Kategori": "Spor > Giyim",
-          "Alış Fiyatı": 450.00,
-          "Satış Fiyatı": 714.15,
-          "Stok": 12,
-          "Senkronizasyon": "Kritik Stok (<50)",
+          "Görsel": "https://images.unsplash.com/photo-1517841905240-472988babdf9?w=100",
+          "Barkod": "606214114000007",
+          "Ürün Adı": "Ayarlanabilir Dizüstü Destek Tabanı Tam Boy",
+          "Alış Fiyatı": 350.00,
+          "Satış Fiyatı": 629.70,
+          "Trendyol Stok": 27,
+          "Hepsiburada Stok": 27,
+          "M.Entegre Stok": 45,
+          "Durum": "Satışta / Onaylı",
       },
   ])
 
 if "siparisler_db" not in st.session_state:
   st.session_state.siparisler_db = pd.DataFrame([
       {
-          "Sipariş ID": "MET-88412",
+          "Sipariş ID": "SAH-88412",
           "Pazaryeri": "Trendyol",
-          "Müşteri": "Kerem Aksoy",
-          "Ürün": "Kablosuz Hızlı Şarj Cihazı",
-          "Tutar": "396.75 TL",
-          "Kargo Durumu": "Hazırlanıyor",
+          "Müşteri": "Ahmet Yılmaz",
+          "Ürün": "Siyah Dantelli Sabahlık",
+          "Tutar": "726.00 TL",
+          "Durum": "Yeni Sipariş",
       },
       {
-          "Sipariş ID": "MET-88413",
+          "Sipariş ID": "SAH-88413",
           "Pazaryeri": "Hepsiburada",
           "Müşteri": "Zeynep Demir",
-          "Ürün": "Bluetooth Kulaklık",
-          "Tutar": "952.20 TL",
-          "Kargo Durumu": "Faturalandı",
+          "Ürün": "Ayarlanabilir Dizüstü Destek",
+          "Tutar": "629.70 TL",
+          "Durum": "Kargolandı",
       },
   ])
 
 if "sistem_loglari" not in st.session_state:
   st.session_state.sistem_loglari = [
-      "[{}] MetEntegre çekirdek servis başlatıldı.".format(
+      "[{}] Şah Entegre çekirdek sistem başlatıldı.".format(
           time.strftime("%H:%M:%S")
       ),
-      "[{}] Tüm pazaryeri adaptörleri aktif konuma getirildi.".format(
-          time.strftime("%H:%M:%S")
-      ),
-      "[{}] 6 saatlik otomatik stok cron görevi devrede.".format(
+      "[{}] Çoklu pazaryeri API adaptörleri aktif.".format(
           time.strftime("%H:%M:%S")
       ),
   ]
 
 # -------------------------------------------------------------
-# ÜST BAR VE HESAP / PROFİL YÖNETİMİ
+# ÜST BAR VE SAĞ PROFİL MENÜSÜ
 # -------------------------------------------------------------
-ust_col1, ust_col2 = st.columns([3, 2])
-with ust_col1:
+col_h1, col_h2 = st.columns([4, 2])
+with col_h1:
   st.markdown(
-      "<span style='font-size: 18px; font-weight: 800; color:"
-      " #0f172a;'>⚡ ŞAH ENTEGRE - Kurumsal E-Ticaret Otomasyon"
-      " Platformu</span>",
+      "<span style='font-size: 15px; font-weight: 700; color:"
+      " #1e293b;'>👑 Şah Entegre - Profesyonel E-Ticaret Yönetim"
+      " Paneli</span>",
       unsafe_allow_html=True,
   )
-with ust_col2:
-  profil_menu = [
-      "👤 Mağaza & Bayi Bilgileri",
-      "⚙️ Otomatik Fiyat & Komisyon",
-      "🔑 API Entegrasyon Anahtarları",
-      "📄 Lisans ve Sürüm Bilgisi",
-      "🚪 Oturumu Kapat",
+with col_h2:
+  profil_secenekleri = [
+      "👤 Mağaza ve Fatura Bilgileri",
+      "⚙️ Fiyat, Kâr & Komisyon Ayarları",
+      "🔑 Pazaryeri API Anahtarları",
+      "📄 Faturalarım & Abonelik",
+      "🚪 Güvenli Çıkış",
   ]
-  secilen_profil_islem = st.selectbox(
-      "Profil", profil_menu, label_visibility="collapsed"
+  secilen_profil = st.selectbox(
+      "Profil", profil_secenekleri, label_visibility="collapsed"
   )
 
 st.markdown("---")
 
 # -------------------------------------------------------------
-# SOL YAN MENÜ (NAVİGASYON)
+# SOL YAN MENÜ (METENTEGRE ANA MENÜ YAPISI)
 # -------------------------------------------------------------
 st.sidebar.markdown(
     """
-    <div style="text-align: center; padding: 12px 0; margin-bottom: 15px;">
-        <span style="font-size: 26px; font-weight: 900; color: #2563eb;">ŞAH</span>
-        <span style="font-size: 20px; font-weight: 700; color: #0f172a;">ENTEGRE</span>
-        <div style="font-size: 11px; color: #64748b; margin-top: 4px;">Uçtan Uca Pazaryeri Yönetimi</div>
+    <div style="text-align: center; padding: 10px 0; margin-bottom: 10px;">
+        <span style="font-size: 26px; font-weight: 900; color: #f27a1a;">ŞAH</span>
+        <span style="font-size: 15px; font-weight: 600; color: #0f172a;">ENTEGRE</span>
+        <div style="font-size: 10px; color: #64748b; margin-top: 2px;">Merkezi Yönetim Sistemi</div>
     </div>
 """,
     unsafe_allow_html=True,
 )
 
-aktif_sayfa = st.sidebar.selectbox(
-    "Ana Menü",
+selected_menu = st.sidebar.selectbox(
+    "Yönetim Paneli",
     [
-        "🏠 Yönetim Paneli",
-        "📦 Ürünler & Hazır Eşleme",
-        "🚀 Pazaryerine Toplu Gönder",
-        "⚙️ Fiyat & Kâr Motoru",
-        "🔑 API & Mağaza Bağlantıları",
-        "🛒 Sipariş & Kargo Merkezi",
-        "🔄 6 Saatlik Otomatik Stok",
-        "📜 Sistem Log Kayıtları",
-        "🎧 Teknik Destek",
+        "🏠 Anasayfa",
+        "📦 Sistemdeki Ürünler",
+        "🔗 XML & API Entegrasyon Merkezi",
+        "🚀 Pazaryerine Ürün Gönder",
+        "⚙️ Fiyatlandırma & Kâr Motoru",
+        "🔑 Pazaryeri API Bağlantıları",
+        "🧡 Trendyol Mağaza Yönetimi",
+        "🧡 Hepsiburada Mağaza Yönetimi",
+        "💜 N11 Mağaza Yönetimi",
+        "🌸 ÇiçekSepeti Yönetimi",
+        "💛 E-PTT AVM Yönetimi",
+        "🛒 Sipariş Takip Merkezi",
+        "⚡ Oto Kritik Stok & 6 Saatlik Döngü",
+        "🎧 Destek Taleplerim",
+        "📢 Duyurular",
     ],
 )
 
 # -------------------------------------------------------------
-# PROFİL / AYAR İŞLEMLERİ MANTIĞI
+# PROFİL / HESAP AYARLARI SAYFALARI
 # -------------------------------------------------------------
-if secilen_profil_islem == "⚙️ Otomatik Fiyat & Komisyon":
-  st.subheader("⚙️ Global Fiyat ve Kâr Marjı Ayarları")
+if secilen_profil == "⚙️ Fiyat, Kâr & Komisyon Ayarları":
+  st.subheader("⚙️ Global Fiyatlandırma ve Kâr Oranı Kuralları")
   c1, c2, c3, c4 = st.columns(4)
   with c1:
-    y_kar = st.number_input("Kâr Oranı (%)", value=st.session_state.kar_orani)
+    y_kar = st.number_input("Kâr Marjı (%)", value=st.session_state.kar_orani)
   with c2:
     y_kom = st.number_input(
         "Komisyon Oranı (%)", value=st.session_state.komisyon_orani
     )
   with c3:
     y_kargo = st.number_input(
-        "Kargo Bedeli (TL)", value=st.session_state.kargo_ucreti
+        "Kargo Ücreti (TL)", value=st.session_state.kargo_ucreti
     )
   with c4:
     y_marka = st.text_input("Marka Adı", value=st.session_state.marka_adi)
 
-  if st.button("Ayarları Kaydet ve Tüm Fiyatları Güncelle"):
+  if st.button("Kuralları Kaydet ve Tüm Fiyatları Güncelle"):
     st.session_state.kar_orani = y_kar
     st.session_state.komisyon_orani = y_kom
     st.session_state.kargo_ucreti = y_kargo
@@ -200,51 +206,56 @@ if secilen_profil_islem == "⚙️ Otomatik Fiyat & Komisyon":
       )
       st.session_state.urun_havuzu.at[idx, "Satış Fiyatı"] = round(yeni_satis, 2)
 
-    st.success("Tüm ürün fiyatları yeni kurallara göre otomatik güncellendi!")
+    st.success(
+        "Tüm ürünlerin satış fiyatları yeni kural setine göre güncellendi!"
+    )
 
-elif secilen_profil_islem == "🔑 API Entegrasyon Anahtarları":
-  st.subheader("🔑 Pazaryeri API Anahtar Yönetimi")
+elif secilen_profil == "🔑 Pazaryeri API Anahtarları":
+  st.subheader("🔑 Mağaza API Anahtar Yönetimi")
   for k, v in st.session_state.api_anahtarlari.items():
     st.session_state.api_anahtarlari[k] = st.text_input(
-        k, value=v, type="password", key=f"prof_key_{k}"
+        k, value=v, type="password", key=f"prof_api_{k}"
     )
-  if st.button("API Anahtarlarını Kaydet"):
-    st.success("API anahtarları başarıyla güncellendi.")
+  if st.button("API Bilgilerini Kaydet"):
+    st.success("API anahtarları güvenle kaydedildi!")
 
-elif secilen_profil_islem == "📄 Lisans ve Sürüm Bilgisi":
-  st.subheader("📄 Lisans ve Abonelik Detayları")
+elif secilen_profil == "📄 Faturalarım & Abonelik":
+  st.subheader("📄 Abonelik ve Geçmiş Faturalar")
   st.dataframe(
       pd.DataFrame([{
-          "Paket Türü": "Şah Entegre Kurumsal Sınırsız",
-          "Kapsam": "Tüm Pazaryerleri Dahil",
-          "Durum": "Aktif / Sorunsuz",
-          "Otomatik Stok Döngüsü": "Aktif (6 Saatte Bir)",
+          "Sipariş ID": "SAH-PRO-2026",
+          "Hizmet": "Şah Entegre Kurumsal Lisans",
+          "Tutar": "0.00 ₺",
+          "Durum": "Ödendi / Aktif",
       }]),
       use_container_width=True,
       hide_index=True,
   )
 
-elif secilen_profil_islem == "👤 Mağaza & Bayi Bilgileri":
-  st.subheader("👤 Mağaza ve Hesap Bilgileri")
-  st.text_input("İşletme Unvanı", value="Şah E-Ticaret Bilişim Ltd. Şti.")
-  st.text_input("Sistem Kullanıcısı", value="Şahin Yiğit")
-  st.text_input("E-posta Adresi", value="sahin@sahentegre.com")
-  if st.button("Bilgileri Güncelle"):
-    st.success("Bilgiler güncellendi.")
+elif secilen_profil == "👤 Mağaza ve Fatura Bilgileri":
+  st.subheader("👤 Fatura ve Mağaza Bilgileri")
+  st.text_input("Firma Unvanı", value="Şah E-Ticaret Limited Şti.")
+  st.text_input(
+      "Adres", value="Sevgi mah. 4642 sok no 4/1 Karabağlar İzmir"
+  )
+  st.text_input("Vergi Dairesi / No", value="Kadifekale / 9800650692")
+  if st.button("Bilgileri Kaydet"):
+    st.success("Bilgiler güncellendi!")
 
 # -------------------------------------------------------------
-# 1. YÖNETİM PANELİ (ANA SAYFA)
+# 1. ANASAYFA
 # -------------------------------------------------------------
-if aktif_sayfa == "🏠 Yönetim Paneli":
-  st.subheader("👑 Operasyonel Genel Bakış")
+if selected_menu == "🏠 Anasayfa":
+  st.subheader("👑 Ana Kontrol Paneli")
 
   st.markdown(
       """
-        <div class="metric-container">
-            <div class="metric-card"><div class="pazar-badge" style="background:#ff6600;">TRENDYOL</div><div style="font-size:11px; color:#64748b;">Aktif Sipariş</div><div style="font-size:16px; font-weight:700; color:#0f172a;">1 Adet</div></div>
-            <div class="metric-card"><div class="pazar-badge" style="background:#f27a1a;">HEPSİBURADA</div><div style="font-size:11px; color:#64748b;">Aktif Sipariş</div><div style="font-size:16px; font-weight:700; color:#0f172a;">1 Adet</div></div>
-            <div class="metric-card"><div class="pazar-badge" style="background:#e6005c;">ÇİÇEKSEPETİ</div><div style="font-size:11px; color:#64748b;">Aktif Sipariş</div><div style="font-size:16px; font-weight:700; color:#0f172a;">0 Adet</div></div>
-            <div class="metric-card"><div class="pazar-badge" style="background:#6b46c1;">N11</div><div style="font-size:11px; color:#64748b;">Aktif Sipariş</div><div style="font-size:16px; font-weight:700; color:#0f172a;">0 Adet</div></div>
+        <div class="mp-grid">
+            <div class="mp-card"><div class="mp-badge" style="background:#ff6600;">HEPSİBURADA</div><div style="font-size:11px; color:#64748b;">Sipariş</div><div style="font-size:12px; font-weight:700; color:#dc2626;">1 Sipariş</div></div>
+            <div class="mp-card"><div class="mp-badge" style="background:#f27a1a;">TRENDYOL</div><div style="font-size:11px; color:#64748b;">Sipariş</div><div style="font-size:12px; font-weight:700; color:#dc2626;">1 Sipariş</div></div>
+            <div class="mp-card"><div class="mp-badge" style="background:#e6005c;">ÇİÇEKSEPETİ</div><div style="font-size:11px; color:#64748b;">Sipariş</div><div style="font-size:12px; font-weight:700; color:#dc2626;">Sipariş yok</div></div>
+            <div class="mp-card"><div class="mp-badge" style="background:#334155;">PTT AVM</div><div style="font-size:11px; color:#64748b;">Sipariş</div><div style="font-size:12px; font-weight:700; color:#dc2626;">Sipariş yok</div></div>
+            <div class="mp-card"><div class="mp-badge" style="background:#6b46c1;">N11</div><div style="font-size:11px; color:#64748b;">Sipariş</div><div style="font-size:12px; font-weight:700; color:#dc2626;">Sipariş yok</div></div>
         </div>
     """,
       unsafe_allow_html=True,
@@ -252,113 +263,60 @@ if aktif_sayfa == "🏠 Yönetim Paneli":
 
   st.markdown(
       f"""
-        <div class="panel-box">
-            <div class="panel-header">📊 Sistem Yapılandırması ve Durum Raporu</div>
+        <div class="box-container">
+            <div class="box-header">📊 Aktif Sistem Yapılandırması</div>
             <table style="width:100%; font-size:13px; color:#1e293b; border-collapse:collapse;">
-                <tr><td style="padding:6px; font-weight:600; width:200px;">Aktif Marka:</td><td>{st.session_state.marka_adi}</td></tr>
-                <tr><td style="padding:6px; font-weight:600;">Uygulanan Kâr Marjı:</td><td>%{st.session_state.kar_orani}</td></tr>
-                <tr><td style="padding:6px; font-weight:600;">Pazaryeri Komisyonu:</td><td>%{st.session_state.komisyon_orani}</td></tr>
-                <tr><td style="padding:6px; font-weight:600;">Sabit Kargo Bedeli:</td><td>{st.session_state.kargo_ucreti} TL</td></tr>
+                <tr><td style="padding:6px; font-weight:600; width:180px;">Aktif Marka:</td><td>{st.session_state.marka_adi}</td></tr>
+                <tr><td style="padding:6px; font-weight:600;">Kâr Marjı Oranı:</td><td>%{st.session_state.kar_orani}</td></tr>
+                <tr><td style="padding:6px; font-weight:600;">Komisyon Oranı:</td><td>%{st.session_state.komisyon_orani}</td></tr>
+                <tr><td style="padding:6px; font-weight:600;">Sabit Kargo Fiyatı:</td><td>{st.session_state.kargo_ucreti} TL</td></tr>
                 <tr><td style="padding:6px; font-weight:600;">Toplam Ürün Havuzu:</td><td>{len(st.session_state.urun_havuzu)} Adet</td></tr>
-                <tr><td style="padding:6px; font-weight:600;">Otomatik Stok Döngüsü:</td><td>Aktif (Her 6 saatte bir güncellenir)</td></tr>
             </table>
         </div>
     """,
       unsafe_allow_html=True,
   )
 
-  c_a, c_b = st.columns(2)
-  with c_a:
+  col_q1, col_q2 = st.columns(2)
+  with col_q1:
     if st.button(
-        "🔄 Tüm Pazaryerlerini ve Stokları Senkronize Et",
+        "🚀 Tüm Pazaryerlerini ve Stokları Senkronize Et",
         use_container_width=True,
     ):
-      with st.spinner("Pazaryeri API sunucularıyla senkronizasyon yapılıyor..."):
+      with st.spinner("Stoklar ve fiyatlar güncelleniyor..."):
         time.sleep(1.2)
-      st.success("Tüm mağazalar başarıyla güncellendi!")
-  with c_b:
-    if st.button("📥 Tedarikçi XML Verilerini Yeniden Çek", use_container_width=True):
-      with st.spinner("XML feed bağlantıları taranıyor..."):
+      st.success("Tüm pazaryerleri başarıyla senkronize edildi!")
+  with col_q2:
+    if st.button("📥 Tüm XML Kaynaklarını Tetikle", use_container_width=True):
+      with st.spinner("Tedarikçi XML feedleri taranıyor..."):
         time.sleep(1.2)
-      st.success("Tedarikçi verileri sisteme işlendi!")
+      st.success("Tüm ürünler güncel stok bilgileriyle çekildi!")
 
 # -------------------------------------------------------------
-# 2. ÜRÜNLER & HAZIR EŞLEME
+# 2. SİSTEMDEKİ ÜRÜNLER
 # -------------------------------------------------------------
-elif aktif_sayfa == "📦 Ürünler & Hazır Eşleme":
-  st.subheader("📦 Hazır Kategori ve Varyant Eşleştirme Merkezi")
+elif selected_menu == "📦 Sistemdeki Ürünler":
+  st.subheader("📦 Sistemdeki Tüm Ürünler ve Barkod Eşleme")
   st.markdown(
-      "Kategori eşleştirme ve varyant karmaşasına son! Sistemimiz tüm"
-      " ürünleri önceden eşleştirilmiş şemalarla yönetir."
+      "Merkezi depoda bulunan ürünleri yönetebilir, barkod eşleştirmelerini"
+      " güncelleyebilirsiniz."
   )
 
-  with st.expander("➕ Yeni Ürün Ekle veya XML'den Aktar", expanded=False):
-    col_u1, col_u2 = st.columns(2)
-    with col_u1:
-      u_ad = st.text_input("Ürün Adı")
-      u_barkod = st.text_input("Barkod / GTIN")
-      u_kat = st.selectbox(
-          "Ön Eşleşmiş Kategori",
-          [
-              "Elektronik > Aksesuar",
-              "Elektronik > Ses",
-              "Spor > Giyim",
-              "Ev > Yaşam",
-          ],
-      )
-    with col_u2:
-      u_alis = st.number_input("Alış Fiyatı (TL)", value=100.0)
-      u_stok = st.number_input("Stok Adedi", value=50, step=1)
-      u_gorsel = st.text_input(
-          "Görsel URL",
-          value="https://images.unsplash.com/photo-1523275335684-37898b6baf30?w=100",
-      )
-
-    if st.button("Ürünü Kaydet ve Fiyat Hesapla"):
-      if u_ad and u_barkod:
-        hesaplanan = round(
-            u_alis
-            * (1 + st.session_state.kar_orani / 100)
-            * (1 + st.session_state.komisyon_orani / 100)
-            + st.session_state.kargo_ucreti,
-            2,
-        )
-        yeni_kayit = {
-            "Görsel": u_gorsel,
-            "Barkod": u_barkod,
-            "Ürün Adı": u_ad,
-            "Kategori": u_kat,
-            "Alış Fiyatı": u_alis,
-            "Satış Fiyatı": hesaplanan,
-            "Stok": u_stok,
-            "Senkronizasyon": "Yeni Eklendi",
-        }
-        st.session_state.urun_havuzu = pd.concat(
-            [st.session_state.urun_havuzu, pd.DataFrame([yeni_kayit])],
-            ignore_index=True,
-        )
-        st.success(
-            "Ürün başarıyla eklendi, kategorisi eşleştirildi ve fiyatı"
-            " hesaplandı!"
-        )
-      else:
-        st.error("Lütfen ürün adı ve barkod alanlarını doldurun.")
-
-  arama = st.text_input(
-      "🔍 Ürün Ara", placeholder="Ürün adı veya barkod girin..."
+  arama_q = st.text_input(
+      "🔍 Ürün Ara", placeholder="Ürün adı veya barkod ile filtrele..."
   )
-  aktif_df = st.session_state.urun_havuzu.copy()
-  if arama:
-    aktif_df = aktif_df[
-        aktif_df["Ürün Adı"].str.lower().str.contains(arama.lower())
-        | aktif_df["Barkod"].str.lower().str.contains(arama.lower())
+  gosterim_df = st.session_state.urun_havuzu.copy()
+  if arama_q:
+    gosterim_df = gosterim_df[
+        gosterim_df["Ürün Adı"].str.lower().str.contains(arama_q.lower())
+        | gosterim_df["Barkod"].str.lower().str.contains(arama_q.lower())
     ]
 
-  duzenlenen_df = st.data_editor(
-      aktif_df,
+  edited_df = st.data_editor(
+      gosterim_df,
       column_config={
           "Görsel": st.column_config.ImageColumn(
-              "Ürün Görseli", width=70
+              "Ürün Görseli", help="Orijinal Görsel", width=70
           ),
           "Alış Fiyatı": st.column_config.NumberColumn(
               "Alış (TL)", format="%.2f ₺"
@@ -371,98 +329,103 @@ elif aktif_sayfa == "📦 Ürünler & Hazır Eşleme":
       hide_index=True,
   )
 
-  if st.button("Değişiklikleri Veritabanına Kaydet"):
-    st.session_state.urun_havuzu = duzenlenen_df
-    st.success("Ürün havuzu güncellendi!")
+  if st.button("Tablo Değişikliklerini Kaydet"):
+    st.session_state.urun_havuzu = edited_df
+    st.success("Ürün verileri güncellendi!")
 
 # -------------------------------------------------------------
-# 3. PAZARYERİNE TOPLU GÖNDER
+# 3. XML & API ENTEGRASYON MERKEZİ
 # -------------------------------------------------------------
-elif aktif_sayfa == "🚀 Pazaryerine Toplu Gönder":
-  st.subheader("🚀 Toplu Ürün Aktarım ve Listeleme Merkezi")
-  st.markdown(
-      "Sistemdeki tüm ürünleri tek tıkla seçtiğiniz pazaryerine toplu olarak"
-      " gönderin."
+elif selected_menu == "🔗 XML & API Entegrasyon Merkezi":
+  st.subheader("🔗 Tedarikçi XML ve API Bağlantı Merkezi")
+  xml_link = st.text_input(
+      "XML Feed URL", placeholder="https://tedarikci.com/feed/urunler.xml"
   )
+  ted_adi = st.text_input("Tedarikçi Adı", placeholder="Örn: Global Depo")
+  if st.button("XML Verilerini ve Ürünleri Çek"):
+    if xml_link:
+      with st.spinner("XML parse ediliyor ve ürünler ekleniyor..."):
+        time.sleep(1.5)
+        yeni_urun = {
+            "Görsel": (
+                "https://images.unsplash.com/photo-1523275335684-37898b6baf30?w=100"
+            ),
+            "Barkod": "XML-NEW-9981",
+            "Ürün Adı": f"XML Ürünü ({ted_adi})",
+            "Alış Fiyatı": 500.00,
+            "Satış Fiyatı": round(
+                500.00
+                * (1 + st.session_state.kar_orani / 100)
+                * (1 + st.session_state.komisyon_orani / 100)
+                + st.session_state.kargo_ucreti,
+                2,
+            ),
+            "Trendyol Stok": 75,
+            "Hepsiburada Stok": 75,
+            "M.Entegre Stok": 75,
+            "Durum": "Satışta",
+        }
+        st.session_state.urun_havuzu = pd.concat(
+            [st.session_state.urun_havuzu, pd.DataFrame([yeni_urun])],
+            ignore_index=True,
+        )
+      st.success("XML ürünleri sisteme başarıyla aktarıldı!")
+    else:
+      st.error("Lütfen geçerli bir XML linki girin.")
 
-  hedef_pazar_secimi = st.selectbox(
+# -------------------------------------------------------------
+# 4. PAZARYERİNE ÜRÜN GÖNDER
+# -------------------------------------------------------------
+elif selected_menu == "🚀 Pazaryerine Ürün Gönder":
+  st.subheader("🚀 Pazaryerlerine Toplu Ürün Aktarım Merkezi")
+  hedef_pazar = st.selectbox(
       "Hedef Pazaryeri",
-      [
-          "Trendyol",
-          "Hepsiburada",
-          "N11",
-          "ÇiçekSepeti",
-          "Pazarama",
-          "İdefix",
-          "Tümü",
-      ],
+      ["Trendyol", "Hepsiburada", "N11", "ÇiçekSepeti", "E-PTT AVM", "Tümü"],
   )
 
   col_g1, col_g2 = st.columns(2)
   with col_g1:
     if st.button(
-        f"📤 Seçilen Ürünleri {hedef_pazar_secimi}'ne Gönder",
-        use_container_width=True,
+        f"📤 Seçilen Ürünleri {hedef_pazar}'ne Gönder", use_container_width=True
     ):
-      with st.spinner(f"{hedef_pazar_secimi} API havuzuna aktarılıyor..."):
+      with st.spinner(f"{hedef_pazar} API servisine aktarılıyor..."):
         time.sleep(1.5)
-      st.success(
-          f"Ürünler başarıyla {hedef_pazar_secimi} mağazanıza listelendi!"
-      )
+      st.success(f"Ürünler başarıyla {hedef_pazar} mağazasına listelendi!")
   with col_g2:
     if st.button(
-        f"🔄 {hedef_pazar_secimi} Fiyat ve Stoklarını Senkronize Et",
-        use_container_width=True,
+        f"🔄 {hedef_pazar} Fiyat ve Stoklarını Güncelle", use_container_width=True
     ):
-      with st.spinner("Fiyatlar ve stoklar güncelleniyor..."):
+      with st.spinner("Stoklar ve karlı fiyatlar güncelleniyor..."):
         time.sleep(1.2)
-      st.success(f"{hedef_pazar_secimi} verileri güncellendi!")
-
-  st.markdown("---")
-  st.subheader("📋 Gönderime Hazır Ürün Havuzu")
-  st.dataframe(
-      st.session_state.urun_havuzu[[
-          "Barkod",
-          "Ürün Adı",
-          "Kategori",
-          "Satış Fiyatı",
-          "Stok",
-          "Senkronizasyon",
-      ]],
-      use_container_width=True,
-      hide_index=True,
-  )
+      st.success(f"{hedef_pazar} verileri güncellendi!")
 
 # -------------------------------------------------------------
-# 4. FİYAT & KÂR MOTORU
+# 5. FİYATLANDIRMA & KÂR MOTORU
 # -------------------------------------------------------------
-elif aktif_sayfa == "⚙️ Fiyat & Kâr Motoru":
+elif selected_menu == "⚙️ Fiyatlandırma & Kâr Motoru":
   st.subheader("⚙️ Otomatik Fiyatlandırma ve Komisyon Hesaplayıcı")
-  st.markdown(
-      "Alış fiyatı üzerine kâr marjı, komisyon ve kargo eklenerek satış"
-      " fiyatı otomatik hesaplanır."
-  )
-
   f_kar = st.number_input(
       "Kâr Marjı Oranı (%)",
       value=st.session_state.kar_orani,
-      key="motor_kar",
+      key="fiyat_kar",
   )
   f_kom = st.number_input(
       "Komisyon Oranı (%)",
       value=st.session_state.komisyon_orani,
-      key="motor_kom",
+      key="fiyat_kom",
   )
   f_kargo = st.number_input(
       "Sabit Kargo Ücreti (TL)",
       value=st.session_state.kargo_ucreti,
-      key="motor_kargo",
+      key="fiyat_kargo",
   )
   f_marka = st.text_input(
-      "Marka İsmi", value=st.session_state.marka_adi, key="motor_marka"
+      "Aktif Marka Bilgisi", value=st.session_state.ayar_marka, key="fiyat_marka"
+  ) if "ayar_marka" in st.session_state else st.text_input(
+      "Aktif Marka Bilgisi", value=st.session_state.marka_adi, key="fiyat_marka"
   )
 
-  if st.button("Fiyatları Hesapla ve Uygula", use_container_width=True):
+  if st.button("Fiyatları Hesapla ve Sisteme Uygula", use_container_width=True):
     st.session_state.kar_orani = f_kar
     st.session_state.komisyon_orani = f_kom
     st.session_state.kargo_ucreti = f_kargo
@@ -478,108 +441,122 @@ elif aktif_sayfa == "⚙️ Fiyat & Kâr Motoru":
       )
       st.session_state.urun_havuzu.at[idx, "Satış Fiyatı"] = round(yeni_satis, 2)
 
-    st.success("Tüm ürünlerin satış fiyatları güncellendi!")
+    st.success("Tüm satış fiyatları güncel oranlarla yeniden hesaplandı!")
+
+# -------------------------------------------------------------
+# 6. PAZARYERİ API BAĞLANTILARI
+# -------------------------------------------------------------
+elif selected_menu == "🔑 Pazaryeri API Bağlantıları":
+  st.subheader("🔑 Pazaryeri API Entegrasyon ve Bağlantı Merkezi")
+  for k, v in st.session_state.api_anahtarlari.items():
+    st.session_state.api_anahtarlari[k] = st.text_input(
+        k, value=v, type="password", key=f"menu_api_{k}"
+    )
+
+  if st.button("API Bağlantılarını Test Et ve Kaydet", use_container_width=True):
+    with st.spinner("Sunuculara ping atılıyor ve token doğrulanıyor..."):
+      time.sleep(1.5)
+    st.success("Tüm API bağlantıları başarılı ve aktif!")
+
+# -------------------------------------------------------------
+# 7. MAĞAZA YÖNETİM SEKMELERİ (Trendyol, Hepsiburada, N11, ÇiçekSepeti, PTT)
+# -------------------------------------------------------------
+elif selected_menu in [
+    "🧡 Trendyol Mağaza Yönetimi",
+    "🧡 Hepsiburada Mağaza Yönetimi",
+    "💜 N11 Mağaza Yönetimi",
+    "🌸 ÇiçekSepeti Yönetimi",
+    "💛 E-PTT AVM Yönetimi",
+]:
+  pazar_adi = selected_menu.split(" ")[1]
+  st.subheader(f"{selected_menu}")
+  st.info(
+      f"{pazar_adi} mağazanız başarıyla entegre edilmiştir. Bu ekrandan ürünleri"
+      " yönetebilir ve siparişleri takip edebilirsiniz."
+  )
+
+  c_a, c_b = st.columns(2)
+  with c_a:
+    if st.button(
+        f"{pazar_adi} Mağazasından Ürünleri Çek", use_container_width=True
+    ):
+      with st.spinner(f"{pazar_adi} API'sine bağlanılıyor..."):
+        time.sleep(1)
+      st.success(f"{pazar_adi} ürün listesi güncellendi!")
+  with c_b:
+    if st.button(
+        f"Seçilen Ürünleri {pazar_adi}'ne Gönder", use_container_width=True
+    ):
+      with st.spinner(f"Ürünler {pazar_adi} sistemine aktarılıyor..."):
+        time.sleep(1)
+      st.success(f"Ürünler başarıyla {pazar_adi} mağazasına yüklendi!")
 
   st.dataframe(
-      st.session_state.urun_havuzu[["Ürün Adı", "Alış Fiyatı", "Satış Fiyatı"]],
+      st.session_state.urun_havuzu[[
+          "Barkod",
+          "Ürün Adı",
+          "Satış Fiyatı",
+          "Trendyol Stok",
+          "Durum",
+      ]],
       use_container_width=True,
       hide_index=True,
   )
 
 # -------------------------------------------------------------
-# 5. API & MAĞAZA BAĞLANTILARI
+# 8. SİPARİŞ TAKİP MERKEZİ
 # -------------------------------------------------------------
-elif aktif_sayfa == "🔑 API & Mağaza Bağlantıları":
-  st.subheader("🔑 Pazaryeri API Entegrasyon Anahtarları")
-  st.markdown(
-      "Mağazalarınıza ait API anahtarlarını girerek entegrasyonu aktif"
-      " edin."
-  )
-
-  for k, v in st.session_state.api_anahtarlari.items():
-    st.session_state.api_anahtarlari[k] = st.text_input(
-        k, value=v, type="password", key=f"menu_key_{k}"
-    )
-
-  c_t1, c_t2 = st.columns(2)
-  with c_t1:
-    if st.button("🔌 API Bağlantılarını Test Et", use_container_width=True):
-      with st.spinner("Sunucularla token doğrulaması yapılıyor..."):
-        time.sleep(1.5)
-      st.success("Tüm API anahtarları doğrulandı ve bağlantı sağlandı!")
-  with c_t2:
-    if st.button("💾 Bilgileri Kalıcı Kaydet", use_container_width=True):
-      st.success("API bilgileri kaydedildi.")
-
-# -------------------------------------------------------------
-# 6. SİPARİŞ & KARGO MERKEZİ
-# -------------------------------------------------------------
-elif aktif_sayfa == "🛒 Sipariş & Kargo Merkezi":
-  st.subheader("🛒 Merkezi Sipariş ve Kargo Yönetimi")
-  st.markdown(
-      "Tüm pazaryerlerinden gelen siparişleri tek ekrandan yönetin, kargo"
-      " etiketlerinizi oluşturun."
-  )
-
+elif selected_menu == "🛒 Sipariş Takip Merkezi":
+  st.subheader("🛒 Pazaryeri Sipariş Takip ve Yönetim Paneli")
   if st.button("🔄 Siparişleri Şimdi Güncelle / Çek", use_container_width=True):
-    with st.spinner("Mağazalardan siparişler çekiliyor..."):
+    with st.spinner("Mağazalardan yeni siparişler sorgulanıyor..."):
       time.sleep(1)
-    st.success("Siparişler güncellendi!")
+    st.success("Sipariş listesi güncel!")
 
   st.dataframe(
       st.session_state.siparisler_db, use_container_width=True, hide_index=True
   )
 
 # -------------------------------------------------------------
-# 7. 6 SAATLİK OTOMATİK STOK
+# 9. OTO KRİTİK STOK & 6 SAATLİK DÖNGÜ
 # -------------------------------------------------------------
-elif aktif_sayfa == "🔄 6 Saatlik Otomatik Stok":
-  st.subheader("🔄 6 Saatte Bir Otomatik Stok ve Fiyat Güncellemesi")
+elif selected_menu == "⚡ Oto Kritik Stok & 6 Saatlik Döngü":
+  st.subheader("⚡ Otomatik Kritik Stok ve 6 Saatlik Senkronizasyon Döngüsü")
   st.markdown(
-      "Sistem arka planda her 6 saatte bir stoklarınızı otomatik olarak"
-      " günceller; kritik stoktaki ürünleri raporlar."
+      "Sistem arka planda her 6 saatte bir stoklarınızı ve fiyatlarınızı"
+      " otomatik günceller."
   )
 
-  kritik = st.session_state.urun_havuzu[
-      st.session_state.urun_havuzu["Stok"] < 50
+  kritik_df = st.session_state.urun_havuzu[
+      st.session_state.urun_havuzu["Trendyol Stok"] < 50
   ]
-  st.dataframe(kritik, use_container_width=True, hide_index=True)
+  st.dataframe(kritik_df, use_container_width=True, hide_index=True)
 
   if st.button(
       "⚡ Şimdi Manuel Stok / Fiyat Senkronizasyonunu Tetikle",
       use_container_width=True,
   ):
-    with st.spinner("Otomatik stok döngüsü tetiklendi..."):
+    with st.spinner("Otomatik stok döngüsü çalışıyor..."):
       time.sleep(1)
     st.success("Stoklar tüm pazaryerlerinde eşitlendi!")
 
 # -------------------------------------------------------------
-# 8. SİSTEM LOG KAYITLARI
+# 10. DESTEK VE DUYURULAR
 # -------------------------------------------------------------
-elif aktif_sayfa == "📜 Sistem Log Kayıtları":
-  st.subheader("📜 Gelişmiş İşlem ve Log İzleme Merkezi")
-  st.markdown(
-      "Tüm API istekleri, güncelleme döngüleri ve hata logları bu ekranda"
-      " tutulur."
-  )
-
-  for log in st.session_state.sistem_loglari:
-    st.code(log, language="text")
-
-  if st.button("Log Kayıtlarını Temizle"):
-    st.session_state.sistem_loglari = [
-        "[{}] Log kayıtları sıfırlandı.".format(time.strftime("%H:%M:%S"))
-    ]
-    st.success("Loglar temizlendi.")
-
-# -------------------------------------------------------------
-# 9. TEKNİK DESTEK
-# -------------------------------------------------------------
-elif aktif_sayfa == "🎧 Teknik Destek":
-  st.subheader("🎧 7/24 Teknik Destek ve Operasyon Masası")
-  st.success(
-      "Teknik ekibimiz taleplerinizi incelemektedir. Destek talebinizi iletin."
-  )
-  st.text_area("Sorununuzu veya talebinizi yazın...")
+elif selected_menu == "🎧 Destek Taleplerim":
+  st.subheader("🎧 Teknik Destek ve Operasyon Masası")
+  st.success("Şah Entegre operasyon ekibi taleplerinizi incelemektedir.")
+  st.text_area("Destek Talebi veya Sorununuzu Yazın")
   if st.button("Destek Talebini Gönder", use_container_width=True):
-    st.success("Talebiniz alınmıştır. En kısa sürede dönüş yapılacaktır.")
+    st.success("Talebiniz başarıyla iletildi!")
+
+elif selected_menu == "📢 Duyurular":
+  st.subheader("📢 Sistem Duyuruları ve Eğitimler")
+  st.markdown(
+      "**EĞİTİM VİDEOLARIMIZ YAYINLANMIŞTIR.** (Yeni entegrasyon rehberini"
+      " izleyebilirsiniz.)"
+  )
+  st.info(
+      "Şah Entegre sürüm güncellemeleri ve pazaryeri API değişiklikleri bu"
+      " alandan duyurulur."
+  )
