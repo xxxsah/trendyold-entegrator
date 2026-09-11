@@ -50,7 +50,7 @@ st.sidebar.markdown(
     <div style="text-align: center; padding: 10px 0; margin-bottom: 10px;">
         <span style="font-size: 32px; font-weight: 800; font-family: 'Georgia', serif; font-style: italic; color: #f27a1a;">Şah</span>
         <span style="font-size: 18px; font-weight: 600; letter-spacing: 1px; margin-left: 4px;">ENTEGRE</span>
-        <div style="font-size: 11px; color: #888; margin-top: 2px;">👑 Yapay Zeka Destekli v4.2</div>
+        <div style="font-size: 11px; color: #888; margin-top: 2px;">👑 Yapay Zeka Destekli v4.3</div>
     </div>
 """,
     unsafe_allow_html=True,
@@ -236,7 +236,7 @@ elif selected_menu == "👑 Şah Yapay Zeka Asistanı":
     with st.spinner("Yapay zeka verileri işliyor ve optimize ediyor..."):
       st.success(
           f"'{ai_secenek}' görevi başarıyla tamamlandı! Mağaza verileriniz"
-           " güncellendi."
+          " güncellendi."
       )
 
   st.markdown("---")
@@ -247,12 +247,13 @@ elif selected_menu == "👑 Şah Yapay Zeka Asistanı":
   )
   if st.button("Yapay Zekaya Danış"):
     if kullanici_sorusu:
-      st.info(
-          f"**Şah AI Yanıtı:** '{kullanici_sorusu' konusunu analiz ettim."
-          " Mağazanızdaki ana kategorilerde listeleme optimizasyonu yapılması"
-          " ve eksik barkodların otomatik eşleme modülü ile taranması"
-          " tavsiye edilir. Sistem sorunsuz çalışmaktadır."
+      yanit_metni = (
+          f"'{kullanici_sorusu}' konusunu analiz ettim. Mağazanızdaki ana"
+          " kategorilerde listeleme optimizasyonu yapılması ve eksik"
+          " barkodların otomatik eşleme modülü ile taranması tavsiye edilir."
+          " Sistem sorunsuz çalışmaktadır."
       )
+      st.info(f"**Şah AI Yanıtı:** {yanit_metni}")
     else:
       st.warning("Lütfen yapay zekaya sormak istediğiniz soruyu yazın.")
 
@@ -263,7 +264,9 @@ elif selected_menu == "API & Barkod Eşitleme":
   st.subheader("⚙️ API Bağlantıları ve Barkod Eşitleme Merkezi")
   st.text_input("Trendyol Supplier ID", value="985632", type="password")
   st.text_input(
-      "Trendyol API Key / Secret", value="*******************pi_key", type="password"
+      "Trendyol API Key / Secret",
+      value="*******************pi_key",
+      type="password",
   )
   if st.button("Trendyol API Bağlantısını Test Et"):
     st.success("Trendyol API bağlantısı başarılı! Mağaza verileri senkron.")
