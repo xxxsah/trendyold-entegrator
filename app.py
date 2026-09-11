@@ -152,8 +152,7 @@ elif selected_menu in [
       placeholder="Aramak istediğiniz ürünü yazıp Enter'a basın...",
   )
 
-  # Gerçekçi ve Orijinal Resimli Ürün Veri Seti (60 Bin Ürün Altyapısı)
-   katalog_veri = []
+  katalog_veri = []
   for i in range(1, 30):
     katalog_veri.append({
         "Orijinal Resim": (
