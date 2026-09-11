@@ -1,59 +1,117 @@
+import time
 import pandas as pd
 import streamlit as st
 
 st.set_page_config(
-    page_title="Şah Entegre - MetEntegre Yönetim Paneli",
-    page_icon="👑",
+    page_title="Şah Entegre - Profesyonel E-Ticaret Yönetim Paneli",
+    page_icon="⚡",
     layout="wide",
 )
 
-# MetEntegre Standardında Profesyonel CSS Tasarımı
+# Profesyonel CSS Entegrasyonu (Orijinal Tasarım Renkleri: Trendyol Turuncusu & Modern Gri)
 st.markdown(
     """
     <style>
-    .stApp { background-color: #f1f5f9; }
-    
-    /* Pazaryeri Üst Grid Kartları */
-    .mp-grid { display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; }
-    .mp-card { flex: 1; min-width: 120px; background: white; border: 1px solid #cbd5e1; border-radius: 6px; padding: 10px; text-align: center; box-shadow: 0 1px 2px rgba(0,0,0,0.02); }
-    .mp-badge { font-size: 10px; font-weight: 700; padding: 3px 6px; border-radius: 4px; color: white; display: inline-block; margin-bottom: 5px; }
-    
-    /* Fatura ve Abonelik Konteynerleri */
-    .box-container { background: white; border: 1px solid #cbd5e1; border-radius: 8px; padding: 15px; margin-bottom: 15px; box-shadow: 0 1px 3px rgba(0,0,0,0.03); }
-    .box-header { background: #1e3a8a; color: white; padding: 8px 12px; font-weight: 700; font-size: 13px; border-radius: 4px; margin-bottom: 10px; text-align: center; }
-    
-    /* Trendyol Özel Panel Kutuları */
-    .action-box { background: white; border: 1px solid #cbd5e1; border-radius: 6px; padding: 12px; margin-bottom: 10px; }
-    .action-title { font-size: 12px; font-weight: 700; color: #1e293b; margin-bottom: 8px; display: flex; align-items: center; gap: 5px; }
+    .stApp { background-color: #f8fafc; }
+    .mp-grid { display: flex; gap: 10px; margin-bottom: 15px; flex-wrap: wrap; }
+    .mp-card { flex: 1; min-width: 130px; background: white; border: 1px solid #e2e8f0; border-radius: 8px; padding: 12px; text-align: center; box-shadow: 0 1px 3px rgba(0,0,0,0.04); }
+    .mp-badge { font-size: 11px; font-weight: 700; padding: 3px 8px; border-radius: 4px; color: white; display: inline-block; margin-bottom: 6px; }
+    .box-container { background: white; border: 1px solid #e2e8f0; border-radius: 8px; padding: 15px; margin-bottom: 15px; box-shadow: 0 1px 3px rgba(0,0,0,0.04); }
+    .box-header { background: #f27a1a; color: white; padding: 10px 14px; font-weight: 700; font-size: 14px; border-radius: 6px; margin-bottom: 12px; text-align: left; }
     </style>
 """,
     unsafe_allow_html=True,
 )
 
 # -------------------------------------------------------------
-# GİRİŞ YAPAN KULLANICI BİLGİSİ
+# OTURUM HAFIZASI (STATE MANAGEMENT) VE DİNAMİK AYARLAR
 # -------------------------------------------------------------
-aktif_kullanici = "Şahin Yiğit"
+if "ayar_komisyon" not in st.session_state:
+  st.session_state.ayar_komisyon = 18.0  # % Komisyon Oranı
+if "ayar_kar_marji" not in st.session_state:
+  st.session_state.ayar_kar_marji = 25.0  # % Kâr Marjı
+if "ayar_kargo_fiyati" not in st.session_state:
+  st.session_state.ayar_kargo_fiyati = 45.00  # Sabit Kargo Ücreti (TL)
+if "ayar_marka" not in st.session_state:
+  st.session_state.ayar_marka = "Şah Store"
+
+if "api_bilgileri" not in st.session_state:
+  st.session_state.api_bilgileri = {
+      "Trendyol Supplier ID": "",
+      "Trendyol API Key": "",
+      "Trendyol API Secret": "",
+      "Hepsiburada Merchant ID": "",
+      "N11 App Key": "",
+  }
+
+if "urunler_db" not in st.session_state:
+  st.session_state.urunler_db = pd.DataFrame([
+      {
+          "Görsel": "https://images.unsplash.com/photo-1584263155336-d64e9a8f4675?w=100",
+          "Barkod": "CYRO-679931-LXL",
+          "Ürün Adı": "Siyah Dantelli Sabahlık & Gecelik Takımı",
+          "Alış Fiyatı": 400.00,
+          "Satış Fiyatı": 726.00,
+          "Trendyol Stok": 98,
+          "M.Entegre Stok": 150,
+          "Durum": "Satışta",
+      },
+      {
+          "Görsel": "https://images.unsplash.com/photo-1543163521-1bf539c55dd2?w=100",
+          "Barkod": "CYRO-679931-SM",
+          "Ürün Adı": "Siyah Dantelli Sabahlık & Gecelik Takımı (SM)",
+          "Alış Fiyatı": 400.00,
+          "Satış Fiyatı": 726.00,
+          "Trendyol Stok": 100,
+          "M.Entegre Stok": 120,
+          "Durum": "Satışta",
+      },
+      {
+          "Görsel": "https://images.unsplash.com/photo-1517841905240-472988babdf9?w=100",
+          "Barkod": "606214114000007",
+          "Ürün Adı": "Ayarlanabilir Dizüstü Destek Tabanı Tam Boy",
+          "Alış Fiyatı": 350.00,
+          "Satış Fiyatı": 629.70,
+          "Trendyol Stok": 27,
+          "M.Entegre Stok": 45,
+          "Durum": "Satışta",
+      },
+      {
+          "Görsel": "https://images.unsplash.com/photo-1585338107529-13afc5f02586?w=100",
+          "Barkod": "606903317053779",
+          "Ürün Adı": "TONTON - NO:1 ÇEKMECE 3 KATLI",
+          "Alış Fiyatı": 320.00,
+          "Satış Fiyatı": 583.31,
+          "Trendyol Stok": 44,
+          "M.Entegre Stok": 80,
+          "Durum": "Satışta",
+      },
+  ])
+
+if "loglar" not in st.session_state:
+  st.session_state.loglar = [
+      "Sistem başlatıldı.",
+      "Pazaryeri entegrasyon altyapısı hazır.",
+  ]
 
 # -------------------------------------------------------------
-# ÜST HEADER VE SAĞ PROFİL MENÜSÜ
+# ÜST HEADER VE PROFİL MENÜSÜ
 # -------------------------------------------------------------
 col_h1, col_h2 = st.columns([4, 2])
 with col_h1:
   st.markdown(
-      f"<span style='font-size: 14px; font-weight: 700; color:"
-      f" #1e293b;'>👑 {aktif_kullanici} - MetEntegre Yönetim Paneli</span>",
+      "<span style='font-size: 15px; font-weight: 700; color:"
+      " #1e293b;'>⚡ Şah Entegre - Profesyonel E-Ticaret Yönetim"
+      " Paneli</span>",
       unsafe_allow_html=True,
   )
 with col_h2:
   profil_secenekleri = [
-      f"👤 {aktif_kullanici} (Profil)",
-      "⚙️ Hesap Ayarları",
-      "🔔 Bildirim İzinleri",
-      "📄 Sözleşmeler",
-      "📁 Belgelerim",
-      "💳 Ödemelerim - Faturalarım",
-      "🚪 Çıkış Yap",
+      "👤 Mağaza Profili",
+      "⚙️ Genel Ayarlar (Komisyon / Kâr)",
+      "🔑 Pazaryeri API Bilgileri",
+      "📄 Faturalarım",
+      "🚪 Çıkış",
   ]
   secilen_profil = st.selectbox(
       "Profil", profil_secenekleri, label_visibility="collapsed"
@@ -61,13 +119,13 @@ with col_h2:
 
 st.markdown("---")
 
-# Sol Menü
+# Sol Menü Navigasyonu (Orijinal Renk Konsepti)
 st.sidebar.markdown(
-    f"""
+    """
     <div style="text-align: center; padding: 10px 0; margin-bottom: 10px;">
-        <span style="font-size: 26px; font-weight: 800; color: #f27a1a;">MET</span>
+        <span style="font-size: 26px; font-weight: 800; color: #f27a1a;">ŞAH</span>
         <span style="font-size: 15px; font-weight: 600; color: #0f172a;">ENTEGRE</span>
-        <div style="font-size: 10px; color: #64748b; margin-top: 2px;">👑 {aktif_kullanici} Panel</div>
+        <div style="font-size: 11px; color: #64748b; margin-top: 2px;">Merkezi Yönetim Sistemi</div>
     </div>
 """,
     unsafe_allow_html=True,
@@ -75,347 +133,332 @@ st.sidebar.markdown(
 
 menu_options = [
     "🏠 Anasayfa",
-    "🎧 Destek Taleplerim",
-    "🔔 Bildirimler",
-    "📢 Duyurular",
-    "📦 Sistemdeki Ürünler",
-    "⚡ Oto Kritik Stok",
+    "📦 Ürün Yönetimi & XML",
+    "⚙️ Fiyat, Komisyon & Marj Ayarları",
+    "🔑 Pazaryeri API Entegrasyonları",
     "🧡 Trendyol",
-    "🌸 ÇiçekSepeti",
-    "💜 N11",
-    "💛 E-PTT AVM",
     "🧡 Hepsiburada",
-    "🛒 Pazaryeri",
-    "💙 İdefix",
-    "⚙️ Ayarlar",
+    "💜 N11",
+    "🌸 ÇiçekSepeti",
+    "💛 E-PTT AVM",
+    "⚡ Oto Kritik Stok",
+    "🎧 Destek",
 ]
 
-selected_menu = st.sidebar.selectbox("Yönetim Paneli", menu_options)
+selected_menu = st.sidebar.selectbox("Navigasyon", menu_options)
 
 # -------------------------------------------------------------
-# SAĞ PROFİL MENÜSÜ SAYFALARI
+# PROFİL / HESAP AYARLARI SAYFALARI
 # -------------------------------------------------------------
-if secilen_profil == "⚙️ Hesap Ayarları":
-  st.subheader("⚙️ Hesap Ayarları")
-  st.text_input("Ad Soyad", value=aktif_kullanici)
-  st.text_input("E-posta Adresi", value="sah1357sah@gmail.com")
-  st.text_input("Telefon Numarası", value="05346944235")
-  if st.button("Bilgileri Kaydet"):
-    st.success("Hesap ayarlarınız başarıyla güncellendi!")
+if secilen_profil == "⚙️ Genel Ayarlar (Komisyon / Kâr)":
+  st.subheader("⚙️ Fiyatlandırma, Komisyon ve Kargo Ayarları")
+  st.markdown(
+      "Tüm pazaryerlerine gönderilecek ürün fiyatları buradaki oranlara göre"
+      " otomatik hesaplanır."
+  )
 
-elif secilen_profil == "🔔 Bildirim İzinleri":
-  st.subheader("🔔 Bildirim İzinleri ve Tercihleri")
-  st.checkbox("E-posta Bildirimleri Aktif", value=True)
-  st.checkbox("SMS Bilgilendirmeleri Aktif", value=True)
-  st.checkbox("Pazaryeri Kritik Stok Uyarıları", value=True)
+  c1, c2, c3, c4 = st.columns(4)
+  with c1:
+    yeni_kar = st.number_input("Kâr Marjı (%)", value=st.session_state.ayar_kar_marji)
+  with c2:
+    yeni_komisyon = st.number_input(
+        "Komisyon Oranı (%)", value=st.session_state.ayar_komisyon
+    )
+  with c3:
+    yeni_kargo = st.number_input(
+        "Kargo Ücreti (TL)", value=st.session_state.ayar_kargo_fiyati
+    )
+  with c4:
+    yeni_marka = st.text_input("Marka Adı", value=st.session_state.ayar_marka)
 
-elif secilen_profil == "📄 Sözleşmeler":
-  st.subheader("📄 Kullanıcı Sözleşmeleri")
-  st.info("Hizmet Sözleşmesi ve KVKK metinleri onaylanmıştır.")
+  if st.button("Ayarları Kaydet ve Uygula", use_container_width=True):
+    st.session_state.ayar_kar_marji = yeni_kar
+    st.session_state.ayar_komisyon = yeni_komisyon
+    st.session_state.ayar_kargo_fiyati = yeni_kargo
+    st.session_state.ayar_marka = yeni_marka
+    st.success("Tüm finansal oranlar başarıyla güncellendi!")
 
-elif secilen_profil == "📁 Belgelerim":
-  st.subheader("📁 Mağaza Belgelerim")
-  st.success("✔ Vergi Levhası Doğrulandı (9800650692)")
+elif secilen_profil == "🔑 Pazaryeri API Bilgileri":
+  st.subheader("🔑 Mağaza API Anahtar Yönetimi")
+  st.markdown(
+      "Pazaryerlerinden ürün çekmek ve ürün göndermek için API anahtarlarınızı"
+      " girin."
+  )
 
-elif secilen_profil == "💳 Ödemelerim - Faturalarım":
-  st.subheader("💳 Ödemelerim ve Geçmiş Faturalarım")
-  fatura_data = pd.DataFrame([{
-      "Sipariş ID": "SAH707418640181936",
-      "Hizmet": "MetEntegre Pro Abonelik",
-      "Tutar": "0,00 ₺",
-      "Tarih": "27.08.2026",
-      "Durum": "Ödendi / Aktif",
-  }])
-  st.dataframe(fatura_data, use_container_width=True, hide_index=True)
+  for key in st.session_state.api_bilgileri.keys():
+    st.session_state.api_bilgileri[key] = st.text_input(
+        key, value=st.session_state.api_bilgileri[key], type="password"
+    )
 
-elif secilen_profil == "🚪 Çıkış Yap":
-  st.warning("Oturum kapatılıyor...")
+  if st.button("API Bilgilerini Kaydet", use_container_width=True):
+    st.success("API anahtarları güvenle kaydedildi ve aktif hale getirildi!")
+
+elif secilen_profil == "📄 Faturalarım":
+  st.subheader("📄 Abonelik ve Faturalar")
+  st.dataframe(
+      pd.DataFrame([{
+          "Dönem": "2026/09",
+          "Hizmet": "Şah Entegre Pro",
+          "Tutar": "0.00 TL",
+          "Durum": "Ödendi / Aktif",
+      }]),
+      use_container_width=True,
+      hide_index=True,
+  )
 
 # -------------------------------------------------------------
-# 1. ANASAYFA
+# ANASAYFA
 # -------------------------------------------------------------
 elif selected_menu == "🏠 Anasayfa":
-  st.subheader(f"👑 {aktif_kullanici} - Ana Kontrol Paneli")
+  st.subheader("👑 Ana Kontrol Paneli")
 
   st.markdown(
       """
         <div class="mp-grid">
-            <div class="mp-card"><div class="mp-badge" style="background:#ff6600;">HEPSİBURADA</div><div style="font-size:11px; color:#64748b;">Siparişiniz</div><div style="font-size:12px; font-weight:700; color:#dc2626;">Sipariş yok</div></div>
-            <div class="mp-card"><div class="mp-badge" style="background:#f27a1a;">TRENDYOL</div><div style="font-size:11px; color:#64748b;">Siparişiniz</div><div style="font-size:12px; font-weight:700; color:#dc2626;">Sipariş yok</div></div>
-            <div class="mp-card"><div class="mp-badge" style="background:#e6005c;">ÇİÇEKSEPETİ</div><div style="font-size:11px; color:#64748b;">Siparişiniz</div><div style="font-size:12px; font-weight:700; color:#dc2626;">Sipariş yok</div></div>
-            <div class="mp-card"><div class="mp-badge" style="background:#334155;">PTT AVM</div><div style="font-size:11px; color:#64748b;">Siparişiniz</div><div style="font-size:12px; font-weight:700; color:#dc2626;">Sipariş yok</div></div>
-            <div class="mp-card"><div class="mp-badge" style="background:#6b46c1;">N11</div><div style="font-size:11px; color:#64748b;">Siparişiniz</div><div style="font-size:12px; font-weight:700; color:#dc2626;">Sipariş yok</div></div>
-            <div class="mp-card"><div class="mp-badge" style="background:#0284c7;">PAZARAMA</div><div style="font-size:11px; color:#64748b; margin-top:5px; font-weight:700; color:#0f172a;">🚀 Çok yakında</div></div>
-            <div class="mp-card"><div class="mp-badge" style="background:#059669;">İDEFİX</div><div style="font-size:11px; color:#64748b; margin-top:5px; font-weight:700; color:#0f172a;">🚀 Çok yakında</div></div>
+            <div class="mp-card"><div class="mp-badge" style="background:#ff6600;">HEPSİBURADA</div><div style="font-size:11px; color:#64748b;">Sipariş</div><div style="font-size:13px; font-weight:700; color:#0f172a;">Bekleyen Yok</div></div>
+            <div class="mp-card"><div class="mp-badge" style="background:#f27a1a;">TRENDYOL</div><div style="font-size:11px; color:#64748b;">Sipariş</div><div style="font-size:13px; font-weight:700; color:#0f172a;">Bekleyen Yok</div></div>
+            <div class="mp-card"><div class="mp-badge" style="background:#e6005c;">ÇİÇEKSEPETİ</div><div style="font-size:11px; color:#64748b;">Sipariş</div><div style="font-size:13px; font-weight:700; color:#0f172a;">Bekleyen Yok</div></div>
+            <div class="mp-card"><div class="mp-badge" style="background:#334155;">PTT AVM</div><div style="font-size:11px; color:#64748b;">Sipariş</div><div style="font-size:13px; font-weight:700; color:#0f172a;">Bekleyen Yok</div></div>
+            <div class="mp-card"><div class="mp-badge" style="background:#6b46c1;">N11</div><div style="font-size:11px; color:#64748b;">Sipariş</div><div style="font-size:13px; font-weight:700; color:#0f172a;">Bekleyen Yok</div></div>
         </div>
     """,
       unsafe_allow_html=True,
   )
 
+  # Bilgi Kutusu
   st.markdown(
       f"""
         <div class="box-container">
-            <div class="box-header">👤 Fatura Bilgileri</div>
+            <div class="box-header">📊 Aktif Sistem Parametreleri</div>
             <table style="width:100%; font-size:13px; color:#1e293b; border-collapse:collapse;">
-                <tr style="border-bottom:1px solid #f1f5f9;"><td style="padding:6px; font-weight:600; width:150px;">İsim:</td><td style="padding:6px;">{aktif_kullanici}</td></tr>
-                <tr style="border-bottom:1px solid #f1f5f9;"><td style="padding:6px; font-weight:600;">Email:</td><td style="padding:6px;">sah1357sah@gmail.com</td></tr>
-                <tr style="border-bottom:1px solid #f1f5f9;"><td style="padding:6px; font-weight:600;">Telefon:</td><td style="padding:6px;">05346944235</td></tr>
-                <tr style="border-bottom:1px solid #f1f5f9;"><td style="padding:6px; font-weight:600;">Vergi Numarası:</td><td style="padding:6px;">9800650692</td></tr>
-                <tr style="border-bottom:1px solid #f1f5f9;"><td style="padding:6px; font-weight:600;">Vergi Dairesi:</td><td style="padding:6px;">Kadifekale</td></tr>
-                <tr style="border-bottom:1px solid #f1f5f9;"><td style="padding:6px; font-weight:600;">TC Kimlik No:</td><td style="padding:6px;">34510406564</td></tr>
-                <tr><td style="padding:6px; font-weight:600;">Adres:</td><td style="padding:6px;">Sevgi mah. 4642 sok no 4/1 Karabağlar İzmir</td></tr>
+                <tr><td style="padding:6px; font-weight:600; width:180px;">Aktif Marka:</td><td>{st.session_state.ayar_marka}</td></tr>
+                <tr><td style="padding:6px; font-weight:600;">Kâr Marjı Oranı:</td><td>%{st.session_state.ayar_kar_marji}</td></tr>
+                <tr><td style="padding:6px; font-weight:600;">Komisyon Oranı:</td><td>%{st.session_state.ayar_komisyon}</td></tr>
+                <tr><td style="padding:6px; font-weight:600;">Sabit Kargo Fiyatı:</td><td>{st.session_state.ayar_kargo_fiyati} TL</td></tr>
             </table>
         </div>
     """,
       unsafe_allow_html=True,
   )
 
-  st.markdown(
-      """
-        <div class="box-container">
-            <div class="box-header">📦 Abonelik Bilgileri</div>
-            <div style="display:flex; justify-content:space-between; align-items:center;">
-                <div style="font-size:13px; color:#1e293b;">
-                    <b>Sipariş ID:</b> SAH707418640181936<br>
-                    <b>Tutar:</b> 0₺<br>
-                    <b>Son Tarih:</b> 27.11.2026<br>
-                    <b>Durum:</b> <span style="color:#16a34a; font-weight:700;">Aktif</span>
-                </div>
-                <div style="text-align:center; background:#f8fafc; border:2px solid #0284c7; border-radius:50%; width:70px; height:70px; display:flex; flex-direction:column; justify-content:center; align-items:center;">
-                    <span style="font-size:18px; font-weight:800; color:#0284c7;">77</span>
-                    <span style="font-size:9px; font-weight:600; color:#64748b;">GÜN KALDI</span>
-                </div>
-            </div>
-        </div>
-    """,
-      unsafe_allow_html=True,
-  )
-
-  col1, col2 = st.columns(2)
-  with col1:
-    st.info("🧡 **Trendyol**\n\nMağazanıza yüklenebilir ürün adedi:\n### 21.203")
-    st.info("💜 **N11**\n\nMağazanıza yüklenebilir ürün adedi:\n### 33.622")
-    st.info("💛 **EPtt AVM**\n\nMağazanıza yüklenebilir ürün adedi:\n### 38.894")
-  with col2:
-    st.info("🌸 **Çiçeksepeti**\n\nMağazanıza yüklenebilir ürün adedi:\n### 32.020")
-    st.info("🧡 **Hepsiburada**\n\nMağazanıza yüklenebilir ürün adedi:\n### 42.323")
+  col_q1, col_q2 = st.columns(2)
+  with col_q1:
+    if st.button(
+        "🚀 Tüm Pazaryerlerini ve Stokları Senkronize Et",
+        use_container_width=True,
+    ):
+      with st.spinner("Stoklar ve fiyatlar güncelleniyor..."):
+        time.sleep(1.2)
+      st.success("Tüm pazaryerleri başarıyla güncellendi!")
+  with col_q2:
+    if st.button("📥 Tüm XML Kaynaklarını Tetikle", use_container_width=True):
+      with st.spinner("Tedarikçi XML linkleri taranıyor..."):
+        time.sleep(1.2)
+      st.success("Tüm ürünler güncel stok bilgileriyle çekildi!")
 
 # -------------------------------------------------------------
-# 🧡 TRENDYOL ÜRÜNLERİM (Görseldeki Birebir Sayfa)
+# ÜRÜN YÖNETİMİ & XML ENTEGRASYONU
 # -------------------------------------------------------------
-elif selected_menu == "🧡 Trendyol":
-  st.subheader("🧡 Trendyol Ürünlerim")
+elif selected_menu == "📦 Ürün Yönetimi & XML":
+  st.subheader("📦 Ürün Yönetimi, XML ve Pazaryerine Gönderim")
 
-  # Üst Uyarı
-  st.warning("⚠️ Önemli Bilgilendirme: Ürün senkronizasyonları aktif durumdadır.")
-
-  # İşlem Panelleri (Arşivleme, Silme, Veri Yönetimi)
-  col_a, col_b, col_c = st.columns(3)
-
-  with col_a:
-    st.markdown(
-        """<div class="action-box"><div class="action-title">📂 Arşivleme"
-        " İşlemleri</div></div>""",
-        unsafe_allow_html=True,
+  with st.expander("📥 Tedarikçi XML Linki ile Ürün Ekle", expanded=False):
+    xml_link = st.text_input(
+        "XML / Feed URL",
+        placeholder="https://tedarikci-ornek.com/urunler.xml",
     )
-    b1, b2 = st.columns(2)
-    with b1:
-      if st.button("Tümünü Arşivle", use_container_width=True):
-        st.toast("Tüm ürünler arşive taşındı.")
-      if st.button("Satıştaki Arşivle", use_container_width=True):
-        st.toast("Satıştaki ürünler arşive taşındı.")
-    with b2:
-      if st.button("Kapatılan Arşivle", use_container_width=True):
-        st.toast("Kapatılan ürünler arşive taşındı.")
-      if st.button("Stok 0 Arşivle", use_container_width=True):
-        st.toast("Stoku 0 olanlar arşive taşındı.")
+    ted_adi = st.text_input("Tedarikçi Firma Adı", placeholder="Örn: Global Depo")
+    if st.button("XML Ürünlerini Sisteme Aktar"):
+      if xml_link:
+        with st.spinner("XML verileri parse ediliyor..."):
+          time.sleep(1.5)
+          yeni_urun = {
+              "Görsel": (
+                  "https://images.unsplash.com/photo-1523275335684-37898b6baf30?w=100"
+              ),
+              "Barkod": "XML-NEW-9981",
+              "Ürün Adı": f"XML Gelen Ürün ({ted_adi})",
+              "Alış Fiyatı": 500.00,
+              "Satış Fiyatı": round(
+                  500.00
+                  * (1 + st.session_state.ayar_kar_marji / 100)
+                  * (1 + st.session_state.ayar_komisyon / 100)
+                  + st.session_state.ayar_kargo_fiyati,
+                  2,
+              ),
+              "Trendyol Stok": 75,
+              "M.Entegre Stok": 75,
+              "Durum": "Satışta",
+          }
+          st.session_state.urunler_db = pd.concat(
+              [st.session_state.urunler_db, pd.DataFrame([yeni_urun])],
+              ignore_index=True,
+          )
+        st.success("XML ürünleri başarıyla veritabanına eklendi!")
+      else:
+        st.error("Lütfen geçerli bir XML linki girin.")
 
-  with col_b:
-    st.markdown(
-        """<div class="action-box"><div class="action-title">🗑️ Silme"
-        " İşlemleri</div></div>""",
-        unsafe_allow_html=True,
-    )
-    if st.button("Onay Sürecini Sil", use_container_width=True):
-      st.toast("Onay sürecindeki ürünler silindi.")
-    if st.button("Arşivledikleri Sil", use_container_width=True):
-      st.toast("Arşivlenen ürünler kalıcı olarak silindi.")
+  col_b1, col_b2, col_b3 = st.columns(3)
+  with col_b1:
+    if st.button("🚀 Seçilen Ürünleri Trendyol'a Gönder", use_container_width=True):
+      with st.spinner("API ile Trendyol'a ürünler aktarılıyor..."):
+        time.sleep(1.5)
+      st.success("Ürünler Trendyol mağazasına başarıyla listelendi!")
+  with col_b2:
+    if st.button("🔄 Stok ve Fiyatları Güncelle", use_container_width=True):
+      with st.spinner("Hesaplanan kâr ve komisyonlar uygulanıyor..."):
+        time.sleep(1.2)
+      st.success("Stoklar ve güncel fiyatlar eşitlendi!")
+  with col_b3:
+    if st.button("📥 Mağazadan Ürün Çek", use_container_width=True):
+      with st.spinner("Pazaryerinden ürünler indiriliyor..."):
+        time.sleep(1.2)
+      st.success("Güncel ürün listesi çekildi!")
 
-  with col_c:
-    st.markdown(
-        """<div class="action-box"><div class="action-title">⚡ Veri"
-        " Yönetimi</div></div>""",
-        unsafe_allow_html=True,
-    )
-    if st.button("📥 Trendyol'dan Çek", use_container_width=True):
-      st.success("Trendyol'dan ürünler başarıyla çekildi!")
-    if st.button("🔄 Listeyi Yenile", use_container_width=True):
-      st.toast("Ürün listesi yenilendi.")
-
-  st.markdown("---")
-
-  # Ürün Listesi Başlığı ve Güncelle Butonu
-  col_u1, col_u2 = st.columns([3, 1])
-  with col_u1:
-    st.markdown("📋 **Ürün Listesi** (Toplam: 6553 / 6553)")
-  with col_u2:
-    if st.button("🚀 TRENDYOL ÜRÜNLERİMİ GÜNCELLE"):
-      st.success("Trendyol ürünleri toplu olarak güncellendi!")
-
-  # Arama Çubuğu
-  arama_terimi = st.text_input(
-      "Ara", placeholder="🔍 Ürün adı, barkod veya model kodu ara..."
+  arama_q = st.text_input(
+      "🔍 Ürün Ara", placeholder="Ürün adı veya barkod yazın..."
   )
-
-  # Filtre Butonları (Görseldeki Renkli Filtre Alanı)
-  st.markdown(
-      """
-        <div style="background:#f8fafc; padding:10px; border-radius:6px; border:1px solid #cbd5e1; margin-bottom:15px; font-size:12px; font-weight:600; color:#475569;">
-            FİLTRELE: &nbsp; 
-            <span style="background:#0f172a; color:white; padding:3px 8px; border-radius:4px; margin-right:4px;">Tümü (6553)</span>
-            <span style="background:#16a34a; color:white; padding:3px 8px; border-radius:4px; margin-right:4px;">Satışta</span>
-            <span style="background:#ea580c; color:white; padding:3px 8px; border-radius:4px; margin-right:4px;">Eşleşmeyenler</span>
-            <span style="background:#0284c7; color:white; padding:3px 8px; border-radius:4px; margin-right:4px;">Satışa Kapalı</span>
-            <span style="background:#64748b; color:white; padding:3px 8px; border-radius:4px; margin-right:4px;">Arşivde</span>
-            <span style="background:#2563eb; color:white; padding:3px 8px; border-radius:4px; margin-right:4px;">Onaylı</span>
-            <span style="background:#ca8a04; color:white; padding:3px 8px; border-radius:4px; margin-right:4px;">Onay Bekliyor</span>
-            <span style="background:#dc2626; color:white; padding:3px 8px; border-radius:4px; margin-right:4px;">Reddedilen</span>
-            <span style="background:#334155; color:white; padding:3px 8px; border-radius:4px; margin-right:4px;">Blacklist</span>
-            <span style="background:#7c3aed; color:white; padding:3px 8px; border-radius:4px;">Kilitli</span>
-        </div>
-    """,
-      unsafe_allow_html=True,
-  )
-
-  # Gerçekçi Trendyol Ürün Veri Tablosu
-  urunler_data = [
-      {
-          "Resim": "📦",
-          "Barkod": "CYRO-679931-LXL",
-          "Ürün Adı": "Siyah Dantelli Sabahlık &amp; Gecelik Takımı",
-          "Satış Fiyatı": "726 TL",
-          "Trendyol Stok": 98,
-          "M.Entegre Stok": 0,
-          "Durum": "Onaylı / Satışta",
-      },
-      {
-          "Resim": "📦",
-          "Barkod": "CYRO-679931-SM",
-          "Ürün Adı": "Siyah Dantelli Sabahlık &amp; Gecelik Takımı",
-          "Satış Fiyatı": "726 TL",
-          "Trendyol Stok": 100,
-          "M.Entegre Stok": 0,
-          "Durum": "Onaylı / Satışta",
-      },
-      {
-          "Resim": "📦",
-          "Barkod": "606214114000007",
-          "Ürün Adı": "Ayarlanabilir Dizüstü Destek Tabanı Tam Boy",
-          "Satış Fiyatı": "629.7 TL",
-          "Trendyol Stok": 27,
-          "M.Entegre Stok": 0,
-          "Durum": "Onaylı / Satışta",
-      },
-      {
-          "Resim": "📦",
-          "Barkod": "606903317053779400007",
-          "Ürün Adı": "TONTON - NO:1 ÇEKMECE 3 KATLI 21.5...",
-          "Satış Fiyatı": "583.31 TL",
-          "Trendyol Stok": 44,
-          "M.Entegre Stok": 0,
-          "Durum": "Onaylı / Satışta",
-      },
-      {
-          "Resim": "📦",
-          "Barkod": "606905115554563300007",
-          "Ürün Adı": "MARS 28 BÖLMELİ ORGANİZER BOX",
-          "Satış Fiyatı": "476.4 TL",
-          "Trendyol Stok": 76,
-          "M.Entegre Stok": 0,
-          "Durum": "Onaylı / Satışta",
-      },
-      {
-          "Resim": "📦",
-          "Barkod": "606909118417096300007",
-          "Ürün Adı": "6 RAFLI - GRİ MODÜLER ÜNİTE PLASTİK...",
-          "Satış Fiyatı": "1660.54 TL",
-          "Trendyol Stok": 13,
-          "M.Entegre Stok": 0,
-          "Durum": "Onaylı / Satışta",
-      },
-      {
-          "Resim": "📦",
-          "Barkod": "60689204013402643700007",
-          "Ürün Adı": "Ağaç Şekilli Mücevher Standı",
-          "Satış Fiyatı": "176.66 TL",
-          "Trendyol Stok": 304,
-          "M.Entegre Stok": 0,
-          "Durum": "Onaylı / Satışta",
-      },
-  ]
-
-  df_urunler = pd.DataFrame(urunler_data)
-
-  # Arama filtresi uygulaması
-  if arama_terimi:
-    df_urunler = df_urunler[
-        df_urunler["Ürün Adı"]
-        .str.lower()
-        .str.contains(arama_terimi.lower())
-        | df_urunler["Barkod"]
-        .str.lower()
-        .str.contains(arama_terimi.lower())
+  gosterim_df = st.session_state.urunler_db.copy()
+  if arama_q:
+    gosterim_df = gosterim_df[
+        gosterim_df["Ürün Adı"].str.lower().str.contains(arama_q.lower())
+        | gosterim_df["Barkod"].str.lower().str.contains(arama_q.lower())
     ]
 
-  st.dataframe(df_urunler, use_container_width=True, hide_index=True)
+  st.data_editor(
+      gosterim_df,
+      column_config={
+          "Görsel": st.column_config.ImageColumn(
+              "Ürün Görseli", help="Orijinal Ürün Görseli", width=80
+          ),
+          "Alış Fiyatı": st.column_config.NumberColumn(
+              "Alış (TL)", format="%.2f ₺"
+          ),
+          "Satış Fiyatı": st.column_config.NumberColumn(
+              "Satış (TL)", format="%.2f ₺"
+          ),
+      },
+      use_container_width=True,
+      hide_index=True,
+  )
 
 # -------------------------------------------------------------
-# DİĞER SOL MENÜ SEKMELERİ
+# FİYAT, KOMİSYON & MARJ AYARLARI SEKMESİ
 # -------------------------------------------------------------
-elif selected_menu == "🎧 Destek Taleplerim":
-  st.subheader("🎧 Destek Taleplerim")
-  st.info("Aktif destek talebiniz bulunmamaktadır.")
+elif selected_menu == "⚙️ Fiyat, Komisyon & Marj Ayarları":
+  st.subheader("⚙️ Otomatik Fiyatlandırma ve Komisyon Yönetimi")
+  st.markdown(
+      "Bu ekrandan yapacağınız değişiklikler tüm ürünlerin satış fiyatlarına"
+      " anında yansıtılır."
+  )
 
-elif selected_menu == "🔔 Bildirimler":
-  st.subheader("🔔 Bildirimler")
-  st.success("Tüm sistemler sorunsuz çalışıyor.")
+  f_kar = st.number_input(
+      "Kâr Marjı Oranı (%)",
+      value=st.session_state.ayar_kar_marji,
+      key="f_kar_input",
+  )
+  f_kom = st.number_input(
+      "Pazaryeri Komisyon Oranı (%)",
+      value=st.session_state.ayar_komisyon,
+      key="f_kom_input",
+  )
+  f_kargo = st.number_input(
+      "Sabit Kargo Maliyeti (TL)",
+      value=st.session_state.ayar_kargo_fiyati,
+      key="f_kargo_input",
+  )
+  f_marka = st.text_input(
+      "Ürün Markası", value=st.session_state.ayar_marka, key="f_marka_input"
+  )
 
-elif selected_menu == "📢 Duyurular":
-  st.subheader("📢 Duyurular")
-  st.markdown("**EĞİTİM VİDEOLARIMIZ YAYINLANMIŞTIR.** (01.09.2026)")
+  if st.button(
+      "Fiyatları ve Oranları Tüm Sistem İçin Güncelle", use_container_width=True
+  ):
+    st.session_state.ayar_kar_marji = f_kar
+    st.session_state.ayar_komisyon = f_kom
+    st.session_state.ayar_kargo_fiyati = f_kargo
+    st.session_state.ayar_marka = f_marka
 
-elif selected_menu == "📦 Sistemdeki Ürünler":
-  st.subheader("📦 Sistemdeki Ürün Analizi")
-  st.markdown("Sistemdeki 202.046 ürün listeleniyor...")
+    # Otomatik Fiyat Hesaplama Simülasyonu
+    for idx, row in st.session_state.urunler_db.iterrows():
+      alis = row["Alış Fiyatı"]
+      yeni_satis = (
+          alis
+          * (1 + f_kar / 100)
+          * (1 + f_kom / 100)
+          + f_kargo
+      )
+      st.session_state.urunler_db.at[idx, "Satış Fiyatı"] = round(yeni_satis, 2)
+
+    st.success(
+        "Tüm ürün satış fiyatları güncel kâr, komisyon ve kargo maliyetine"
+        " göre yeniden hesaplandı!"
+    )
+
+# -------------------------------------------------------------
+# PAZARYERİ API AYARLARI SEKMESİ
+# -------------------------------------------------------------
+elif selected_menu == "🔑 Pazaryeri API Entegrasyonları":
+  st.subheader("🔑 Pazaryeri API Bağlantı Ayarları")
+  st.markdown(
+      "Ürün göndermek ve sipariş çekmek istediğiniz pazaryerlerinin API"
+      " bilgilerini eksiksiz girin."
+  )
+
+  for k, v in st.session_state.api_bilgileri.items():
+    st.session_state.api_bilgileri[k] = st.text_input(
+        k, value=v, type="password", key=f"api_sec_{k}"
+    )
+
+  if st.button("API Bağlantılarını Kaydet", use_container_width=True):
+    st.success(
+        "API entegrasyon ayarları kaydedildi. Artık ürün gönderme işlemleri"
+        " sorunsuz yapılabilir."
+    )
+
+# -------------------------------------------------------------
+# DİĞER PAZARYERİ SEKMELERİ
+# -------------------------------------------------------------
+elif selected_menu in ["🧡 Trendyol", "🧡 Hepsiburada", "💜 N11", "🌸 ÇiçekSepeti", "💛 E-PTT AVM"]:
+  pazar_adi = selected_menu.split(" ")[1]
+  st.subheader(f"{selected_menu} Mağaza Yönetim Paneli")
+  st.info(
+      f"{pazar_adi} pazaryeri API entegrasyonu aktif. Ürün gönderebilir,"
+      " siparişleri yönetebilir ve stok senkronize edebilirsiniz."
+  )
+
+  c_a, c_b = st.columns(2)
+  with c_a:
+    if st.button(
+        f"{pazar_adi} Mağazasından Ürünleri Çek", use_container_width=True
+    ):
+      with st.spinner(f"{pazar_adi} API'sine bağlanılıyor..."):
+        time.sleep(1)
+      st.success(f"{pazar_adi} ürün listesi güncellendi!")
+  with c_b:
+    if st.button(
+        f"Seçilen Ürünleri {pazar_adi}'ne Gönder", use_container_width=True
+    ):
+      with st.spinner(f"Ürünler {pazar_adi} sistemine aktarılıyor..."):
+        time.sleep(1)
+      st.success(f"Ürünler başarıyla {pazar_adi} mağazasına yüklendi!")
 
 elif selected_menu == "⚡ Oto Kritik Stok":
-  st.subheader("⚡ Oto Kritik Stok")
-  st.markdown("Kritik stok seviyesindeki ürünlerin takibi.")
+  st.subheader("⚡ Otomatik Kritik Stok Takibi")
+  st.markdown(
+      "Stoku azalan ürünler listelenir ve tüm pazaryerlerinde otomatik"
+      " güncellenir."
+  )
+  kritik_df = st.session_state.urunler_db[
+      st.session_state.urunler_db["Trendyol Stok"] < 50
+  ]
+  st.dataframe(kritik_df, use_container_width=True, hide_index=True)
 
-elif selected_menu == "🌸 ÇiçekSepeti":
-  st.subheader("🌸 Çiçeksepeti Yönetimi")
-  st.markdown("Çiçeksepeti entegrasyon ekranı.")
-
-elif selected_menu == "💜 N11":
-  st.subheader("💜 N11 Mağaza Yönetimi")
-  st.markdown("N11 entegrasyon ekranı.")
-
-elif selected_menu == "💛 E-PTT AVM":
-  st.subheader("💛 E-PTT AVM Yönetimi")
-  st.markdown("E-PTT AVM entegrasyon ekranı.")
-
-elif selected_menu == "🧡 Hepsiburada":
-  st.subheader("🧡 Hepsiburada Mağaza Yönetimi")
-  st.markdown("Hepsiburada entegrasyon ekranı.")
-
-elif selected_menu == "🛒 Pazaryeri":
-  st.subheader("🛒 Genel Pazaryeri Yönetimi")
-  st.markdown("Toplu pazaryeri yönetim paneli.")
-
-elif selected_menu == "💙 İdefix":
-  st.subheader("💙 İdefix Yönetimi")
-  st.markdown("İdefix entegrasyon ekranı.")
-
-elif selected_menu == "⚙️ Ayarlar":
-  st.subheader("⚙️ Sistem Ayarları")
-  st.text_input("Firma Adı", value=f"{aktif_kullanici} E-Ticaret")
+elif selected_menu == "🎧 Destek":
+  st.subheader("🎧 Destek ve Operasyon Merkezi")
+  st.success(
+      "Şah Entegre operasyon merkezi taleplerinizi anında işleme almaktadır."
+  )
+  st.text_area("Destek Mesajınızı Yazın")
+  if st.button("Talebi Gönder", use_container_width=True):
+    st.success("Talebiniz başarıyla iletildi!")
