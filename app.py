@@ -1,48 +1,49 @@
+import random
 import time
 import pandas as pd
 import streamlit as st
 
 st.set_page_config(
-    page_title=(
-        "Şah Entegre & E-Ticaret Altyapısı (Ticimax / Entegra Modeli)"
-    ),
+    page_title="Şah Platform - Ticimax, Entegra & Nesine Modülü",
     page_icon="👑",
     layout="wide",
 )
 
 # -------------------------------------------------------------
-# 1. PROFESYONEL CSS & MOBİL UYUMLU ARAYÜZ
+# 1. CSS & ARAYÜZ TASARIMI
 # -------------------------------------------------------------
 st.markdown(
     """
     <style>
     .stApp { background-color: #f8fafc; }
     .product-card { background: white; border: 1px solid #e2e8f0; border-radius: 12px; padding: 16px; text-align: center; box-shadow: 0 1px 3px rgba(0,0,0,0.05); margin-bottom: 15px; }
-    .price-tag { font-size: 18px; font-weight: 800; color: #0284c7; margin: 8px 0; }
-    .panel-box { background: white; border: 1px solid #e2e8f0; border-radius: 10px; padding: 20px; margin-bottom: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
-    .panel-header { background: #1e293b; color: white; padding: 12px 16px; font-weight: 700; font-size: 14px; border-radius: 6px; margin-bottom: 15px; }
+    .match-card { background: white; border: 1px solid #e2e8f0; border-radius: 10px; padding: 15px; margin-bottom: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
+    .price-tag { font-size: 16px; font-weight: 800; color: #0284c7; margin: 8px 0; }
     </style>
 """,
     unsafe_allow_html=True,
 )
 
 # -------------------------------------------------------------
-# 2. OTURUM VE SEPET YÖNETİMİ
+# 2. OTURUM VE STATE YÖNETİMİ
 # -------------------------------------------------------------
 if "authenticated" not in st.session_state:
   st.session_state.authenticated = False
-
 if "sepet" not in st.session_state:
   st.session_state.sepet = []
+if "bakiye" not in st.session_state:
+  st.session_state.bakiye = 1000.0
+if "aktif_kupon" not in st.session_state:
+  st.session_state.aktif_kupon = []
 
 if not st.session_state.authenticated:
   st.markdown(
-      "<h2 style='text-align: center; color: #1e293b;'>⚡ ŞAH TİCİMAX &"
-      " ENTEGRE - Yönetici Girişi</h2>",
+      "<h2 style='text-align: center; color: #1e293b;'>⚡ ŞAH PLATFORM -"
+      " Merkezi Yönetim Girişi</h2>",
       unsafe_allow_html=True,
   )
-  col1, col2, col3 = st.columns([1, 2, 1])
-  with col2:
+  c1, c2, c3 = st.columns([1, 2, 1])
+  with c2:
     st.markdown(
         "<div"
         " style='background:white; padding:30px; border-radius:10px;"
@@ -51,7 +52,7 @@ if not st.session_state.authenticated:
     )
     k_adi = st.text_input("Kullanıcı Adı", value="admin")
     k_sifre = st.text_input("Şifre", type="password", value="123456")
-    if st.button("Panele Giriş Yap", use_container_width=True):
+    if st.button("Sisteme Giriş Yap", use_container_width=True):
       if k_adi and k_sifre:
         st.session_state.authenticated = True
         st.session_state.kullanici = k_adi
@@ -60,7 +61,7 @@ if not st.session_state.authenticated:
   st.stop()
 
 # -------------------------------------------------------------
-# 3. VERİTABANI (STATE)
+# 3. VERİTABANI BAŞLANGIÇ VERİLERİ
 # -------------------------------------------------------------
 if "urunler_db" not in st.session_state:
   st.session_state.urunler_db = pd.DataFrame([
@@ -75,7 +76,6 @@ if "urunler_db" not in st.session_state:
           "alis_fiyati": 250.0,
           "satis_fiyati": 396.75,
           "stok": 142,
-          "durum": "Aktif",
       },
       {
           "id": 2,
@@ -88,58 +88,56 @@ if "urunler_db" not in st.session_state:
           "alis_fiyati": 600.0,
           "satis_fiyati": 952.20,
           "stok": 85,
-          "durum": "Aktif",
-      },
-      {
-          "id": 3,
-          "gorsel": (
-              "https://images.unsplash.com/photo-1542291026-7eec264c27ff?w=300"
-          ),
-          "barkod": "8680001122333",
-          "urun_adi": "Ortopedik Spor Ayakkabı",
-          "kategori": "Spor",
-          "alis_fiyati": 450.0,
-          "satis_fiyati": 714.15,
-          "stok": 12,
-          "durum": "Aktif",
       },
   ])
 
-if "siparisler_db" not in st.session_state:
-  st.session_state.siparisler_db = pd.DataFrame([
+if "bulten_db" not in st.session_state:
+  st.session_state.bulten_db = [
       {
-          "siparis_no": "SAH-9011",
-          "kanal": "E-Ticaret Siteniz (Vitrin)",
-          "musteri": "Mehmet Demir",
-          "urun": "Kablosuz Hızlı Şarj",
-          "tutar": "396.75 TL",
-          "durum": "Onaylandı",
+          "id": 101,
+          "lig": "Trendyol Süper Lig",
+          "mac": "Galatasaray - Fenerbahçe",
+          "ms1": 2.10,
+          "ms0": 3.20,
+          "ms2": 2.80,
       },
       {
-          "siparis_no": "TRD-4482",
-          "kanal": "Trendyol",
-          "musteri": "Ayşe Kaya",
-          "urun": "Bluetooth Kulaklık",
-          "tutar": "952.20 TL",
-          "durum": "Kargolandı",
+          "id": 102,
+          "lig": "Premier League",
+          "mac": "Arsenal - Manchester City",
+          "ms1": 2.45,
+          "ms0": 3.10,
+          "ms2": 2.40,
       },
-  ])
+      {
+          "id": 103,
+          "lig": "La Liga",
+          "mac": "Real Madrid - Barcelona",
+          "ms1": 2.25,
+          "ms0": 3.30,
+          "ms2": 2.60,
+      },
+  ]
+
+if "kupon_gecmisi" not in st.session_state:
+  st.session_state.kupon_gecmisi = []
 
 # -------------------------------------------------------------
-# 4. ÜST HEADER
+# 4. ÜST HEADER VE MENÜ
 # -------------------------------------------------------------
 ust1, ust2 = st.columns([3, 2])
 with ust1:
   st.markdown(
       "<span style='font-size: 16px; font-weight: 800; color:"
-      " #0f172a;'>👑 ŞAH TİCİMAX & ENTEGRE - E-Ticaret Altyapısı</span>",
+      " #0f172a;'>👑 ŞAH PLATFORM - E-Ticaret & İddaa Modülü</span>",
       unsafe_allow_html=True,
   )
 with ust2:
   profil_islem = st.selectbox(
       "Profil",
       [
-          f"👤 {st.session_state.get('kullanici', 'Admin')} (Yönetici)",
+          f"👤 {st.session_state.get('kullanici', 'Admin')} (Bakiye:"
+          f" {st.session_state.bakiye:.2f} ₺)",
           "🚪 Çıkış Yap",
       ],
       label_visibility="collapsed",
@@ -150,210 +148,169 @@ if profil_islem == "🚪 Çıkış Yap":
   st.session_state.authenticated = False
   st.rerun()
 
-# -------------------------------------------------------------
-# 5. SOL MENÜ
-# -------------------------------------------------------------
-st.sidebar.markdown(
-    """
-    <div style="text-align: center; padding: 10px 0; margin-bottom: 10px;">
-        <span style="font-size: 24px; font-weight: 900; color: #f27a1a;">ŞAH</span>
-        <span style="font-size: 18px; font-weight: 700; color: #0f172a;">TİCİMAX</span>
-        <div style="font-size: 11px; color: #64748b; margin-top: 2px;">B2C Vitrin + Entegratör</div>
-    </div>
-""",
-    unsafe_allow_html=True,
-)
-
 menu = st.sidebar.selectbox(
-    "Yönetim Paneli",
+    "Ana Menü",
     [
-        "🌐 E-Ticaret Sitem (Müşteri Vitrini)",
-        "🛒 Sepetim ve Siparişi Tamamla",
-        "🏠 Yönetim & Özet Paneli",
-        "📦 Ürün ve Stok Yönetimi",
-        "🔗 Pazaryeri Entegrasyonları (Trendyol/HBS)",
-        "⚙️ Fiyat & Komisyon Motoru",
-        "📜 Sistem Logları",
+        "🌐 E-Ticaret Vitrini (Ticimax)",
+        "🛒 Sepetim",
+        "⚽ Nesine / İddaa Bülteni",
+        "🎫 Kuponlarım & Kasa",
+        "📦 Pazaryeri Entegrasyonları",
+        "🏠 Yönetim Paneli",
     ],
 )
 
 # -------------------------------------------------------------
-# SAYFALAR
+# 5. SAYFA İÇERİKLERİ
 # -------------------------------------------------------------
 
-if menu == "🌐 E-Ticaret Sitem (Müşteri Vitrini)":
-  st.subheader("🌐 E-Ticaret Altyapı Vitrininiz (Müşteri Ön Yüzü)")
-  st.markdown(
-      "Müşterilerinizin sitenize girip doğrudan inceleyip sepetine ekleyebileceği"
-      " ana sayfa vitrini:"
-  )
-
-  cols = st.columns(3)
+if menu == "🌐 E-Ticaret Vitrini (Ticimax)":
+  st.subheader("🌐 E-Ticaret Müşteri Vitrini")
+  cols = st.columns(2)
   for idx, row in st.session_state.urunler_db.iterrows():
-    with cols[idx % 3]:
+    with cols[idx % 2]:
       st.markdown(
           f"""
                 <div class="product-card">
-                    <img src="{row['gorsel']}" style="width:100%; height:140px; object-fit:cover; border-radius:8px;">
-                    <div style="font-weight:700; font-size:14px; margin-top:10px; color:#1e293b;">{row['urun_adi']}</div>
-                    <div style="font-size:12px; color:#64748b;">Stok: {row['stok']} Adet</div>
+                    <img src="{row['gorsel']}" style="width:100%; height:120px; object-fit:cover; border-radius:6px;">
+                    <div style="font-weight:700; margin-top:8px;">{row['urun_adi']}</div>
                     <div class="price-tag">{row['satis_fiyati']} ₺</div>
                 </div>
             """,
-            unsafe_allow_html=True,
+          unsafe_allow_html=True,
       )
-      if st.button(f"Sepete Ekle #{row['id']}", key=f"sepet_{row['id']}"):
+      if st.button(f"Sepete Ekle #{row['id']}", key=f"vitrin_{row['id']}"):
         st.session_state.sepet.append(row.to_dict())
-        st.success(f"'{row['urun_adi']}' sepete eklendi!")
+        st.success("Ürün sepete eklendi!")
 
-elif menu == "🛒 Sepetim ve Siparişi Tamamla":
-  st.subheader("🛒 Alışveriş Sepeti ve Ödeme Ekranı")
-  if len(st.session_state.sepet) == 0:
-    st.info("Sepetinizde henüz ürün bulunmuyor. Vitrinden ürün ekleyebilirsiniz.")
+elif menu == "🛒 Sepetim":
+  st.subheader("🛒 Alışveriş Sepeti")
+  if not st.session_state.sepet:
+    st.info("Sepetiniz boş.")
   else:
-    sepet_df = pd.DataFrame(st.session_state.sepet)
+    sdf = pd.DataFrame(st.session_state.sepet)
     st.dataframe(
-        sepet_df[["urun_adi", "satis_fiyati", "stok"]],
+        sdf[["urun_adi", "satis_fiyati"]],
         use_container_width=True,
         hide_index=True,
     )
-    toplam_tutar = sepet_df["satis_fiyati"].sum()
-    st.markdown(
-        f"### **Toplam Tutar: {toplam_tutar:.2f} TL**"
-    )
-
-    m_ad = st.text_input("Ad Soyad", value="Ahmet Yılmaz")
-    m_tel = st.text_input("Telefon Numarası", value="0532 000 00 00")
-    m_adres = st.text_area(
-        "Teslimat Adresi", value="Atatürk Mah. Cumhuriyet Cad. No:10 İzmir"
-    )
-
-    if st.button("Siparişi Onayla ve Tamamla", use_container_width=True):
-      yeni_sip = {
-          "siparis_no": f"SAH-{int(time.time()) % 10000}",
-          "kanal": "E-Ticaret Siteniz (Vitrin)",
-          "musteri": m_ad,
-          "urun": sepet_df["urun_adi"].iloc[0],
-          "tutar": f"{toplam_tutar:.2f} TL",
-          "durum": "Yeni Sipariş",
-      }
-      st.session_state.siparisler_db = pd.concat(
-          [
-              st.session_state.siparisler_db,
-              pd.DataFrame([yeni_sip]),
-          ],
-          ignore_index=True,
-      )
+    tutar = sdf["satis_fiyati"].sum()
+    st.markdown(f"**Toplam Tutar: {tutar:.2f} TL**")
+    if st.button("Siparişi Tamamla"):
       st.session_state.sepet = []
-      st.success(
-          "Siparişiniz başarıyla alındı! Otomatik olarak yönetim paneline ve"
-          " muhasebeye aktarıldı."
-      )
+      st.success("Sipariş başarıyla oluşturuldu!")
 
-elif menu == "🏠 Yönetim & Özet Paneli":
-  st.subheader("🏠 Operasyonel Kontrol Merkezi")
+elif menu == "⚽ Nesine / İddaa Bülteni":
+  st.subheader("⚽ Nesine / İddaa Canlı Maç Bülteni")
   st.markdown(
-      """
-        <div class="panel-box">
-            <div class="panel-header">📊 Ticimax & Entegre Altyapı Özeti</div>
-            <table style="width:100%; font-size:13px; color:#1e293b; border-collapse:collapse;">
-                <tr><td style="padding:6px; font-weight:600; width:220px;">E-Ticaret Vitrin Durumu:</td><td>Aktif (B2C Satışa Açık)</td></tr>
-                <tr><td style="padding:6px; font-weight:600;">Pazaryeri Entegrasyonu:</td><td>Trendyol, Hepsiburada, N11 Bağlı</td></tr>
-                <tr><td style="padding:6px; font-weight:600;">Toplam Sipariş Adedi:</td><td>{sip_sayisi} Adet</td></tr>
-            </table>
-        </div>
-    """.format(
-          sip_sayisi=len(st.session_state.siparisler_db)
-      ),
-      unsafe_allow_html=True,
-  )
-  st.dataframe(
-      st.session_state.siparisler_db,
-      use_container_width=True,
-      hide_index=True,
+      f"Mevcut Kasanız / Bakiyeniz: **{st.session_state.bakiye:.2f} ₺**"
   )
 
-elif menu == "📦 Ürün ve Stok Yönetimi":
-  st.subheader("📦 Ürün ve Barkod Havuzu")
-  with st.expander("➕ Yeni Ürün Ekle", expanded=False):
-    c1, c2 = st.columns(2)
+  for mac in st.session_state.bulten_db:
+    st.markdown(
+        f"""
+            <div class="match-card">
+                <div style="font-size:12px; color:#64748b; font-weight:600;">{mac['lig']}</div>
+                <div style="font-size:16px; font-weight:800; color:#1e293b; margin:6px 0;">{mac['mac']}</div>
+            </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    c1, c2, c3 = st.columns(3)
     with c1:
-      p_ad = st.text_input("Ürün Adı")
-      p_barkod = st.text_input("Barkod")
-      p_kat = st.selectbox("Kategori", ["Elektronik", "Spor", "Ev & Yaşam"])
+      if st.button(
+          f"MS 1 ({mac['ms1']})", key=f"ms1_{mac['id']}", use_container_width=True
+      ):
+        st.session_state.aktif_kupon.append({
+            "mac": mac["mac"],
+            "secim": "MS 1",
+            "oran": mac["ms1"],
+        })
+        st.toast(f"Eklendi: {mac['mac']} (MS 1)")
     with c2:
-      p_alis = st.number_input("Alış Fiyatı (TL)", value=100.0)
-      p_stok = st.number_input("Stok", value=50)
-      p_gorsel = st.text_input(
-          "Görsel URL",
-          value="https://images.unsplash.com/photo-1523275335684-37898b6baf30?w=300",
-      )
+      if st.button(
+          f"MS 0 ({mac['ms0']})", key=f"ms0_{mac['id']}", use_container_width=True
+      ):
+        st.session_state.aktif_kupon.append({
+            "mac": mac["mac"],
+            "secim": "MS 0",
+            "oran": mac["ms0"],
+        })
+        st.toast(f"Eklendi: {mac['mac']} (MS 0)")
+    with c3:
+      if st.button(
+          f"MS 2 ({mac['ms2']})", key=f"ms2_{mac['id']}", use_container_width=True
+      ):
+        st.session_state.aktif_kupon.append({
+            "mac": mac["mac"],
+            "secim": "MS 2",
+            "oran": mac["ms2"],
+        })
+        st.toast(f"Eklendi: {mac['mac']} (MS 2)")
 
-    if st.button("Ürünü Vitrine ve Pazaryerlerine Ekle"):
-      if p_ad and p_barkod:
-        yeni_satis = round(p_alis * 1.4, 2)
-        yeni_p = {
-            "id": len(st.session_state.urunler_db) + 1,
-            "gorsel": p_gorsel,
-            "barkod": p_barkod,
-            "urun_adi": p_ad,
-            "kategori": p_kat,
-            "alis_fiyati": p_alis,
-            "satis_fiyati": yeni_satis,
-            "stok": p_stok,
-            "durum": "Aktif",
-        }
-        st.session_state.urunler_db = pd.concat(
-            [
-                st.session_state.urunler_db,
-                pd.DataFrame([yeni_p]),
-            ],
-            ignore_index=True,
-        )
-        st.success(
-            "Ürün hem e-ticaret sitenize hem de pazaryerlerine eklendi!"
-        )
+elif menu == "🎫 Kuponlarım & Kasa":
+  st.subheader("🎫 Hazırlanan Kupon ve Kasa Yönetimi")
+  if not st.session_state.aktif_kupon:
+    st.info(
+        "Kuponunuzda maç bulunmuyor. İddaa bülteninden oran seçebilirsiniz."
+    )
+  else:
+    kdf = pd.DataFrame(st.session_state.aktif_kupon)
+    st.dataframe(kdf, use_container_width=True, hide_index=True)
+    toplam_oran = kdf["oran"].prod()
+    st.markdown(f"### **Toplam Oran: {toplam_oran:.2f}**")
+
+    misli = st.number_input("Misli / Yatırılacak Tutar (TL)", value=50.0)
+    olasi_ikramiye = misli * toplam_oran
+    st.markdown(f"**Olası İkramiye: {olasi_ikramiye:.2f} TL**")
+
+    col_b1, col_b2 = st.columns(2)
+    with col_b1:
+      if st.button("Kuponu Oyna (Kasadan Düş)", use_container_width=True):
+        if st.session_state.bakiye >= misli:
+          st.session_state.bakiye -= misli
+          st.session_state.kupon_gecmisi.append({
+              "adet": len(kdf),
+              "oran": round(toplam_oran, 2),
+              "misli": misli,
+              "ikramiye": round(olasi_ikramiye, 2),
+              "durum": "Tuttu 🎉" if random.random() > 0.4 else "Yattı ❌",
+          })
+          st.session_state.aktif_kupon = []
+          st.success("Kupon başarıyla oynandı!")
+          st.rerun()
+        else:
+          st.error("Yetersiz bakiye!")
+    with col_b2:
+      if st.button("Kuponu Temizle", use_container_width=True):
+        st.session_state.aktif_kupon = []
         st.rerun()
 
+  st.markdown("---")
+  st.subheader("📜 Oynanan Kupon Geçmişi")
+  if st.session_state.kupon_gecmisi:
+    st.dataframe(
+        pd.DataFrame(st.session_state.kupon_gecmisi),
+        use_container_width=True,
+        hide_index=True,
+    )
+  else:
+    st.info("Henüz geçmiş kuponunuz bulunmuyor.")
+
+elif menu == "📦 Pazaryeri Entegrasyonları":
+  st.subheader("📦 Trendyol & Hepsiburada Entegrasyonu")
+  if st.button("🔄 Stok ve Fiyatları Eşitle"):
+    time.sleep(1)
+    st.success("Tüm pazaryerleri güncellendi!")
   st.dataframe(
       st.session_state.urunler_db,
-      column_config={
-          "gorsel": st.column_config.ImageColumn("Görsel", width=70)
-      },
       use_container_width=True,
       hide_index=True,
   )
 
-elif menu == "🔗 Pazaryeri Entegrasyonları (Trendyol/HBS)":
-  st.subheader("🔗 Çoklu Pazaryeri ve Stok Senkronizasyonu")
-  pazar = st.selectbox(
-      "Seçilen Pazaryeri", ["Trendyol", "Hepsiburada", "N11", "ÇiçekSepeti"]
-  )
-  if st.button(
-      f"🔄 Tüm Ürünleri {pazar} ile Eşitle", use_container_width=True
-  ):
-    with st.spinner(f"{pazar} API havuzuyla senkronize ediliyor..."):
-      time.sleep(1.2)
-    st.success(f"Tüm stok ve fiyatlar {pazar} mağazanıza güncellendi!")
-
-  st.dataframe(
-      st.session_state.urunler_db[["barkod", "urun_adi", "satis_fiyati", "stok"]],
-      use_container_width=True,
-      hide_index=True,
-  )
-
-elif menu == "⚙️ Fiyat & Komisyon Motoru":
-  st.subheader("⚙️ Otomatik Fiyatlandırma")
-  k_marj = st.number_input("Kâr Oranı (%)", value=30.0)
-  if st.button("Fiyatları Güncelle"):
-    st.session_state.urunler_db["satis_fiyati"] = st.session_state.urunler_db[
-        "alis_fiyati"
-    ].apply(lambda x: round(x * (1 + k_marj / 100), 2))
-    st.success("Tüm fiyatlar güncellendi!")
-
-elif menu == "📜 Sistem Logları":
-  st.subheader("📜 Sistem ve API Logları")
-  st.code(
-      f"[{time.strftime('%H:%M:%S')}] Ticimax B2C vitrin altyapısı aktif.\n[{time.strftime('%H:%M:%S')}] Trendyol stok senkronizasyonu başarılı.",
-      language="text",
+elif menu == "🏠 Yönetim Paneli":
+  st.subheader("🏠 Sistem Özeti")
+  st.markdown(
+      f"Aktif Bakiye: **{st.session_state.bakiye:.2f} ₺** | Sepet Ürün Sayısı:"
+      f" **{len(st.session_state.sepet)}**"
   )
