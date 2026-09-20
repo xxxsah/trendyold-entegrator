@@ -59,23 +59,20 @@ def fiyat_parse(s):
     return 0.0
 
 
-# Gelişmiş Trendyol API Gönderim Fonksiyonu (Ortam Seçenekli)
+# Gelişmiş Trendyol API Gönderim Fonksiyonu (Düzeltilmiş Header ve User-Agent)
 def trendyol_urunleri_gonder(df, credentials, ortam="Canlı"):
-  supplier_id = credentials["supplier_id"]
-  api_key = credentials["key"]
-  api_secret = credentials["secret"]
+  supplier_id = credentials["supplier_id"].strip()
+  api_key = credentials["key"].strip()
+  api_secret = credentials["secret"].strip()
 
   auth_str = f"{api_key}:{api_secret}"
   encoded_auth = base64.b64encode(auth_str.encode("utf-8")).decode("utf-8")
 
+  # Trendyol dokümantasyonuna uygun başlıklar
   headers = {
       "Authorization": f"Basic {encoded_auth}",
       "Content-Type": "application/json",
-      "User-Agent": (
-          f"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML,"
-          f" like Gecko) Chrome/122.0.0.0 Safari/537.36 - SupplierId/"
-          f" {supplier_id}"
-      ),
+      "User-Agent": f"{supplier_id} - SelfIntegration",
       "Accept": "application/json",
   }
 
@@ -107,34 +104,34 @@ def trendyol_urunleri_gonder(df, credentials, ortam="Canlı"):
     }
     items_list.append(item_data)
 
-  chunk_size = 50
+  # Test için ilk seferde sadece ilk 5 ürünü gönderelim ki 403 veya yetki sorununu hızlıca görebilelim
+  chunk_size = 5
   toplam_urun = len(items_list)
   basarili_paket = 0
 
-  for i in range(0, toplam_urun, chunk_size):
-    chunk = items_list[i : i + chunk_size]
-    payload = {"items": chunk}
+  # İlk paketi test amaçlı gönderelim
+  chunk = items_list[0:chunk_size]
+  payload = {"items": chunk}
 
-    try:
-      response = requests.post(
-          url, headers=headers, data=json.dumps(payload), timeout=45
+  try:
+    response = requests.post(
+        url, headers=headers, data=json.dumps(payload), timeout=45
+    )
+    if response.status_code in [200, 201]:
+      return (
+          True,
+          f"Test amaçlı ilk {len(chunk)} ürün başarıyla Trendyol'a iletildi! (Kod:"
+          f" {response.status_code})",
       )
-      if response.status_code in [200, 201]:
-        basarili_paket += 1
-      else:
-        return (
-            False,
-            f"API Yanıt Hatası (Ürün {i}-{i+len(chunk)}): Kod"
-            f" {response.status_code}. Detay: {response.text[:300]}",
-        )
-    except requests.exceptions.RequestException as e:
-      return False, f"Bağlantı İstek Hatası: {str(e)}"
-
-  return (
-      True,
-      f"Başarılı! Toplam {toplam_urun} ürün {chunk_size}'şerli paketler halinde"
-      f" {ortam} ortama iletildi.",
-  )
+    else:
+      return (
+          False,
+          f"API Reddetti (Kod {response.status_code}). Lütfen Supplier ID,"
+          f" Key ve Secret bilgilerinizi Trendyol Partner Paneli'nden"
+          f" kontrol edin.\nYanıt: {response.text[:300]}",
+      )
+  except requests.exceptions.RequestException as e:
+    return False, f"Bağlantı İstek Hatası: {str(e)}"
 
 
 # Sekmeler (Tabs)
@@ -366,7 +363,7 @@ with tab4:
     st.session_state["urunler_df"] = df_temp
     log_ekle("Fiyatlandırma kuralları güncellendi.", "INFO")
     st.success("Fiyatlar başarıyla güncellendi!")
-    st.dataframe(df_temp, use_container_width=True)
+    st.dataframe(df_temp, use_container_width+True)
 
 with tab5:
   st.subheader("🚀 Trendyol Toplu Ürün Yollama (API Entegrasyonu)")
@@ -393,7 +390,9 @@ with tab5:
     )
     col_g2.metric("Seçilen Mod", secilen_ortam)
 
-    if st.button("Trendyol'a Ürünleri Gönder (Batch Başlat)", type="primary"):
+    if st.button(
+        "Trendyol'a Test Amaçlı İlk 5 Ürünü Gönder", type="primary"
+    ):
       if "ty_credentials" not in st.session_state:
         st.error(
             "Lütfen önce 'API & Mağaza Ayarları' sekmesinden Trendyol API"
@@ -401,7 +400,7 @@ with tab5:
         )
       else:
         with st.spinner(
-            "Ürünler Trendyol sunucularına iletiliyor, lütfen bekleyin..."
+            "API bağlantısı test ediliyor ve ürünler iletiliyor..."
         ):
           basari, sonuc_mesajı = trendyol_urunleri_gonder(
               st.session_state["urunler_df"],
@@ -413,6 +412,7 @@ with tab5:
             st.success(sonuc_mesajı)
           else:
             log_ekle(f"Trendyol Gönderim Hatası: {sonuc_mesajı}", "ERROR")
+            st.error(sonuc_mesaj_i := sonuc_mesajı)
             st.error(sonuc_mesajı)
 
 with tab6:
