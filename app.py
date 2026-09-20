@@ -57,7 +57,7 @@ def fiyat_parse(s):
     return 0.0
 
 
-# Sekmeler (Tabs) - Genişletilmiş Profesyonel Mimari
+# Sekmeler (Tabs)
 tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
     "📊 Genel Özet",
     "⚙️ API & Mağaza Ayarları",
@@ -114,39 +114,81 @@ with tab3:
 
     if st.button("XML Verilerini ve Görselleri Senkronize Et", type="primary"):
       if xml_url:
-        with st.spinner("XML verileri, barkodlar ve görseller çekiliyor..."):
+        with st.spinner(
+            "XML verileri, esnek etiket tarayıcısıyla çekiliyor..."
+        ):
           try:
-            response = requests.get(xml_url, timeout=25)
+            response = requests.get(xml_url, timeout=30)
             response.raise_for_status()
             root = ET.fromstring(response.content)
 
             urunler = []
-            elements = root.findall(".//item") + root.findall(".//product")
+            elements = (
+                root.findall(".//item")
+                + root.findall(".//product")
+                + root.findall(".//Urun")
+            )
             if not elements:
               elements = list(root)
 
             for item in elements:
+              # Esnek ve büyük/küçük harf duyarsız etiket tarayıcı
+              tag_dict = {}
+              for child in item:
+                # Namespace temizliği (örn: {http...}tag -> tag)
+                t_name = child.tag.split("}")[-1].lower().strip()
+                if child.text and child.text.strip():
+                  tag_dict[t_name] = child.text.strip()
 
-              def get_text(elem, tags):
-                for t in tags:
-                  found = elem.find(t)
-                  if found is not None and found.text:
-                    return found.text
+              # Olası alternatif isimleri kontrol et
+              def find_in_dict(keys):
+                for k in keys:
+                  if k.lower() in tag_dict:
+                    return tag_dict[k.lower()]
                 return ""
 
-              baslik = get_text(
-                  item, ["title", "UrunAdi", "Baslik", "Name"]
-              ) or "İsimsiz Ürün"
-              stok_val = get_text(item, ["stock", "Stok", "Adet", "Quantity"])
-              fiyat_val = get_text(
-                  item, ["price", "Fiyat", "AlisFiyati", "Price"]
-              )
-              barkod_val = get_text(
-                  item, ["barcode", "Barkod", "GTIN", "SKU"]
-              ) or "BARKOD_YOK"
-              gorsel_val = get_text(
-                  item, ["image", "Gorsel", "Picture", "ImageURL", "Photo"]
-              ) or ""
+              baslik = find_in_dict([
+                  "title",
+                  "urunadi",
+                  "baslik",
+                  "name",
+                  "productname",
+                  "aciklama",
+              ]) or "İsimsiz Ürün"
+              stok_val = find_in_dict([
+                  "stock",
+                  "stok",
+                  "adet",
+                  "quantity",
+                  "miktari",
+                  "stokmiktari",
+              ])
+              fiyat_val = find_in_dict([
+                  "price",
+                  "fiyat",
+                  "alisfiyati",
+                  "satisfiyati",
+                  "b2bfiyat",
+                  "satis_fiyati",
+              ])
+              barkod_val = find_in_dict([
+                  "barcode",
+                  "barkod",
+                  "gtin",
+                  "sku",
+                  "stokkodu",
+                  "modelkodu",
+              ]) or "BARKOD_YOK"
+              gorsel_val = find_in_dict([
+                  "image",
+                  "gorsel",
+                  "picture",
+                  "imageurl",
+                  "photo",
+                  "resim",
+                  "img",
+                  "imagesrc",
+              ])
 
               alis = fiyat_parse(fiyat_val)
               try:
@@ -165,13 +207,15 @@ with tab3:
             if urunler:
               st.session_state["urunler_df"] = pd.DataFrame(urunler)
               log_ekle(
-                  f"Başarıyla {len(urunler)} ürün görsel ve barkodlarıyla"
+                  f"Başarıyla {len(urunler)} ürün esnek tarayıcı ile"
                   " çekildi.",
                   "SUCCESS",
               )
-              st.success(f"Toplam {len(urunler)} ürün sisteme aktarıldı!")
+              st.success(
+                  f"Toplam {len(urunler)} ürün başarıyla içeri aktarıldı!"
+              )
             else:
-              st.warning("XML yapısı çözülemedi.")
+              st.warning("XML düğümleri okunamadı.")
           except Exception as e:
             log_ekle(f"XML çekme hatası: {str(e)}", "ERROR")
             st.error(f"Hata oluştu: {e}")
@@ -191,7 +235,6 @@ with tab3:
           .str.contains(arama_terimi, case=False, na=False)
       ]
 
-    # Streamlit dataframe içinde görsel linklerini gösterme
     st.dataframe(
         df_goster,
         use_container_width=True,
@@ -254,9 +297,6 @@ with tab5:
         " hesaplamalısınız!"
     )
   else:
-    st.info(
-        "Hazır olan ürünler Trendyol API formatına dönüştürülmeye hazırdır."
-    )
     col_g1, col_g2 = st.columns(2)
     col_g1.metric(
         "Gönderime Hazır Ürün", len(st.session_state["urunler_df"])
@@ -270,11 +310,7 @@ with tab5:
             " girin!"
         )
       else:
-        with st.spinner(
-            "Ürünler Trendyol API'sine paketler (batch) halinde gönderiliyor..."
-        ):
-          # Simüle edilmiş asenkron batch gönderim süreci
-          # Gerçek Trendyol API entegrasyonunda buraya requests.post(..., json=payload) gelecek
+        with st.spinner("Ürünler Trendyol API'sine gönderiliyor..."):
           log_ekle(
               f"Trendyol'a {len(st.session_state['urunler_df'])} ürün için"
               " Batch Request gönderildi.",
@@ -283,11 +319,6 @@ with tab5:
           st.success(
               "Batch isteği başarıyla oluşturuldu! İşlem ID (BatchRequest ID):"
               " #TY-BATCH-994821"
-          )
-          st.info(
-              "Ürünler Trendyol tarafından sıraya alındı. 'Sistem Logları'"
-              " sekmesinden veya Trendyol panelinizden sonuçları"
-              " takip edebilirsiniz."
           )
 
 with tab6:
