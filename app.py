@@ -59,13 +59,12 @@ def fiyat_parse(s):
     return 0.0
 
 
-# Gerçek Trendyol API Gönderim Fonksiyonu
+# Gerçek Trendyol API Parçalı (Chunking) Gönderim Fonksiyonu
 def trendyol_urunleri_gonder(df, credentials):
   supplier_id = credentials["supplier_id"]
   api_key = credentials["key"]
   api_secret = credentials["secret"]
 
-  # Trendyol Basic Auth Hazırlama
   auth_str = f"{api_key}:{api_secret}"
   encoded_auth = base64.b64encode(auth_str.encode("utf-8")).decode("utf-8")
 
@@ -75,13 +74,11 @@ def trendyol_urunleri_gonder(df, credentials):
       "User-Agent": f"{supplier_id} - SelfIntegration",
   }
 
-  # Trendyol Ürün Oluşturma Endpoint'i (Canlı Ortam)
   url = f"https://api.trendyol.com/sapigw/suppliers/{supplier_id}/items"
 
-  # Ürünleri Trendyol formatına dönüştür
+  # Tüm ürünleri Trendyol formatına dönüştür
   items_list = []
   for _, row in df.iterrows():
-    # Görsel listesi kontrolü
     images = []
     if row.get("Görsel URL") and str(row.get("Görsel URL")) != "nan":
       images.append({"url": str(row["Görsel URL"])})
@@ -89,40 +86,48 @@ def trendyol_urunleri_gonder(df, credentials):
     item_data = {
         "barcode": str(row["Barkod"]),
         "title": str(row["Ürün Adı"]),
-        "productMainId": str(row["Barkod"]),  # Model kodu / Ana Ürün ID
-        "brandId": 1,  # Varsayılan marka ID (Kendi markanıza göre güncellenebilir)
-        "categoryId": 1,  # Varsayılan Kategori ID
+        "productMainId": str(row["Barkod"]),
+        "brandId": 1,
+        "categoryId": 1,
         "quantity": int(row["Stok"]),
         "stockCode": str(row["Barkod"]),
         "price": float(row.get("Önerilen Satış Fiyatı (₺)", 100.0)),
-        "listPrice": float(
-            row.get("Önerilen Satış Fiyatı (₺)", 100.0)
-        ),  # Piyasa fiyatı
+        "listPrice": float(row.get("Önerilen Satış Fiyatı (₺)", 100.0)),
         "vatRate": 20,
         "images": images,
         "attributes": [],
     }
     items_list.append(item_data)
 
-  payload = {"items": items_list}
+  # 500'erli paketlere (chunk) bölerek gönderim
+  chunk_size = 500
+  toplam_urun = len(items_list)
+  basarili_paket = 0
 
-  try:
-    # Büyük veri setleri için zaman aşımı süresi artırıldı
-    response = requests.post(
-        url, headers=headers, data=json.dumps(payload), timeout=60
-    )
+  for i in range(0, toplam_urun, chunk_size):
+    chunk = items_list[i : i + chunk_size]
+    payload = {"items": chunk}
 
-    if response.status_code in [200, 201]:
-      res_json = response.json()
-      batch_request_id = res_json.get("batchRequestId", "Bilinmiyor")
-      return True, f"Başarılı! Batch ID: {batch_request_id}"
-    else:
-      return (
-          False,
-          f"API Hatası (Kod {response.status_code}): {response.text[:200]}",
+    try:
+      response = requests.post(
+          url, headers=headers, data=json.dumps(payload), timeout=45
       )
-  except requests.exceptions.RequestException as e:
-    return False, f"Bağlantı Hatası: {str(e)}"
+      if response.status_code in [200, 201]:
+        basarili_paket += 1
+      else:
+        return (
+            False,
+            f"Paket Hatası (Ürün {i}-{i+len(chunk)}): Kod"
+            f" {response.status_code} - {response.text[:150]}",
+        )
+    except requests.exceptions.RequestException as e:
+      return False, f"Bağlantı Hatası: {str(e)}"
+
+  return (
+      True,
+      f"Başarılı! Toplam {toplam_urun} ürün {chunk_size}'şerli paketler halinde"
+      " Trendyol'a iletildi.",
+  )
 
 
 # Sekmeler (Tabs)
@@ -385,7 +390,8 @@ with tab5:
         )
       else:
         with st.spinner(
-            "Ürünler Trendyol API sunucularına iletiliyor, lütfen bekleyin..."
+            "Ürünler Trendyol API sunucularına parçalı olarak iletiliyor, lütfen"
+            " bekleyin..."
         ):
           basari, sonuc_mesajı = trendyol_urunleri_gonder(
               st.session_state["urunler_df"],
