@@ -1,4 +1,6 @@
+import base64
 import datetime
+import json
 import pandas as pd
 import requests
 import streamlit as st
@@ -57,6 +59,72 @@ def fiyat_parse(s):
     return 0.0
 
 
+# Gerçek Trendyol API Gönderim Fonksiyonu
+def trendyol_urunleri_gonder(df, credentials):
+  supplier_id = credentials["supplier_id"]
+  api_key = credentials["key"]
+  api_secret = credentials["secret"]
+
+  # Trendyol Basic Auth Hazırlama
+  auth_str = f"{api_key}:{api_secret}"
+  encoded_auth = base64.b64encode(auth_str.encode("utf-8")).decode("utf-8")
+
+  headers = {
+      "Authorization": f"Basic {encoded_auth}",
+      "Content-Type": "application/json",
+      "User-Agent": f"{supplier_id} - SelfIntegration",
+  }
+
+  # Trendyol Ürün Oluşturma Endpoint'i (Canlı Ortam)
+  url = f"https://api.trendyol.com/sapigw/suppliers/{supplier_id}/items"
+
+  # Ürünleri Trendyol formatına dönüştür
+  items_list = []
+  for _, row in df.iterrows():
+    # Görsel listesi kontrolü
+    images = []
+    if row.get("Görsel URL") and str(row.get("Görsel URL")) != "nan":
+      images.append({"url": str(row["Görsel URL"])})
+
+    item_data = {
+        "barcode": str(row["Barkod"]),
+        "title": str(row["Ürün Adı"]),
+        "productMainId": str(row["Barkod"]),  # Model kodu / Ana Ürün ID
+        "brandId": 1,  # Varsayılan marka ID (Kendi markanıza göre güncellenebilir)
+        "categoryId": 1,  # Varsayılan Kategori ID
+        "quantity": int(row["Stok"]),
+        "stockCode": str(row["Barkod"]),
+        "price": float(row.get("Önerilen Satış Fiyatı (₺)", 100.0)),
+        "listPrice": float(
+            row.get("Önerilen Satış Fiyatı (₺)", 100.0)
+        ),  # Piyasa fiyatı
+        "vatRate": 20,
+        "images": images,
+        "attributes": [],
+    }
+    items_list.append(item_data)
+
+  payload = {"items": items_list}
+
+  try:
+    # Büyük veri setleri için zaman aşımı süresi artırıldı
+    response = requests.post(
+        url, headers=headers, data=json.dumps(payload), timeout=60
+    )
+
+    if response.status_code in [200, 201]:
+      res_json = response.json()
+      batch_request_id = res_json.get("batchRequestId", "Bilinmiyor")
+      return True, f"Başarılı! Batch ID: {batch_request_id}"
+    else:
+      return (
+          False,
+          f"API Hatası (Kod {response.status_code}): {response.text[:200]}",
+      )
+  except requests.exceptions.RequestException as e:
+    return False, f"Bağlantı Hatası: {str(e)}"
+
+
 # Sekmeler (Tabs)
 tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
     "📊 Genel Özet",
@@ -78,7 +146,14 @@ with tab1:
 
   col1.metric("Toplam Aktif Ürün", toplam_urun)
   col2.metric("Stokta Var", aktif_stok)
-  col3.metric("Trendyol API Durumu", "Yapılandırıldı 🟢")
+  col3.metric(
+      "Trendyol API Durumu",
+      (
+          "Yapılandırıldı 🟢"
+          if "ty_credentials" in st.session_state
+          else "Beklemede 🟡"
+      ),
+  )
   col4.metric("Hepsiburada API Durumu", "Beklemede 🟡")
 
 with tab2:
@@ -94,9 +169,9 @@ with tab2:
     if kaydet_btn:
       if ty_supplier_id and ty_api_key and ty_api_secret:
         st.session_state["ty_credentials"] = {
-            "supplier_id": ty_supplier_id,
-            "key": ty_api_key,
-            "secret": ty_api_secret,
+            "supplier_id": ty_supplier_id.strip(),
+            "key": ty_api_key.strip(),
+            "secret": ty_api_secret.strip(),
         }
         log_ekle("Trendyol API bilgileri sisteme kaydedildi.", "SUCCESS")
         st.success("API bilgileri başarıyla kaydedildi!")
@@ -132,15 +207,12 @@ with tab3:
               elements = list(root)
 
             for item in elements:
-              # Esnek ve büyük/küçük harf duyarsız etiket tarayıcı
               tag_dict = {}
               for child in item:
-                # Namespace temizliği (örn: {http...}tag -> tag)
                 t_name = child.tag.split("}")[-1].lower().strip()
                 if child.text and child.text.strip():
                   tag_dict[t_name] = child.text.strip()
 
-              # Olası alternatif isimleri kontrol et
               def find_in_dict(keys):
                 for k in keys:
                   if k.lower() in tag_dict:
@@ -285,10 +357,10 @@ with tab4:
     st.dataframe(df_temp, use_container_width=True)
 
 with tab5:
-  st.subheader("🚀 Trendyol Toplu Ürün Yollama (Batch Request)")
+  st.subheader("🚀 Trendyol Toplu Ürün Yollama (Canlı API)")
   st.markdown(
-      "Sistemde hazırlanan ürünleri Trendyol satıcı panelinize toplu olarak"
-      " asenkron şekilde gönderin."
+      "Sistemde hazırlanan ürünleri doğrudan Trendyol Mağaza API'nize canlı"
+      " olarak gönderin."
   )
 
   if "Önerilen Satış Fiyatı (₺)" not in st.session_state["urunler_df"].columns:
@@ -301,25 +373,30 @@ with tab5:
     col_g1.metric(
         "Gönderime Hazır Ürün", len(st.session_state["urunler_df"])
     )
-    col_g2.metric("Entegrasyon Modu", "Canlı / Test API")
+    col_g2.metric("Entegrasyon Modu", "Canlı Trendyol API")
 
-    if st.button("Trendyol'a Ürünleri Aktar (Batch Başlat)", type="primary"):
+    if st.button(
+        "Trendyol'a Ürünleri Canlı Gönder (Batch Başlat)", type="primary"
+    ):
       if "ty_credentials" not in st.session_state:
         st.error(
-            "Lütfen önce 'API & Mağaza Ayarları' sekmesinden bilgilerinizi"
-            " girin!"
+            "Lütfen önce 'API & Mağaza Ayarları' sekmesinden Trendyol API"
+            " bilgilerinizi girin!"
         )
       else:
-        with st.spinner("Ürünler Trendyol API'sine gönderiliyor..."):
-          log_ekle(
-              f"Trendyol'a {len(st.session_state['urunler_df'])} ürün için"
-              " Batch Request gönderildi.",
-              "SUCCESS",
+        with st.spinner(
+            "Ürünler Trendyol API sunucularına iletiliyor, lütfen bekleyin..."
+        ):
+          basari, sonuc_mesajı = trendyol_urunleri_gonder(
+              st.session_state["urunler_df"],
+              st.session_state["ty_credentials"],
           )
-          st.success(
-              "Batch isteği başarıyla oluşturuldu! İşlem ID (BatchRequest ID):"
-              " #TY-BATCH-994821"
-          )
+          if basari:
+            log_ekle(f"Trendyol Canlı Gönderim Başarılı: {sonuc_mesajı}", "SUCCESS")
+            st.success(sonuc_mesajı)
+          else:
+            log_ekle(f"Trendyol Gönderim Hatası: {sonuc_mesajı}", "ERROR")
+            st.error(sonuc_mesajı)
 
 with tab6:
   st.subheader("🪵 Sistem Logları & İşlem Geçmişi")
