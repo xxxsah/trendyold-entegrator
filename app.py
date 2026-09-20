@@ -59,7 +59,7 @@ def fiyat_parse(s):
     return 0.0
 
 
-# Gelişmiş Trendyol API Gönderim Fonksiyonu (Düzeltilmiş Header ve User-Agent)
+# Gelişmiş Trendyol API Gönderim Fonksiyonu
 def trendyol_urunleri_gonder(df, credentials, ortam="Canlı"):
   supplier_id = credentials["supplier_id"].strip()
   api_key = credentials["key"].strip()
@@ -68,7 +68,6 @@ def trendyol_urunleri_gonder(df, credentials, ortam="Canlı"):
   auth_str = f"{api_key}:{api_secret}"
   encoded_auth = base64.b64encode(auth_str.encode("utf-8")).decode("utf-8")
 
-  # Trendyol dokümantasyonuna uygun başlıklar
   headers = {
       "Authorization": f"Basic {encoded_auth}",
       "Content-Type": "application/json",
@@ -76,7 +75,6 @@ def trendyol_urunleri_gonder(df, credentials, ortam="Canlı"):
       "Accept": "application/json",
   }
 
-  # Ortama göre URL seçimi
   if ortam == "Test / Stage":
     url = f"https://stageapi.trendyol.com/sapigw/suppliers/{supplier_id}/items"
   else:
@@ -104,12 +102,7 @@ def trendyol_urunleri_gonder(df, credentials, ortam="Canlı"):
     }
     items_list.append(item_data)
 
-  # Test için ilk seferde sadece ilk 5 ürünü gönderelim ki 403 veya yetki sorununu hızlıca görebilelim
   chunk_size = 5
-  toplam_urun = len(items_list)
-  basarili_paket = 0
-
-  # İlk paketi test amaçlı gönderelim
   chunk = items_list[0:chunk_size]
   payload = {"items": chunk}
 
@@ -127,8 +120,8 @@ def trendyol_urunleri_gonder(df, credentials, ortam="Canlı"):
       return (
           False,
           f"API Reddetti (Kod {response.status_code}). Lütfen Supplier ID,"
-          f" Key ve Secret bilgilerinizi Trendyol Partner Paneli'nden"
-          f" kontrol edin.\nYanıt: {response.text[:300]}",
+          f" Key ve Secret bilgilerinizi kontrol edin.\nYanıt:"
+          f" {response.text[:300]}",
       )
   except requests.exceptions.RequestException as e:
     return False, f"Bağlantı İstek Hatası: {str(e)}"
@@ -342,28 +335,43 @@ with tab4:
     )
   with col_f3:
     kdv_orani = (
-        st.selectbox("KDV Oranı (%)", [1, 10, 20], index=2) / 100.0
+        st.selectbox("KDV Oranı (%)", [1, 10, 20], index=2, key="kdv_select")
+        / 100.0
     )
 
-  if (
-      not st.session_state["urunler_df"].empty
-      and st.button("Net Kar Bazlı Fiyatları Hesapla")
-  ):
-    df_temp = st.session_state["urunler_df"].copy()
-    hesaplanan_satis = []
-    for alis in df_temp["Alış Fiyatı (₺)"]:
-      if (1 - pazaryeri_komisyon) > 0:
-        kdvsiz_satis = (alis * (1 + genel_kar)) / (1 - pazaryeri_komisyon)
-      else:
-        kdvsiz_satis = alis * (1 + genel_kar)
-      kdvli_satis = kdvsiz_satis * (1 + kdv_orani)
-      hesaplanan_satis.append(round(kdvli_satis, 2))
+  if not st.session_state["urunler_df"].empty:
+    if st.button("Net Kar Bazlı Fiyatları Hesapla", type="primary"):
+      df_temp = st.session_state["urunler_df"].copy()
+      hesaplanan_satis = []
+      for alis in df_temp["Alış Fiyatı (₺)"]:
+        if (1 - pazaryeri_komisyon) > 0:
+          kdvsiz_satis = (alis * (1 + genel_kar)) / (1 - pazaryeri_komisyon)
+        else:
+          kdvsiz_satis = alis * (1 + genel_kar)
+        kdvli_satis = kdvsiz_satis * (1 + kdv_orani)
+        hesaplanan_satis.append(round(kdvli_satis, 2))
 
-    df_temp["Önerilen Satış Fiyatı (₺)"] = hesaplanan_satis
-    st.session_state["urunler_df"] = df_temp
-    log_ekle("Fiyatlandırma kuralları güncellendi.", "INFO")
-    st.success("Fiyatlar başarıyla güncellendi!")
-    st.dataframe(df_temp, use_container_width+True)
+      df_temp["Önerilen Satış Fiyatı (₺)"] = hesaplanan_satis
+      st.session_state["urunler_df"] = df_temp
+      log_ekle("Fiyatlandırma kuralları güncellendi.", "INFO")
+      st.success("Fiyatlar başarıyla güncellendi!")
+
+    if "Önerilen Satış Fiyatı (₺)" in st.session_state["urunler_df"].columns:
+      st.markdown("### Güncel Fiyat Matrisi Tablosu")
+      st.dataframe(
+          st.session_state["urunler_df"],
+          use_container_width=True,
+          column_config={
+              "Görsel URL": st.column_config.ImageColumn("Ürün Görseli")
+          },
+      )
+    else:
+      st.info(
+          "Henüz fiyat hesaplaması yapılmadı. Yukarıdaki butona tıklayarak"
+          " hesaplatabilirsiniz."
+      )
+  else:
+    st.warning("⚠️ Önce 'XML & Ürün Yönetimi' sekmesinden ürünleri çekmelisiniz!")
 
 with tab5:
   st.subheader("🚀 Trendyol Toplu Ürün Yollama (API Entegrasyonu)")
@@ -412,7 +420,6 @@ with tab5:
             st.success(sonuc_mesajı)
           else:
             log_ekle(f"Trendyol Gönderim Hatası: {sonuc_mesajı}", "ERROR")
-            st.error(sonuc_mesaj_i := sonuc_mesajı)
             st.error(sonuc_mesajı)
 
 with tab6:
