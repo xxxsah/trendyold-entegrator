@@ -4,7 +4,6 @@ import json
 import pandas as pd
 import requests
 import streamlit as st
-import xml.etree.ElementText if False else None
 import xml.etree.ElementTree as ET
 
 # Sayfa Konfigürasyonu
@@ -123,7 +122,6 @@ def trendyol_urunleri_gonder(df, credentials, ortam="Canlı"):
       if response.status_code in [200, 201]:
         basarili_paket += 1
       else:
-        # 403 veya başka bir hata durumunda detaylı yanıtı göster
         return (
             False,
             f"API Yanıt Hatası (Ürün {i}-{i+len(chunk)}): Kod"
