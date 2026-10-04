@@ -1,141 +1,180 @@
 import streamlit as st
 import pandas as pd
-import datetime
 
 # Sayfa Konfigürasyonu
 st.set_page_config(
-    page_title="MetEntegre Benzeri E-Ticaret Paneli",
-    page_icon="🚀",
+    page_title="MetEntegre - Profesyonel E-Ticaret Yönetim Paneli",
+    page_icon="📦",
     layout="wide"
 )
 
-# --- ÜST MENÜ / BAŞLIK ---
-st.title("🚀 Profesyonel E-Ticaret Entegrasyon & Yönetim Paneli")
-st.markdown("Trendyol, Hepsiburada ve XML Tedarikçi Yönetim Merkezi")
-
-# --- YAN MENÜ (SEKMELER) ---
-menu = st.sidebar.selectbox(
-    "Operasyon Menüsü",
-    [
-        "📊 Dashboard (Özet)", 
-        "📥 Tedarikçi & XML Ürün Çekme", 
-        "💰 Fiyat & Kar Marjı Motoru", 
-        "🔄 Stok Senkronizasyonu", 
-        "📦 Sipariş & İade Yönetimi"
-    ]
-)
+# Oturum Durumu
+if "giris_yapildi" not in st.session_state:
+    st.session_state.giris_yapildi = False
 
 # ==========================================
-# 1. DASHBOARD (GENEL BAKIŞ)
+# GİRİŞ EKRANI (LANDING)
 # ==========================================
-if menu == "📊 Dashboard (Özet)":
-    st.header("Mağaza Genel Durumu")
-    
-    col1, col2, col3, col4 = st.columns(4)
-    with col1:
-        st.metric(label="Aktif Ürün Sayısı", value="1,450", delta="+12")
-    with col2:
-        st.metric(label="Bugünkü Sipariş", value="24", delta="3 yeni")
-    with col3:
-        st.metric(label="Günlük Ciro", value="18,450 TL", delta="%18")
-    with col4:
-        st.metric(label="Kritik Stoktaki Ürün", value="5", delta="-2", delta_color="inverse")
-    
-    st.markdown("---")
-    st.subheader("Son Hareketler & Bildirimler")
-    st.info("ℹ️ Colezium XML başarıyla senkronize edildi. (Son güncelleme: Bugün 13:00)")
-    st.warning("⚠️ 5 ürünün tedarikçi stoğu tükenmek üzere, pazaryerlerinde güncellendi.")
-
-# ==========================================
-# 2. TEDARİKÇİ & XML ÜRÜN ÇEKME
-# ==========================================
-elif menu == "📥 Tedarikçi & XML Ürün Çekme":
-    st.header("Tedarikçi XML Entegrasyonu")
-    
-    with st.form("xml_form"):
-        st.subheader("Yeni XML Kaynağı Ekle")
-        tedarikci_adi = st.text_input("Tedarikçi Adı (Örn: Colezium / MetEntegre Tedarik)")
-        xml_url = st.text_input("XML Linki (URL)")
-        kategori_esitle = st.selectbox("Varsayılan Kategori Eşleme", ["Telefon Aksesuarları", "Ev Yaşam", "Elektronik"])
+if not st.session_state.giris_yapildi:
+    col_l1, col_l2, col_l3 = st.columns([1, 2, 1])
+    with col_l2:
+        st.markdown("### 🌐 **MetEntegre** Giriş Paneli")
+        st.info("İrmakxx Mağaza Yönetim Sistemi")
+        eposta = st.text_input("E-posta Adresi", value="sah1357sah@gmail.com")
+        sifre = st.text_input("Şifre", type="password", value="123456")
         
-        submit_xml = st.form_submit_button("XML'i İçe Aktar ve Ürünleri Çek")
+        if st.button("🚀 Sisteme Giriş Yap", use_container_width=True):
+            if eposta:
+                st.session_state.giris_yapildi = True
+                st.rerun()
+else:
+    # ==========================================
+    # SOL MENÜ (Görseldeki Menünün Aynısı)
+    # ==========================================
+    st.sidebar.title("📌 MetEntegre Menü")
+    secim = st.sidebar.selectbox(
+        "Sayfa Seçin",
+        [
+            "🏠 Anasayfa",
+            "💬 Destek Taleplerim",
+            "🔔 Bildirimler",
+            "📢 Duyurular",
+            "📦 Sistemdeki Ürünler",
+            "⚡ Oto Kritik Stok",
+            "🧡 Trendyol İşlemleri",
+            "🌸 Çiçeksepeti İşlemleri",
+            "🔴 N11 İşlemleri",
+            "📦 E-PTT AVM İşlemleri",
+            "🟠 Hepsiburada Tüm İşlemler",
+            "🔵 Pazarama İşlemleri",
+            "📚 İdefix İşlemleri",
+            "⚙️ Fiyat & Barkod Ayarları",
+            "⚙️ Ayarlar"
+        ]
+    )
+
+    if st.sidebar.button("🚪 Çıkış Yap"):
+        st.session_state.giris_yapildi = False
+        st.rerun()
+
+    # ==========================================
+    # 1. ANASAYFA
+    # ==========================================
+    if secim == "🏠 Anasayfa":
+        st.title("🌐 MetEntegre - Kontrol Paneli")
+        st.markdown("#### Pazaryeri Durum Özetleri")
         
-        if submit_xml:
-            if xml_url:
-                st.success(f"'{tedarikci_adi}' XML adresi sisteme tanımlandı ve ürünler kuyruğa eklendi!")
-            else:
-                st.error("Lütfen geçerli bir XML linki girin.")
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            st.markdown("""
+                <div style='background-color: #f8f9fa; border: 2px solid #ff6600; border-radius: 10px; padding: 12px; text-align: center;'>
+                    <h4 style='color: #ff6600; margin: 0;'>HEPSİBURADA</h4><hr style='margin: 5px 0;'>
+                    <p style='background-color: #e6f2ff; color: #004085; padding: 5px; border-radius: 5px;'><b>6 Gönderime Hazır</b></p>
+                    <p style='background-color: #f8d7da; color: #721c24; padding: 5px; border-radius: 5px;'><b>5 Kargoda</b></p>
+                </div>
+            """, unsafe_allow_html=True)
+        with c2:
+            st.markdown("""
+                <div style='background-color: #f8f9fa; border: 2px solid #f27a1a; border-radius: 10px; padding: 12px; text-align: center;'>
+                    <h4 style='color: #f27a1a; margin: 0;'>TRENDYOL</h4><hr style='margin: 5px 0;'>
+                    <p style='color: #666; padding: 15px;'>Sipariş yok</p>
+                </div>
+            """, unsafe_allow_html=True)
+        with c3:
+            st.markdown("""
+                <div style='background-color: #f8f9fa; border: 2px solid #ff69b4; border-radius: 10px; padding: 12px; text-align: center;'>
+                    <h4 style='color: #ff69b4; margin: 0;'>ÇİÇEKSEPETİ</h4><hr style='margin: 5px 0;'>
+                    <p style='color: #666; padding: 15px;'>Sipariş yok</p>
+                </div>
+            """, unsafe_allow_html=True)
 
-    st.subheader("Mevcut Tedarikçiler ve Ürün Listesi")
-    # Örnek Tablo
-    data = {
-        "Tedarikçi": ["Colezium", "Örnek Tedarikçi 2"],
-        "Son Güncelleme": ["04.10.2026 12:30", "03.10.2026 09:15"],
-        "Çekilen Ürün": [1250, 430],
-        "Durum": ["Aktif 🟢", "Aktif 🟢"]
-    }
-    st.table(pd.DataFrame(data))
+        st.markdown("<br>", unsafe_allow_html=True)
+        
+        # Fatura Bilgileri Kartı
+        st.markdown("""
+            <div style='background-color: #ffffff; border: 2px solid #004085; border-radius: 10px; padding: 15px;'>
+                <h4 style='color: #004085; text-align: center; margin-top: 0;'>👤 Fatura & Hesap Bilgileri</h4>
+                <hr>
+                <p><b>İsim:</b> Şahin Yiğit</p>
+                <p><b>Marka:</b> İrmakxx</p>
+                <p><b>Email:</b> sah1357sah@gmail.com</p>
+                <p><b>TC Kimlik No:</b> 34510406564</p>
+            </div>
+        """, unsafe_allow_html=True)
 
-# ==========================================
-# 3. FIYAT & KAR MARJI MOTORU
-# ==========================================
-elif menu == "💰 Fiyat & Kar Marjı Motoru":
-    st.header("Akıllı Fiyatlandırma & Net Kar Hesaplayıcı")
-    
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        alis_fiyati = st.number_input("Ürün Alış Fiyatı (KDV Hariç) - TL", min_value=0.0, value=100.0)
-        kdv_orani = st.selectbox("KDV Oranı (%)", [1, 10, 20], index=2)
-        komisyon_orani = st.slider("Pazaryeri Komisyon Oranı (%)", min_value=5, max_value=30, value=15)
-    
-    with col2:
-        kargo_maliyeti = st.number_input("Ortalama Kargo Gideri - TL", min_value=0.0, value=45.0)
-        hedef_kar_marji = st.slider("İstenen Net Kar Marjı (%)", min_value=5, max_value=100, value=25)
-    
-    # Hesaplama Mantığı
-    kdv_tutar = alis_fiyati * (kdv_orani / 100)
-    maliyet_toplam = alis_fiyati + kdv_tutar + kargo_maliyeti
-    # Hedef kar ve komisyon hesabı dahil satış fiyatı simülasyonu
-    tahmini_satis = maliyet_toplam * (1 + (hedef_kar_marji / 100)) / (1 - (komisyon_orani / 100))
-    
-    st.markdown("---")
-    st.subheader("Sonuç / Önerilen Satış Fiyatı")
-    res_col1, res_col2, res_col3 = st.columns(3)
-    res_col1.metric("Toplam Maliyet", f"{maliyet_toplam:.2f} TL")
-    res_col2.metric("Önerilen Satış Fiyatı (KDV Dahil)", f"{tahmini_satis:.2f} TL")
-    res_col3.metric("Net Tahmini Kazanç", f"{(tahmini_satis * (komisyon_orani/100)):.2f} TL")
+    # ==========================================
+    # 2. HEPSİBURADA TÜM İŞLEMLER (Görseldeki Ekran)
+    # ==========================================
+    elif secim == "🟠 Hepsiburada Tüm İşlemler":
+        st.title("🟠 Hepsiburada Mağaza Yönetimi")
+        st.write("Hepsiburada mağazanızdaki ürünler, eşleşme durumları ve entegrasyon araçları.")
+        
+        st.markdown("---")
+        col_hb1, col_hb2, col_hb3 = st.columns(3)
+        with col_hb1:
+            if st.button("🔄 Tam Senkronizasyon"):
+                st.success("Hepsiburada tam senkronizasyon kuyruğa eklendi!")
+        with col_hb2:
+            if st.button("⚠️ Kritik Stok Sıfırla"):
+                st.warning("Kritik stoktaki ürünler sıfırlandı.")
+        with col_hb3:
+            if st.button("📦 Tüm Barkodları Güncelle"):
+                st.info("Barkod senkronizasyonu başlatıldı.")
 
-# ==========================================
-# 4. STOK SENKRONIZASYONU
-# ==========================================
-elif menu == "🔄 Stok Senkronizasyonu":
-    st.header("Otomatik Stok ve Fiyat Güncelleyici")
-    st.write("Tedarikçi XML'lerindeki değişimleri Trendyol ve Hepsiburada mağazalarınıza yansıtın.")
-    
-    col1, col2 = st.columns(2)
-    with col1:
-        st.info("⏱️ **Otomatik Çalışma:** Arka planda her 1 saatte bir güncellenir.")
-        if st.button("Şimdi Tüm Stokları Senkronize Et (Manuel tetikle)"):
-            st.success("Senkronizasyon başlatıldı! Stoklar pazaryeri API'lerine iletiliyor...")
-    
-    with col2:
-        st.warning("🛡️ **Güvenlik Sınırı:** Tedarikçi stoğu 2 ve altındaysa mağazada '0' (Tükendi) göster.")
-        guvenlik_kilidi = st.checkbox("Stok Emniyet Kilidini Etkinleştir", value=True)
+        st.markdown("---")
+        st.subheader("Hızlı İşlem Paneli")
+        col_op1, col_op2 = st.columns(2)
+        with col_op1:
+            if st.button("🚀 Toplu Ürün Gönder"):
+                st.success("XML'deki ürünler Hepsiburada'ya gönderiliyor...")
+            if st.button("⏱️ Kargo Süresi Ayarla"):
+                st.info("Kargo teslim süreleri güncellendi.")
+        with col_op2:
+            if st.button("✅ Eşleşme Onay / Red"):
+                st.info("Eşleşme ekranı açıldı.")
+            if st.button("❌ Eşleşmemiş Ürünleri Stok 0'la"):
+                st.warning("Eşleşmeyen ürünlerin stoğu kapatıldı.")
 
-# ==========================================
-# 5. SIPARIŞ & İADE YÖNETİMİ
-# ==========================================
-elif menu == "📦 Sipariş & İade Yönetimi":
-    st.header("Çoklu Pazaryeri Sipariş Merkezi")
-    
-    filtre = st.radio("Görüntüle:", ["Tüm Siparişler", "Bekleyenler", "Kargodakiler", "İadeler"], horizontal=True)
-    
-    siparis_data = {
-        "Sipariş No": ["TRND-10492", "HPB-88392", "TRND-10493"],
-        "Pazaryeri": ["Trendyol", "Hepsiburada", "Trendyol"],
-        "Müşteri": ["Ahmet Y.", "Mehmet K.", "Ayşe D."],
-        "Tutar": ["450.00 TL", "1,200.00 TL", "230.00 TL"],
-        "Durum": ["Kargolandı 🚚", "Onay Bekliyor ⏳", "İade Talebi ↩️"]
-    }
-    st.dataframe(pd.DataFrame(siparis_data), use_container_width=True)
+    # ==========================================
+    # 3. FİYAT & BARKOD AYARLARI (Görseldeki Ekran)
+    # ==========================================
+    elif secim == "⚙️ Fiyat & Barkod Ayarları":
+        st.title("⚙️ Fiyat & Barkod Konfigürasyonu")
+        st.markdown("---")
+        
+        st.subheader("BARCODE BAŞLANGICI")
+        st.text_input("Ön Ek (Prefix)", value="RKRW", disabled=True)
+        if st.button("🔄 Yeni Barcode Oluştur"):
+            st.success("Yeni barkod öneki üretildi!")
+
+        st.subheader("SABİT KARGO FİYATI (TL / $)")
+        st.number_input("Kargo Maliyeti", value=120.0, disabled=True)
+        st.caption("Bu alan sistem yöneticisi tarafından sabitlenmiştir.")
+
+        st.subheader("SABİT ARTTIRIM VE KÂR MARJLARI")
+        st.number_input("Sabit Artırım (TL)", value=15)
+        st.info("Sistem tarafından otomatik kar marjı ve artırım uygulanmaktadır.")
+
+    # ==========================================
+    # 4. AYARLAR VE SOAP/REST API (Görseldeki Ekran)
+    # ==========================================
+    elif secim == "⚙️ Ayarlar":
+        st.title("🔌 API ve Mağaza Bağlantı Ayarları")
+        st.markdown("---")
+        
+        st.subheader("SOAP API - Ürün & Stok Yönetimi")
+        st.text_input("MAĞAZA ID (SUPPLIER ID)", value="20178075")
+        st.text_input("API KULLANICI ADI", value="İrmakxx")
+        st.text_input("API ŞİFRE", type="password", value="******")
+        st.text_input("MARKA", value="İrmak")
+        
+        if st.button("💾 Ayarları Kaydet"):
+            st.success("API ve Mağaza ayarları başarıyla güncellendi!")
+
+    # ==========================================
+    # DİĞER SEKMELER (Dinamik Şablon)
+    # ==========================================
+    else:
+        st.title(f"📌 {secim}")
+        st.info(f"Bu modül ({secim}) şu anda aktif ve veritabanı ile senkronize çalışmaktadır.")
+        st.write("İlgili operasyonel verileri buradan yönetebilirsiniz.")
