@@ -1,180 +1,171 @@
-import streamlit as st
+import streamlit as str_lib
 import pandas as pd
 
 # Sayfa Konfigürasyonu
-st.set_page_config(
-    page_title="MetEntegre - Profesyonel E-Ticaret Yönetim Paneli",
+str_lib.set_page_config(
+    page_title="MetEntegre - E-Ticaret Yönetim Paneli",
     page_icon="📦",
     layout="wide"
 )
 
-# Oturum Durumu
-if "giris_yapildi" not in st.session_state:
-    st.session_state.giris_yapildi = False
+# Oturum Durumu Yönetimi
+if "aktif_sayfa" not in str_lib.session_state:
+    str_lib.session_state.aktif_sayfa = "🏠 Anasayfa"
 
 # ==========================================
-# GİRİŞ EKRANI (LANDING)
+# SOL MENÜ (Orijinal Sistem Menüsü)
 # ==========================================
-if not st.session_state.giris_yapildi:
-    col_l1, col_l2, col_l3 = st.columns([1, 2, 1])
-    with col_l2:
-        st.markdown("### 🌐 **MetEntegre** Giriş Paneli")
-        st.info("İrmakxx Mağaza Yönetim Sistemi")
-        eposta = st.text_input("E-posta Adresi", value="sah1357sah@gmail.com")
-        sifre = st.text_input("Şifre", type="password", value="123456")
-        
-        if st.button("🚀 Sisteme Giriş Yap", use_container_width=True):
-            if eposta:
-                st.session_state.giris_yapildi = True
-                st.rerun()
-else:
-    # ==========================================
-    # SOL MENÜ (Görseldeki Menünün Aynısı)
-    # ==========================================
-    st.sidebar.title("📌 MetEntegre Menü")
-    secim = st.sidebar.selectbox(
-        "Sayfa Seçin",
-        [
-            "🏠 Anasayfa",
-            "💬 Destek Taleplerim",
-            "🔔 Bildirimler",
-            "📢 Duyurular",
-            "📦 Sistemdeki Ürünler",
-            "⚡ Oto Kritik Stok",
-            "🧡 Trendyol İşlemleri",
-            "🌸 Çiçeksepeti İşlemleri",
-            "🔴 N11 İşlemleri",
-            "📦 E-PTT AVM İşlemleri",
-            "🟠 Hepsiburada Tüm İşlemler",
-            "🔵 Pazarama İşlemleri",
-            "📚 İdefix İşlemleri",
-            "⚙️ Fiyat & Barkod Ayarları",
-            "⚙️ Ayarlar"
-        ]
-    )
+str_lib.sidebar.title("📌 MetEntegre Menü")
+secim = str_lib.sidebar.selectbox(
+    "Sayfa Seçin",
+    [
+        "🏠 Anasayfa",
+        "💬 Destek Taleplerim",
+        "🔔 Bildirimler",
+        "📢 Duyurular",
+        "📦 Sistemdeki Ürünler",
+        "⚡ Oto Kritik Stok",
+        "🧡 Trendyol Tüm İşlemler",
+        "🌸 Çiçeksepeti Tüm İşlemler",
+        "🔴 N11 Tüm İşlemler",
+        "📦 E-PTT AVM Tüm İşlemler",
+        "🟠 Hepsiburada Tüm İşlemler",
+        "🔵 Pazarama Tüm İşlemler",
+        "📚 İdefix Tüm İşlemler",
+        "⚙️ Fiyat & Barkod Ayarları",
+        "⚙️ Hesap ve API Ayarları"
+    ],
+    index=0
+)
 
-    if st.sidebar.button("🚪 Çıkış Yap"):
-        st.session_state.giris_yapildi = False
-        st.rerun()
-
-    # ==========================================
-    # 1. ANASAYFA
-    # ==========================================
-    if secim == "🏠 Anasayfa":
-        st.title("🌐 MetEntegre - Kontrol Paneli")
-        st.markdown("#### Pazaryeri Durum Özetleri")
-        
-        c1, c2, c3 = st.columns(3)
-        with c1:
-            st.markdown("""
-                <div style='background-color: #f8f9fa; border: 2px solid #ff6600; border-radius: 10px; padding: 12px; text-align: center;'>
-                    <h4 style='color: #ff6600; margin: 0;'>HEPSİBURADA</h4><hr style='margin: 5px 0;'>
-                    <p style='background-color: #e6f2ff; color: #004085; padding: 5px; border-radius: 5px;'><b>6 Gönderime Hazır</b></p>
-                    <p style='background-color: #f8d7da; color: #721c24; padding: 5px; border-radius: 5px;'><b>5 Kargoda</b></p>
-                </div>
-            """, unsafe_allow_html=True)
-        with c2:
-            st.markdown("""
-                <div style='background-color: #f8f9fa; border: 2px solid #f27a1a; border-radius: 10px; padding: 12px; text-align: center;'>
-                    <h4 style='color: #f27a1a; margin: 0;'>TRENDYOL</h4><hr style='margin: 5px 0;'>
-                    <p style='color: #666; padding: 15px;'>Sipariş yok</p>
-                </div>
-            """, unsafe_allow_html=True)
-        with c3:
-            st.markdown("""
-                <div style='background-color: #f8f9fa; border: 2px solid #ff69b4; border-radius: 10px; padding: 12px; text-align: center;'>
-                    <h4 style='color: #ff69b4; margin: 0;'>ÇİÇEKSEPETİ</h4><hr style='margin: 5px 0;'>
-                    <p style='color: #666; padding: 15px;'>Sipariş yok</p>
-                </div>
-            """, unsafe_allow_html=True)
-
-        st.markdown("<br>", unsafe_allow_html=True)
-        
-        # Fatura Bilgileri Kartı
-        st.markdown("""
-            <div style='background-color: #ffffff; border: 2px solid #004085; border-radius: 10px; padding: 15px;'>
-                <h4 style='color: #004085; text-align: center; margin-top: 0;'>👤 Fatura & Hesap Bilgileri</h4>
-                <hr>
-                <p><b>İsim:</b> Şahin Yiğit</p>
-                <p><b>Marka:</b> İrmakxx</p>
-                <p><b>Email:</b> sah1357sah@gmail.com</p>
-                <p><b>TC Kimlik No:</b> 34510406564</p>
+# ==========================================
+# 1. ANASAYFA (Görseldeki Orijinal Tasarım)
+# ==========================================
+if secim == "🏠 Anasayfa":
+    str_lib.title("🌐 MetEntegre - Kontrol Paneli")
+    str_lib.markdown("#### Pazaryeri Durum Özetleri")
+    
+    # 1. Satır Kartlar (Hepsiburada, Trendyol, Çiçeksepeti)
+    c1, c2, c3 = str_lib.columns(3)
+    with c1:
+        str_lib.markdown("""
+            <div style='background-color: #ffffff; border: 2px solid #e65100; border-radius: 8px; padding: 10px; text-align: center; box-shadow: 0 2px 4px rgba(0,0,0,0.1);'>
+                <div style='background-color: #e65100; color: white; padding: 8px; border-radius: 6px; font-weight: bold; margin-bottom: 8px;'>HEPSİBURADA</div>
+                <div style='background-color: #e3f2fd; color: #0d47a1; padding: 6px; border-radius: 5px; font-size: 13px; margin-bottom: 5px; font-weight: bold;'>📦 6 Gönderime Hazır</div>
+                <div style='background-color: #ffebee; color: #b71c1c; padding: 6px; border-radius: 5px; font-size: 13px; font-weight: bold;'>🚚 5 Kargoda</div>
+            </div>
+        """, unsafe_allow_html=True)
+    with c2:
+        str_lib.markdown("""
+            <div style='background-color: #ffffff; border: 2px solid #f27a1a; border-radius: 8px; padding: 10px; text-align: center; box-shadow: 0 2px 4px rgba(0,0,0,0.1);'>
+                <div style='background-color: #f27a1a; color: white; padding: 8px; border-radius: 6px; font-weight: bold; margin-bottom: 8px;'>TRENDYOL</div>
+                <div style='color: #757575; font-size: 14px; padding: 22px;'>Sipariş yok</div>
+            </div>
+        """, unsafe_allow_html=True)
+    with c3:
+        str_lib.markdown("""
+            <div style='background-color: #ffffff; border: 2px solid #e91e63; border-radius: 8px; padding: 10px; text-align: center; box-shadow: 0 2px 4px rgba(0,0,0,0.1);'>
+                <div style='background-color: #e91e63; color: white; padding: 8px; border-radius: 6px; font-weight: bold; margin-bottom: 8px;'>ÇİÇEKSEPETİ</div>
+                <div style='color: #757575; font-size: 14px; padding: 22px;'>Sipariş yok</div>
             </div>
         """, unsafe_allow_html=True)
 
-    # ==========================================
-    # 2. HEPSİBURADA TÜM İŞLEMLER (Görseldeki Ekran)
-    # ==========================================
-    elif secim == "🟠 Hepsiburada Tüm İşlemler":
-        st.title("🟠 Hepsiburada Mağaza Yönetimi")
-        st.write("Hepsiburada mağazanızdaki ürünler, eşleşme durumları ve entegrasyon araçları.")
-        
-        st.markdown("---")
-        col_hb1, col_hb2, col_hb3 = st.columns(3)
-        with col_hb1:
-            if st.button("🔄 Tam Senkronizasyon"):
-                st.success("Hepsiburada tam senkronizasyon kuyruğa eklendi!")
-        with col_hb2:
-            if st.button("⚠️ Kritik Stok Sıfırla"):
-                st.warning("Kritik stoktaki ürünler sıfırlandı.")
-        with col_hb3:
-            if st.button("📦 Tüm Barkodları Güncelle"):
-                st.info("Barkod senkronizasyonu başlatıldı.")
+    str_lib.markdown("<br>", unsafe_allow_html=True)
+    
+    # 2. Satır Kartlar (PTT AVM, N11, Pazarama)
+    c4, c5, c6 = str_lib.columns(3)
+    with c4:
+        str_lib.markdown("""
+            <div style='background-color: #ffffff; border: 2px solid #d84315; border-radius: 8px; padding: 10px; text-align: center; box-shadow: 0 2px 4px rgba(0,0,0,0.1);'>
+                <div style='background-color: #d84315; color: white; padding: 8px; border-radius: 6px; font-weight: bold; margin-bottom: 8px;'>PTT AVM</div>
+                <div style='background-color: #e8f5e9; color: #1b5e20; padding: 6px; border-radius: 5px; font-size: 13px; margin-bottom: 5px; font-weight: bold;'>🛍️ 1 Yeni Sipariş</div>
+                <div style='background-color: #ede7f6; color: #311b92; padding: 6px; border-radius: 5px; font-size: 13px; font-weight: bold;'>📦 1 Kargo Bekliyor</div>
+            </div>
+        """, unsafe_allow_html=True)
+    with c5:
+        str_lib.markdown("""
+            <div style='background-color: #ffffff; border: 2px solid #c62828; border-radius: 8px; padding: 10px; text-align: center; box-shadow: 0 2px 4px rgba(0,0,0,0.1);'>
+                <div style='background-color: #c62828; color: white; padding: 8px; border-radius: 6px; font-weight: bold; margin-bottom: 8px;'>N11</div>
+                <div style='color: #757575; font-size: 14px; padding: 22px;'>Sipariş yok</div>
+            </div>
+        """, unsafe_allow_html=True)
+    with c6:
+        str_lib.markdown("""
+            <div style='background-color: #ffffff; border: 2px solid #0277bd; border-radius: 8px; padding: 10px; text-align: center; box-shadow: 0 2px 4px rgba(0,0,0,0.1);'>
+                <div style='background-color: #0277bd; color: white; padding: 8px; border-radius: 6px; font-weight: bold; margin-bottom: 8px;'>PAZARAMA</div>
+                <div style='background-color: #eceff1; color: #37474f; padding: 18px; border-radius: 5px; font-size: 14px; font-weight: bold;'>Çok yakında</div>
+            </div>
+        """, unsafe_allow_html=True)
 
-        st.markdown("---")
-        st.subheader("Hızlı İşlem Paneli")
-        col_op1, col_op2 = st.columns(2)
-        with col_op1:
-            if st.button("🚀 Toplu Ürün Gönder"):
-                st.success("XML'deki ürünler Hepsiburada'ya gönderiliyor...")
-            if st.button("⏱️ Kargo Süresi Ayarla"):
-                st.info("Kargo teslim süreleri güncellendi.")
-        with col_op2:
-            if st.button("✅ Eşleşme Onay / Red"):
-                st.info("Eşleşme ekranı açıldı.")
-            if st.button("❌ Eşleşmemiş Ürünleri Stok 0'la"):
-                st.warning("Eşleşmeyen ürünlerin stoğu kapatıldı.")
+    str_lib.markdown("<br>", unsafe_allow_html=True)
+    
+    # 3. Satır Kartlar (İdefix)
+    c7, _, _ = str_lib.columns(3)
+    with c7:
+        str_lib.markdown("""
+            <div style='background-color: #ffffff; border: 2px solid #2e7d32; border-radius: 8px; padding: 10px; text-align: center; box-shadow: 0 2px 4px rgba(0,0,0,0.1);'>
+                <div style='background-color: #2e7d32; color: white; padding: 8px; border-radius: 6px; font-weight: bold; margin-bottom: 8px;'>İDEFİX</div>
+                <div style='background-color: #eceff1; color: #37474f; padding: 18px; border-radius: 5px; font-size: 14px; font-weight: bold;'>Çok yakında</div>
+            </div>
+        """, unsafe_allow_html=True)
 
-    # ==========================================
-    # 3. FİYAT & BARKOD AYARLARI (Görseldeki Ekran)
-    # ==========================================
-    elif secim == "⚙️ Fiyat & Barkod Ayarları":
-        st.title("⚙️ Fiyat & Barkod Konfigürasyonu")
-        st.markdown("---")
-        
-        st.subheader("BARCODE BAŞLANGICI")
-        st.text_input("Ön Ek (Prefix)", value="RKRW", disabled=True)
-        if st.button("🔄 Yeni Barcode Oluştur"):
-            st.success("Yeni barkod öneki üretildi!")
+    str_lib.markdown("<br><hr><br>", unsafe_allow_html=True)
+    
+    # Fotoğraftaki Fatura Bilgileri Paneli (Birebir Tasarım)
+    str_lib.markdown("""
+        <div style='background-color: #ffffff; border: 2px solid #1565c0; border-radius: 10px; overflow: hidden; box-shadow: 0 4px 6px rgba(0,0,0,0.1);'>
+            <div style='background-color: #1565c0; color: white; padding: 12px; font-size: 16px; font-weight: bold; text-align: center;'>
+                👤 Fatura Bilgileri
+            </div>
+            <div style='padding: 20px;'>
+                <table style='width: 100%; font-size: 15px; border-collapse: collapse;'>
+                    <tr style='border-bottom: 1px solid #e0e0e0;'>
+                        <td style='padding: 12px; font-weight: bold; width: 25%; color: #333;'>👤 İsim:</td>
+                        <td style='padding: 12px; color: #333;'>Şahin Yiğit</td>
+                    </tr>
+                    <tr style='border-bottom: 1px solid #e0e0e0;'>
+                        <td style='padding: 12px; font-weight: bold; color: #333;'>✉️ Email:</td>
+                        <td style='padding: 12px; color: #333;'>sah1357sah@gmail.com</td>
+                    </tr>
+                    <tr style='border-bottom: 1px solid #e0e0e0;'>
+                        <td style='padding: 12px; font-weight: bold; color: #333;'>📞 Telefon:</td>
+                        <td style='padding: 12px; color: #333;'>05346944235</td>
+                    </tr>
+                    <tr>
+                        <td style='padding: 12px; font-weight: bold; color: #333;'>📍 Adres:</td>
+                        <td style='padding: 12px; color: #333;'>Sevgi mah. 4642 sok no 4/1 Karabağlar İzmir[span_2](start_span)[span_2](end_span)</td>
+                    </tr>
+                </table>
+            </div>
+        </div>
+    """, unsafe_allow_html=True)
 
-        st.subheader("SABİT KARGO FİYATI (TL / $)")
-        st.number_input("Kargo Maliyeti", value=120.0, disabled=True)
-        st.caption("Bu alan sistem yöneticisi tarafından sabitlenmiştir.")
+# ==========================================
+# 2. SİSTEMDEKİ ÜRÜNLER
+# ==========================================
+elif secim == "📦 Sistemdeki Ürünler":
+    str_lib.title("📦 Sistemdeki Ürün Analizi")
+    str_lib.write("Sisteminizdeki kayıtlı ürün ve stok durumları[span_3](start_span)[span_3](end_span).")
+    
+    col1, col2, col3 = str_lib.columns(3)
+    col1.metric("Toplam Kategori", "4.009")
+    col2.metric("Toplam Ürün", "131.401")
+    col3.metric("Stoklu Ürün", "58.002")
 
-        st.subheader("SABİT ARTTIRIM VE KÂR MARJLARI")
-        st.number_input("Sabit Artırım (TL)", value=15)
-        st.info("Sistem tarafından otomatik kar marjı ve artırım uygulanmaktadır.")
+# ==========================================
+# 3. HEPSİBURADA TÜM İŞLEMLER
+# ==========================================
+elif secim == "🟠 Hepsiburada Tüm İşlemler":
+    str_lib.title("🟠 Hepsiburada Tüm İşlemler")
+    str_lib.write("Hepsiburada sipariş, kargo ve ürün senkronizasyon yönetimi.")
+    str_lib.warning("⚠️ Günlük Tam Senkronizasyon sınırına dikkat ediniz[span_4](start_span)[span_4](end_span).")
+    
+    if str_lib.button("🔄 Tam Senkronizasyon Başlat"):
+        str_lib.success("Hepsiburada senkronizasyonu tetiklendi!")
 
-    # ==========================================
-    # 4. AYARLAR VE SOAP/REST API (Görseldeki Ekran)
-    # ==========================================
-    elif secim == "⚙️ Ayarlar":
-        st.title("🔌 API ve Mağaza Bağlantı Ayarları")
-        st.markdown("---")
-        
-        st.subheader("SOAP API - Ürün & Stok Yönetimi")
-        st.text_input("MAĞAZA ID (SUPPLIER ID)", value="20178075")
-        st.text_input("API KULLANICI ADI", value="İrmakxx")
-        st.text_input("API ŞİFRE", type="password", value="******")
-        st.text_input("MARKA", value="İrmak")
-        
-        if st.button("💾 Ayarları Kaydet"):
-            st.success("API ve Mağaza ayarları başarıyla güncellendi!")
-
-    # ==========================================
-    # DİĞER SEKMELER (Dinamik Şablon)
-    # ==========================================
-    else:
-        st.title(f"📌 {secim}")
-        st.info(f"Bu modül ({secim}) şu anda aktif ve veritabanı ile senkronize çalışmaktadır.")
-        st.write("İlgili operasyonel verileri buradan yönetebilirsiniz.")
+# ==========================================
+# DİĞER MODÜLLER
+# ==========================================
+else:
+    str_lib.title(f"📌 {secim}")
+    str_lib.info("İlgili modül aktif olarak çalışmaktadır.")
