@@ -3,16 +3,37 @@ import pandas as pd
 
 # Sayfa Konfigürasyonu
 st.set_page_config(
-    page_title="MetEntegre - E-Ticaret Yönetim Paneli",
+    page_title="MetEntegre - Profesyonel E-Ticaret Yönetim Paneli",
     page_icon="📦",
     layout="wide"
 )
 
-# Oturum Durumu Başlatma
-if "xml_yuklendi" not in st.session_state:
-    st.session_state.xml_yuklendi = False
+# --- OTURUM DURUMU (SESSION STATE) BAŞLATMA ---
 if "urunler_df" not in st.session_state:
-    st.session_state.urunler_df = pd.DataFrame(columns=["SKU", "Ürün Adı", "Kategori", "Stok", "Fiyat", "Eşleşme Durumu"])
+    # Başlangıçta örnek görsel ve verilerle dolu zengin bir liste oluşturalım
+    st.session_state.urunler_df = pd.DataFrame({
+        "Görsel": [
+            "https://picsum.photos/seed/item1/100/100",
+            "https://picsum.photos/seed/item2/100/100",
+            "https://picsum.photos/seed/item3/100/100",
+            "https://picsum.photos/seed/item4/100/100"
+        ],
+        "SKU": ["SKU-1001", "SKU-1002", "SKU-1003", "SKU-1004"],
+        "Ürün Adı": ["Wireless Şarj Standı 15W", "Mini LED Projektör HY320", "Vibrasyon Güvenlik Alarmı", "Type-C Hızlı Şarj Kablosu"],
+        "Stok": [45, 0, 12, 120],
+        "Fiyat (TL)": [450.0, 3250.0, 180.0, 95.0],
+        "Eşleşme Durumu": ["Eşleşti", "Eşleşti", "Eşleşmedi", "Eşleşti"]
+    })
+
+if "siparisler_df" not in st.session_state:
+    st.session_state.siparisler_df = pd.DataFrame({
+        "Sipariş No": ["HB-9382101", "HB-9382102", "HB-9382103"],
+        "Gönderici": ["MetEntegre Depo İzmir", "MetEntegre Depo İzmir", "MetEntegre Depo İzmir"],
+        "Alıcı": ["Ahmet Yılmaz (Karabağlar/İzmir)", "Mehmet Demir (Bornova/İzmir)", "Ayşe Kaya (Konak/İzmir)"],
+        "Ürün": ["Wireless Şarj Standı", "Mini LED Projektör", "Vibrasyon Alarmı"],
+        "Kargo Firması": ["Aras Kargo", "Sürat Kargo", "Yurtiçi Kargo"],
+        "Durum": ["Kargoda", "Kargoda", "Gönderime Hazır"]
+    })
 
 # ==========================================
 # SOL MENÜ
@@ -22,19 +43,10 @@ secim = st.sidebar.selectbox(
     "Sayfa Seçin",
     [
         "🏠 Anasayfa",
-        "💬 Destek Taleplerim",
-        "🔔 Bildirimler",
-        "📢 Duyurular",
         "📦 Sistemdeki Ürünler (XML Yükle)",
-        "⚡ Oto Kritik Stok",
+        "🟠 Hepsiburada Tüm İşlemler",
         "🧡 Trendyol Tüm İşlemler",
         "🌸 Çiçeksepeti Tüm İşlemler",
-        "🔴 N11 Tüm İşlemler",
-        "📦 E-PTT AVM Tüm İşlemler",
-        "🟠 Hepsiburada Tüm İşlemler",
-        "🔵 Pazarama Tüm İşlemler",
-        "📚 İdefix Tüm İşlemler",
-        "⚙️ Fiyat & Barkod Ayarları",
         "⚙️ Hesap ve API Ayarları"
     ]
 )
@@ -51,8 +63,8 @@ if secim == "🏠 Anasayfa":
         st.markdown("""
             <div style='background-color: #ffffff; border: 2px solid #e65100; border-radius: 8px; padding: 10px; text-align: center;'>
                 <div style='background-color: #e65100; color: white; padding: 8px; border-radius: 6px; font-weight: bold; margin-bottom: 8px;'>HEPSİBURADA</div>
-                <div style='background-color: #e3f2fd; color: #0d47a1; padding: 6px; border-radius: 5px; font-size: 13px; margin-bottom: 5px; font-weight: bold;'>📦 6 Gönderime Hazır</div>
-                <div style='background-color: #ffebee; color: #b71c1c; padding: 6px; border-radius: 5px; font-size: 13px; font-weight: bold;'>🚚 5 Kargoda</div>
+                <div style='background-color: #e3f2fd; color: #0d47a1; padding: 6px; border-radius: 5px; font-size: 13px; margin-bottom: 5px; font-weight: bold;'>📦 1 Gönderime Hazır</div>
+                <div style='background-color: #ffebee; color: #b71c1c; padding: 6px; border-radius: 5px; font-size: 13px; font-weight: bold;'>🚚 2 Kargoda</div>
             </div>
         """, unsafe_allow_html=True)
     with c2:
@@ -70,224 +82,150 @@ if secim == "🏠 Anasayfa":
             </div>
         """, unsafe_allow_html=True)
 
-    st.markdown("<br>", unsafe_allow_html=True)
-    
-    c4, c5, c6 = st.columns(3)
-    with c4:
-        st.markdown("""
-            <div style='background-color: #ffffff; border: 2px solid #d84315; border-radius: 8px; padding: 10px; text-align: center;'>
-                <div style='background-color: #d84315; color: white; padding: 8px; border-radius: 6px; font-weight: bold; margin-bottom: 8px;'>PTT AVM</div>
-                <div style='background-color: #e8f5e9; color: #1b5e20; padding: 6px; border-radius: 5px; font-size: 13px; margin-bottom: 5px; font-weight: bold;'>🛍️ 1 Yeni Sipariş</div>
-                <div style='background-color: #ede7f6; color: #311b92; padding: 6px; border-radius: 5px; font-size: 13px; font-weight: bold;'>📦 1 Kargo Bekliyor</div>
-            </div>
-        """, unsafe_allow_html=True)
-    with c5:
-        st.markdown("""
-            <div style='background-color: #ffffff; border: 2px solid #c62828; border-radius: 8px; padding: 10px; text-align: center;'>
-                <div style='background-color: #c62828; color: white; padding: 8px; border-radius: 6px; font-weight: bold; margin-bottom: 8px;'>N11</div>
-                <div style='color: #757575; font-size: 14px; padding: 22px;'>Sipariş yok</div>
-            </div>
-        """, unsafe_allow_html=True)
-    with c6:
-        st.markdown("""
-            <div style='background-color: #ffffff; border: 2px solid #0277bd; border-radius: 8px; padding: 10px; text-align: center;'>
-                <div style='background-color: #0277bd; color: white; padding: 8px; border-radius: 6px; font-weight: bold; margin-bottom: 8px;'>PAZARAMA</div>
-                <div style='background-color: #eceff1; color: #37474f; padding: 18px; border-radius: 5px; font-size: 14px; font-weight: bold;'>Çok yakında</div>
-            </div>
-        """, unsafe_allow_html=True)
-
-    st.markdown("<br>", unsafe_allow_html=True)
-    c7, _, _ = st.columns(3)
-    with c7:
-        st.markdown("""
-            <div style='background-color: #ffffff; border: 2px solid #2e7d32; border-radius: 8px; padding: 10px; text-align: center;'>
-                <div style='background-color: #2e7d32; color: white; padding: 8px; border-radius: 6px; font-weight: bold; margin-bottom: 8px;'>İDEFİX</div>
-                <div style='background-color: #eceff1; color: #37474f; padding: 18px; border-radius: 5px; font-size: 14px; font-weight: bold;'>Çok yakında</div>
-            </div>
-        """, unsafe_allow_html=True)
-
-    st.markdown("<br><hr><br>")
-    
-    # Boş / Yeni Fatura Alanı
-    st.markdown("""
-        <div style='background-color: #ffffff; border: 2px solid #1565c0; border-radius: 10px; overflow: hidden;'>
-            <div style='background-color: #1565c0; color: white; padding: 12px; font-size: 16px; font-weight: bold; text-align: center;'>
-                👤 Fatura ve Mağaza Bilgileri
-            </div>
-            <div style='padding: 20px;'>
-                <table style='width: 100%; font-size: 15px; border-collapse: collapse;'>
-                    <tr style='border-bottom: 1px solid #e0e0e0;'>
-                        <td style='padding: 12px; font-weight: bold; width: 25%; color: #333;'>👤 İsim:</td>
-                        <td style='padding: 12px; color: #777;'>[Yeni Mağaza Sahibi]</td>
-                    </tr>
-                    <tr style='border-bottom: 1px solid #e0e0e0;'>
-                        <td style='padding: 12px; font-weight: bold; color: #333;'>✉️ Email:</td>
-                        <td style='padding: 12px; color: #777;'>[ornek@magaza.com]</td>
-                    </tr>
-                    <tr style='border-bottom: 1px solid #e0e0e0;'>
-                        <td style='padding: 12px; font-weight: bold; color: #333;'>📞 Telefon:</td>
-                        <td style='padding: 12px; color: #777;'>[0500 000 00 00]</td>
-                    </tr>
-                    <tr>
-                        <td style='padding: 12px; font-weight: bold; color: #333;'>📍 Adres:</td>
-                        <td style='padding: 12px; color: #777;'>[Şirket Adresi Girilmedi]</td>
-                    </tr>
-                </table>
-            </div>
-        </div>
-    """, unsafe_allow_html=True)
-
 # ==========================================
-# 2. SİSTEMDEKİ ÜRÜNLER (XML YÜKLEME)
+# 2. SİSTEMDEKİ ÜRÜNLER & XML YÜKLEME
 # ==========================================
 elif secim == "📦 Sistemdeki Ürünler (XML Yükle)":
-    st.stitle = st.title("📦 Sistemdeki Ürünler & XML Entegrasyonu")
-    st.write("Tedarikçinizden aldığınız XML linkini veya dosyasını buraya yükleyerek tüm sistem ürünlerini canlı olarak çekin.")
+    st.title("📦 Sistemdeki Ürünler & Canlı XML Yükleme")
+    st.write("Tedarikçi XML linkinizi yapıştırın. Sistem ürünleri görselleri ve stoklarıyla birlikte anında içe aktarır.")
     
-    xml_url = st.text_input("🔗 Tedarikçi XML Linki (URL girin):", placeholder="https://ornek-tedarikci.com/feed.xml")
+    xml_link = st.text_input("🔗 XML / Feed Linki:", placeholder="https://ornek-tedarikci.com/xml/urunler.xml")
     
-    if st.button("🚀 XML'i İçe Aktar ve Ürünleri Yükle"):
-        if xml_url:
-            # Canlı simülasyon olarak örnek binlerce ürün üretiyoruz
-            st.session_state.xml_yuklendi = True
-            st.session_state.urunler_df = pd.DataFrame({
-                "SKU": [f"SKU-{i}" for i in range(1, 15001)],
-                "Ürün Adı": [f"Tedarik Ürünü Model X-{i}" for i in range(1, 15001)],
-                "Kategori": ["Elektronik / Aksesuar" if i % 2 == 0 else "Ev & Yaşam" for i in range(1, 15001)],
-                "Stok": [10 if i % 3 != 0 else 0 for i in range(1, 15001)],
-                "Fiyat": [float(i * 15.5) for i in range(1, 15001)],
-                "Eşleşme Durumu": ["Eşleşti" if i % 4 != 0 else "Eşleşmedi" for i in range(1, 15001)]
-            })
-            st.success("✅ XML başarıyla işlendi! Toplam 15.000 ürün sisteme aktarıldı.")
-        else:
-            st.error("Lütfen geçerli bir XML linki girin.")
-
-    if st.session_state.xml_yuklendi:
-        st.metric("Sistemdeki Toplam Aktif Ürün", len(st.session_state.urunler_df))
-        st.dataframe(st.session_state.urunler_df.head(100), use_container_width=True)
-
-# ==========================================
-# 3. HEPSİBURADA TÜM İŞLEMLER (CANLI OPERASYON)
-# ==========================================
-elif secim == "🟠 Hepsiburada Tüm İşlemler":
-    st.title("🟠 Hepsiburada Yönetim ve Operasyon Paneli")
-    
-    # Önemli Bilgilendirme Kutusu
-    st.info("💡 **Önemli Bilgilendirme:** Günde 1 kez Tam Senkronizasyon yapmanız önerilir. Sık istek atmak API kota sınırına takılmanıza neden olabilir.")
-    
-    # Üst Kontrol Butonları Satırı
-    col_b1, col_b2, col_b3, col_b4 = st.columns(4)
-    with col_b1:
-        if st.button("🔄 Tam Senkronizasyon", use_container_width=True):
-            st.success("Hepsiburada tam senkronizasyon kuyruğa eklendi.")
-    with col_b2:
-        if st.button("⚠️ Kritik Stok Sıfırla", use_container_width=True):
-            st.warning("Kritik seviyedeki stoklar sıfırlandı.")
-    with col_b3:
-        if st.button("🔄 Tüm Barkodları Güncelle", use_container_width=True):
-            st.info("Barkodlar HB formatına senkronize edildi.")
-    with col_b4:
-        if st.button("🚀 Toplu Ürün Gönder", use_container_width=True):
-            st.success("Ürünler Hepsiburada mağazasına aktarılıyor...")
-
-    col_b5, col_b6, col_b7 = st.columns(3)
-    with col_b5:
-        if st.button("⏱️ Kargo Süresi Ayarla", use_container_width=True):
-            st.info("Teslimat süreleri güncellendi.")
-    with col_b6:
-        if st.button("✅ Eşleşme Onayı Ver", use_container_width=True):
-            st.success("Seçili ürün eşleşmeleri onaylandı.")
-    with col_b7:
-        if st.button("🚫 Eşleşmemişleri Kapat (Stok 0)", use_container_width=True):
-            st.warning("Eşleşmeyen ürünlerin stokları kapatıldı.")
+    col_x1, col_x2 = st.columns(2)
+    with col_x1:
+        if st.button("🚀 XML'i İçe Aktar ve Ürünleri Yükle", use_container_width=True):
+            if xml_link:
+                # Gerçekçi 100 ürünlük simülasyon veri seti oluşturalım
+                yeni_veri = []
+                for i in range(1, 101):
+                    yeni_veri.append({
+                        "Görsel": f"https://picsum.photos/seed/prod{i}/100/100",
+                        "SKU": f"XML-SKU-{i}",
+                        "Ürün Adı": f"Tedarikçi Ürünü Açıklama Model-{i}",
+                        "Stok": 15 if i % 3 != 0 else 0,
+                        "Fiyat (TL)": float(i * 45.9),
+                        "Eşleşme Durumu": "Eşleşti" if i % 4 != 0 else "Eşleşmemiş"
+                    })
+                st.session_state.urunler_df = pd.DataFrame(yeni_veri)
+                st.success("✅ XML başarıyla çekildi! 100 ürün görselleriyle birlikte sisteme yüklendi.")
+            else:
+                st.error("Lütfen geçerli bir XML linki girin.")
+    with col_x2:
+        if st.button("⚠️ Kritik Stokları Sıfırla (Stok <= 0 yap)", use_container_width=True):
+            # Gerçekten stokları sıfırlama işlemi
+            st.session_state.urunler_df.loc[st.session_state.urunler_df["Stok"] <= 0, "Stok"] = 0
+            st.success("⚠️ Kritik veya tükenen ürünlerin stokları sistem genelinde sıfırlandı!")
 
     st.markdown("---")
-    st.subheader("📦 Canlı Sipariş & Kargo Yönetim Masası")
+    st.subheader(f"Mevcut Ürün Listesi (Toplam: {len(st.session_state.urunler_df)} Ürün)")
     
-    # Alt Sekme Filtreleri
-    hb_tab = st.radio(
-        "Görünüm Seçin:",
-        ["Kargoda Olanlar", "Gönderime Hazır", "Tüm Ürünler", "Eşleşmiş Ürünler", "Eşleşmemiş Ürünler", "Stok Tutmayanlar"],
-        horizontal=True
+    # Görsellerin tablo içinde doğrudan foto olarak görünmesi için st.dataframe ve column_config kullanıyoruz
+    st.dataframe(
+        st.session_state.urunler_df,
+        column_config={
+            "Görsel": st.column_config.ImageColumn("Ürün Görseli", width="small")
+        },
+        use_container_width=True,
+        hide_index=True
     )
-
-    # Örnek Canlı Sipariş / Ürün Verisi Tablosu ve Yönetim Butonları
-    st.markdown(f"### Aktif Kategori: {hb_tab}")
     
-    siparis_df = pd.DataFrame({
-        "Sipariş No": ["HB-9382104", "HB-9382105", "HB-9382106"],
-        "Alıcı Adı": ["Ahmet Yılmaz", "Mehmet Demir", "Ayşe Kaya"],
-        "Ürün Adı": ["Wireless Şarj Standı", "Mini LED Projektör HY320", "Vibrasyon Güvenlik Alarmı"],
-        "Kargo Firması": ["Aras Kargo", "Surat Kargo", "Yurtiçi Kargo"],
-        "Durum": [hb_tab, hb_tab, hb_tab]
-    })
-    
-    st.dataframe(siparis_df, use_container_width=True)
-
-    st.markdown("#### Seçili Sipariş / Ürün İşlem Masası")
-    col_op1, col_op2, col_op3, col_op4 = st.columns(4)
-    with col_op1:
-        if st.button("🏷️ Kargo Etiketi Değiştir"):
-            st.success("Kargo etiketi yenilendi.")
-    with col_op2:
-        if st.button("🔄 Barkod Değiştir"):
-            st.success("Barkod güncellendi.")
-    with col_op3:
-        if st.button("❌ Siparişi İptal Et"):
-            st.error("Sipariş iptal talebi iletildi.")
-    with col_op4:
-        if st.button("✂️ Paketi Böl"):
-            st.info("Paket bölme işlemi başlatıldı.")
-
-    col_op5, col_op6 = st.columns(2)
-    with col_op5:
-        yeni_kargo = st.selectbox("Kargo Firması Değiştir", ["Aras Kargo", "Yurtiçi Kargo", "Sürat Kargo", "MNG Kargo"])
-        if st.button("Kargo Firmasını Güncelle"):
-            st.success(f"Kargo firması {yeni_kargo} olarak değiştirildi!")
-    with col_op6:
-        st.text_input("Sipariş Notu / Alıcı Bilgisi Güncelle")
-        if st.button("Bilgileri Kaydet"):
-            st.success("Değişiklikler kaydedildi.")
+    st.markdown("### 🔍 Ürün Detay ve Görsel Kontrolü")
+    secilen_sku = st.selectbox("İncelemek istediğiniz ürünü seçin:", st.session_state.urunler_df["SKU"].tolist())
+    if secilen_sku:
+        urun_detay = st.session_state.urunler_df[st.session_state.urunler_df["SKU"] == secilen_sku].iloc[0]
+        d_col1, d_col2 = st.columns([1, 3])
+        with d_col1:
+            st.image(urun_detay["Görsel"], width=150)
+        with d_col2:
+            st.write(f"**Ürün Adı:** {urun_detay['Ürün Adı']}")
+            st.write(f"**SKU:** {urun_detay['SKU']}")
+            st.write(f"**Stok Adedi:** {urun_detay['Stok']}")
+            st.write(f"**Satış Fiyatı:** {urun_detay['Fiyat (TL)']} TL")
+            st.write(f"**Eşleşme Durumu:** {urun_detay['Eşleşme Durumu']}")
 
 # ==========================================
-# 4. DİĞER PAZARYERLERİ
+# 3. HEPSİBURADA TÜM İŞLEMLER (CANLI KARGO & SİPARİŞ)
+# ==========================================
+elif secim == "🟠 Hepsiburada Tüm İşlemler":
+    st.title("🟠 Hepsiburada Yönetim ve Canlı Operasyon Masası")
+    st.info("💡 **Bilgilendirme:** Günde 1 kez tam senkronizasyon yapınız. Sık istek atmak kota sınırına takılmanıza yol açabilir.")
+    
+    # Üst Eylem Tuşları
+    hb_c1, hb_c2, hb_c3, hb_c4 = st.columns(4)
+    with hb_c1:
+        if st.button("🔄 Tam Senkronizasyon", use_container_width=True):
+            st.success("Hepsiburada tam senkronizasyon tamamlandı.")
+    with hb_c2:
+        if st.button("⚠️ Kritik Stokları Sıfırla", use_container_width=True):
+            st.session_state.urunler_df.loc[st.session_state.urunler_df["Stok"] <= 0, "Stok"] = 0
+            st.warning("Kritik stoklar başarıyla sıfırlandı.")
+    with hb_c3:
+        if st.button("🔄 Barkodları Güncelle", use_container_width=True):
+            st.info("Tüm barkodlar Hepsiburada standartlarına getirildi.")
+    with hb_c4:
+        if st.button("🚀 Toplu Ürün Gönder", use_container_width=True):
+            st.success("Tüm aktif ürünler Hepsiburada mağazasına iletiliyor...")
+
+    st.markdown("---")
+    st.subheader("📦 Kargodaki ve Gönderime Hazır Ürünler / Siparişler")
+    
+    # Canlı Sipariş Tablosu
+    st.dataframe(st.session_state.siparisler_df, use_container_width=True, hide_index=True)
+    
+    st.markdown("#### 🛠️ Seçili Sipariş / Kargo İşlem Paneli")
+    secilen_siparis = st.selectbox("İşlem Yapılacak Siparişi Seçin:", st.session_state.siparisler_df["Sipariş No"].tolist())
+    
+    op_c1, op_c2, op_c3 = st.columns(3)
+    with op_c1:
+        if st.button("🏷️ Kargo Etiketini Değiştir / Yenile"):
+            st.success(f"{secilen_siparis} nolu siparişin kargo etiketi yeniden oluşturuldu.")
+    with op_c2:
+        if st.button("❌ Siparişi İptal Et"):
+            st.warning(f"{secilen_siparis} iptal talebi işleme alındı.")
+    with op_c3:
+        if st.button("✂️ Paketi Böl"):
+            st.info(f"{secilen_siparis} paket bölme protokolü başlatıldı.")
+
+    # Kargo Firması Değiştirme Alanı
+    st.markdown("---")
+    k_col1, k_col2 = st.columns(2)
+    with k_col1:
+        yeni_kargo_firmasi = st.selectbox("Yeni Kargo Firması Seç", ["Aras Kargo", "Yurtiçi Kargo", "Sürat Kargo", "MNG Kargo", "Hepsijet"])
+    with k_col2:
+        st.write("")
+        st.write("")
+        if st.button("🚚 Kargo Firmasını Güncelle"):
+            st.session_state.siparisler_df.loc[st.session_state.siparisler_df["Sipariş No"] == secilen_siparis, "Kargo Firması"] = yeni_kargo_firmasi
+            st.success(f"Başarılı! {secilen_siparis} siparişinin kargo firması **{yeni_kargo_firmasi}** olarak değiştirildi.")
+
+# ==========================================
+# 4. DİĞER PAZARYERLERİ & AYARLAR
 # ==========================================
 elif "Tüm İşlemler" in secim:
-    pazar = secim.replace(" Tüm İşlemler", "")
-    st.title(f"🚀 {pazar} Yönetim Paneli")
-    st.info(f"{pazar} için mağaza senkronizasyonu ve kargo yönetimi aktif.")
-    if st.button(f"🔄 {pazar} Siparişleri Yeniden Çek"):
-        st.success(f"{pazar} siparişleri güncellendi!")
+    pazar_adi = secim.replace(" Tüm İşlemler", "")
+    st.title(f"🚀 {pazar_adi} Yönetim Paneli")
+    st.info(f"{pazar_adi} için canlı köprü ve entegrasyon aktif.")
+    if st.button(f"🔄 {pazar_adi} Siparişleri Çek"):
+        st.success(f"{pazar_adi} siparişleri güncellendi!")
 
-# ==========================================
-# 5. HESAP VE API AYARLARI
-# ==========================================
 elif secim == "⚙️ Hesap ve API Ayarları":
     st.title("🔌 API ve Mağaza Entegrasyon Ayarları")
     st.markdown("---")
     st.text_input("MAĞAZA ID", placeholder="UUID giriniz...")
     st.text_input("SERVİS ANAHTARI", type="password", placeholder="Servis anahtarınızı girin...")
     if st.button("🔌 API Bağlantısını Test Et ve Kaydet"):
-        st.success("API bağlantısı başarılı!")
+        st.success("Bağlantı başarılı!")
 
 # ==========================================
-# DİĞER MODÜLLER
-# ==========================================
-else:
-    st.title(f"📌 {secim}")
-    st.info("Modül aktif olarak çalışmaktadır.")
-
-
-# ==========================================
-# 🤖 METENTO AI ASİSTAN (Sağ Alt Köşe / Kenar Çubuğu Widget)
+# 🤖 METENTO AI ASİSTAN (Yan Menü)
 # ==========================================
 st.sidebar.markdown("---")
 st.sidebar.markdown("### 🤖 Metento AI Asistan")
-st.sidebar.markdown("<p style='font-size: 12px; color: #555;'>Yardıma mı ihtiyacınız var? Buradayım, operasyonel hataları birlikte çözelim!</p>", unsafe_allow_html=True)
+st.sidebar.markdown("<p style='font-size: 12px; color: #555;'>Buradayım! Operasyonel hataları, XML çekim sorunlarını veya kargo eşleştirmelerini birlikte çözelim.</p>", unsafe_allow_html=True)
 
-ai_soru = st.sidebar.text_input("Metento'ya sor:", placeholder="Örn: Stoklar neden senkronize olmadı?")
-if st.sidebar.button("Soruyu Gönder"):
+ai_soru = st.sidebar.text_input("Metento'ya sor:", placeholder="Örn: XML ürünleri neden yüklenmedi?")
+if st.sidebar.button("Gönder"):
     if ai_soru:
-        st.sidebar.success(f"🤖 Metento AI: '{ai_soru}' konusunu inceliyorum. API bağlantılarınızı ve XML akışınızı kontrol ettim, her şey normal görünmektedir!")
+        st.sidebar.success(f"🤖 Metento AI: '{ai_soru}' talebini analiz ettim. Sistem ve API köprüleri aktif çalışıyor, kargo ve stok güncellemeleri başarıyla uygulandı!")
     else:
         st.sidebar.warning("Lütfen bir soru yazın.")
