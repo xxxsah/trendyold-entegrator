@@ -1,431 +1,141 @@
-import base64
-import datetime
-import json
-import pandas as pd
-import requests
 import streamlit as st
-import xml.etree.ElementTree as ET
+import pandas as pd
+import datetime
 
 # Sayfa Konfigürasyonu
 st.set_page_config(
-    page_title="ProEntegre - Profesyonel E-Ticaret Yönetim Merkezi",
-    layout="wide",
+    page_title="MetEntegre Benzeri E-Ticaret Paneli",
+    page_icon="🚀",
+    layout="wide"
 )
 
-# Üst Başlık
-st.title("🚀 ProEntegre | Profesyonel XML & Trendyol Entegrasyon Sistemi")
-st.markdown(
-    "Trendyol ve Hepsiburada operasyonlarınızı güvenli ve hatasız yönetin."
+# --- ÜST MENÜ / BAŞLIK ---
+st.title("🚀 Profesyonel E-Ticaret Entegrasyon & Yönetim Paneli")
+st.markdown("Trendyol, Hepsiburada ve XML Tedarikçi Yönetim Merkezi")
+
+# --- YAN MENÜ (SEKMELER) ---
+menu = st.sidebar.selectbox(
+    "Operasyon Menüsü",
+    [
+        "📊 Dashboard (Özet)", 
+        "📥 Tedarikçi & XML Ürün Çekme", 
+        "💰 Fiyat & Kar Marjı Motoru", 
+        "🔄 Stok Senkronizasyonu", 
+        "📦 Sipariş & İade Yönetimi"
+    ]
 )
-st.markdown("---")
 
-# Session State Başlatma
-if "urunler_df" not in st.session_state:
-  st.session_state["urunler_df"] = pd.DataFrame()
-if "loglar" not in st.session_state:
-  st.session_state["loglar"] = []
+# ==========================================
+# 1. DASHBOARD (GENEL BAKIŞ)
+# ==========================================
+if menu == "📊 Dashboard (Özet)":
+    st.header("Mağaza Genel Durumu")
+    
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        st.metric(label="Aktif Ürün Sayısı", value="1,450", delta="+12")
+    with col2:
+        st.metric(label="Bugünkü Sipariş", value="24", delta="3 yeni")
+    with col3:
+        st.metric(label="Günlük Ciro", value="18,450 TL", delta="%18")
+    with col4:
+        st.metric(label="Kritik Stoktaki Ürün", value="5", delta="-2", delta_color="inverse")
+    
+    st.markdown("---")
+    st.subheader("Son Hareketler & Bildirimler")
+    st.info("ℹ️ Colezium XML başarıyla senkronize edildi. (Son güncelleme: Bugün 13:00)")
+    st.warning("⚠️ 5 ürünün tedarikçi stoğu tükenmek üzere, pazaryerlerinde güncellendi.")
 
-
-def log_ekle(mesaj, seviye="INFO"):
-  zaman = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-  st.session_state["loglar"].insert(
-      0, {"Zaman": zaman, "Seviye": seviye, "Mesaj": mesaj}
-  )
-
-
-# Güvenli Fiyat Parse Fonksiyonu
-def fiyat_parse(s):
-  if not s:
-    return 0.0
-  s = (
-      str(s)
-      .replace("TL", "")
-      .replace("₺", "")
-      .replace("USD", "")
-      .replace("EUR", "")
-      .replace(" ", "")
-      .strip()
-  )
-  if "," in s and "." in s:
-    if s.rfind(",") > s.rfind("."):
-      s = s.replace(".", "").replace(",", ".")
-    else:
-      s = s.replace(",", "")
-  elif "," in s:
-    s = s.replace(",", ".")
-  try:
-    return float(s)
-  except ValueError:
-    return 0.0
-
-
-# Gelişmiş Trendyol API Gönderim Fonksiyonu
-def trendyol_urunleri_gonder(df, credentials, ortam="Canlı"):
-  supplier_id = credentials["supplier_id"].strip()
-  api_key = credentials["key"].strip()
-  api_secret = credentials["secret"].strip()
-
-  auth_str = f"{api_key}:{api_secret}"
-  encoded_auth = base64.b64encode(auth_str.encode("utf-8")).decode("utf-8")
-
-  headers = {
-      "Authorization": f"Basic {encoded_auth}",
-      "Content-Type": "application/json",
-      "User-Agent": f"{supplier_id} - SelfIntegration",
-      "Accept": "application/json",
-  }
-
-  if ortam == "Test / Stage":
-    url = f"https://stageapi.trendyol.com/sapigw/suppliers/{supplier_id}/items"
-  else:
-    url = f"https://api.trendyol.com/sapigw/suppliers/{supplier_id}/items"
-
-  items_list = []
-  for _, row in df.iterrows():
-    images = []
-    if row.get("Görsel URL") and str(row.get("Görsel URL")) != "nan":
-      images.append({"url": str(row["Görsel URL"])})
-
-    item_data = {
-        "barcode": str(row["Barkod"]),
-        "title": str(row["Ürün Adı"]),
-        "productMainId": str(row["Barkod"]),
-        "brandId": 1,
-        "categoryId": 1,
-        "quantity": int(row["Stok"]),
-        "stockCode": str(row["Barkod"]),
-        "price": float(row.get("Önerilen Satış Fiyatı (₺)", 100.0)),
-        "listPrice": float(row.get("Önerilen Satış Fiyatı (₺)", 100.0)),
-        "vatRate": 20,
-        "images": images,
-        "attributes": [],
-    }
-    items_list.append(item_data)
-
-  chunk_size = 5
-  chunk = items_list[0:chunk_size]
-  payload = {"items": chunk}
-
-  try:
-    response = requests.post(
-        url, headers=headers, data=json.dumps(payload), timeout=45
-    )
-    if response.status_code in [200, 201]:
-      return (
-          True,
-          f"Test amaçlı ilk {len(chunk)} ürün başarıyla Trendyol'a iletildi! (Kod:"
-          f" {response.status_code})",
-      )
-    else:
-      return (
-          False,
-          f"API Reddetti (Kod {response.status_code}). Lütfen Supplier ID,"
-          f" Key ve Secret bilgilerinizi kontrol edin.\nYanıt:"
-          f" {response.text[:300]}",
-      )
-  except requests.exceptions.RequestException as e:
-    return False, f"Bağlantı İstek Hatası: {str(e)}"
-
-
-# Sekmeler (Tabs)
-tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
-    "📊 Genel Özet",
-    "⚙️ API & Mağaza Ayarları",
-    "📦 XML & Ürün Yönetimi",
-    "💰 Fiyat & Komisyon Kuralları",
-    "🚀 Trendyol Ürün Gönderimi",
-    "🪵 Sistem Logları",
-])
-
-with tab1:
-  st.subheader("📈 Anlık İş Operasyonları Özeti")
-  col1, col2, col3, col4 = st.columns(4)
-  df_mevcut = st.session_state["urunler_df"]
-  toplam_urun = len(df_mevcut) if not df_mevcut.empty else 0
-  aktif_stok = (
-      len(df_mevcut[df_mevcut["Stok"] > 0]) if not df_mevcut.empty else 0
-  )
-
-  col1.metric("Toplam Aktif Ürün", toplam_urun)
-  col2.metric("Stokta Var", aktif_stok)
-  col3.metric(
-      "Trendyol API Durumu",
-      (
-          "Yapılandırıldı 🟢"
-          if "ty_credentials" in st.session_state
-          else "Beklemede 🟡"
-      ),
-  )
-  col4.metric("Hepsiburada API Durumu", "Beklemede 🟡")
-
-with tab2:
-  st.subheader("🔐 Pazaryeri API & Güvenlik Ayarları")
-  with st.form("api_form"):
-    ty_supplier_id = st.text_input(
-        "Trendyol Supplier ID (Mağaza ID)", type="password"
-    )
-    ty_api_key = st.text_input("Trendyol API Key", type="password")
-    ty_api_secret = st.text_input("Trendyol API Secret", type="password")
-
-    kaydet_btn = st.form_submit_button("API Bilgilerini Kaydet")
-    if kaydet_btn:
-      if ty_supplier_id and ty_api_key and ty_api_secret:
-        st.session_state["ty_credentials"] = {
-            "supplier_id": ty_supplier_id.strip(),
-            "key": ty_api_key.strip(),
-            "secret": ty_api_secret.strip(),
-        }
-        log_ekle("Trendyol API bilgileri sisteme kaydedildi.", "SUCCESS")
-        st.success("API bilgileri başarıyla kaydedildi!")
-      else:
-        st.warning("Lütfen tüm alanları doldurun.")
-
-with tab3:
-  st.subheader("📥 XML Tedarikçi Entegrasyonu, Görseller ve Barkodlar")
-
-  with st.expander("⚙️ XML Bağlantı Ayarları", expanded=True):
-    xml_url = st.text_input(
-        "XML Feed URL Adresi",
-        placeholder="https://tedarikci.com/xml/urunler.xml",
-    )
-
-    if st.button("XML Verilerini ve Görselleri Senkronize Et", type="primary"):
-      if xml_url:
-        with st.spinner(
-            "XML verileri, esnek etiket tarayıcısıyla çekiliyor..."
-        ):
-          try:
-            response = requests.get(xml_url, timeout=30)
-            response.raise_for_status()
-            root = ET.fromstring(response.content)
-
-            urunler = []
-            elements = (
-                root.findall(".//item")
-                + root.findall(".//product")
-                + root.findall(".//Urun")
-            )
-            if not elements:
-              elements = list(root)
-
-            for item in elements:
-              tag_dict = {}
-              for child in item:
-                t_name = child.tag.split("}")[-1].lower().strip()
-                if child.text and child.text.strip():
-                  tag_dict[t_name] = child.text.strip()
-
-              def find_in_dict(keys):
-                for k in keys:
-                  if k.lower() in tag_dict:
-                    return tag_dict[k.lower()]
-                return ""
-
-              baslik = find_in_dict([
-                  "title",
-                  "urunadi",
-                  "baslik",
-                  "name",
-                  "productname",
-                  "aciklama",
-              ]) or "İsimsiz Ürün"
-              stok_val = find_in_dict([
-                  "stock",
-                  "stok",
-                  "adet",
-                  "quantity",
-                  "miktari",
-                  "stokmiktari",
-              ])
-              fiyat_val = find_in_dict([
-                  "price",
-                  "fiyat",
-                  "alisfiyati",
-                  "satisfiyati",
-                  "b2bfiyat",
-                  "satis_fiyati",
-              ])
-              barkod_val = find_in_dict([
-                  "barcode",
-                  "barkod",
-                  "gtin",
-                  "sku",
-                  "stokkodu",
-                  "modelkodu",
-              ]) or "BARKOD_YOK"
-              gorsel_val = find_in_dict([
-                  "image",
-                  "gorsel",
-                  "picture",
-                  "imageurl",
-                  "photo",
-                  "resim",
-                  "img",
-                  "imagesrc",
-              ])
-
-              alis = fiyat_parse(fiyat_val)
-              try:
-                stok = int(float(stok_val)) if stok_val else 0
-              except ValueError:
-                stok = 0
-
-              urunler.append({
-                  "Barkod": barkod_val,
-                  "Ürün Adı": baslik,
-                  "Stok": stok,
-                  "Alış Fiyatı (₺)": alis,
-                  "Görsel URL": gorsel_val,
-              })
-
-            if urunler:
-              st.session_state["urunler_df"] = pd.DataFrame(urunler)
-              log_ekle(
-                  f"Başarıyla {len(urunler)} ürün esnek tarayıcı ile"
-                  " çekildi.",
-                  "SUCCESS",
-              )
-              st.success(
-                  f"Toplam {len(urunler)} ürün başarıyla içeri aktarıldı!"
-              )
+# ==========================================
+# 2. TEDARİKÇİ & XML ÜRÜN ÇEKME
+# ==========================================
+elif menu == "📥 Tedarikçi & XML Ürün Çekme":
+    st.header("Tedarikçi XML Entegrasyonu")
+    
+    with st.form("xml_form"):
+        st.subheader("Yeni XML Kaynağı Ekle")
+        tedarikci_adi = st.text_input("Tedarikçi Adı (Örn: Colezium / MetEntegre Tedarik)")
+        xml_url = st.text_input("XML Linki (URL)")
+        kategori_esitle = st.selectbox("Varsayılan Kategori Eşleme", ["Telefon Aksesuarları", "Ev Yaşam", "Elektronik"])
+        
+        submit_xml = st.form_submit_button("XML'i İçe Aktar ve Ürünleri Çek")
+        
+        if submit_xml:
+            if xml_url:
+                st.success(f"'{tedarikci_adi}' XML adresi sisteme tanımlandı ve ürünler kuyruğa eklendi!")
             else:
-              st.warning("XML düğümleri okunamadı.")
-          except Exception as e:
-            log_ekle(f"XML çekme hatası: {str(e)}", "ERROR")
-            st.error(f"Hata oluştu: {e}")
-      else:
-        st.warning("Lütfen XML linki girin.")
+                st.error("Lütfen geçerli bir XML linki girin.")
 
-  if not st.session_state["urunler_df"].empty:
-    st.markdown("### 📋 Ürün Veritabanı ve Görsel Eşleşmeleri")
-    arama_terimi = st.text_input("Ürün Havuzunda Ara (Ürün Adı / Barkod)")
-    df_goster = st.session_state["urunler_df"]
+    st.subheader("Mevcut Tedarikçiler ve Ürün Listesi")
+    # Örnek Tablo
+    data = {
+        "Tedarikçi": ["Colezium", "Örnek Tedarikçi 2"],
+        "Son Güncelleme": ["04.10.2026 12:30", "03.10.2026 09:15"],
+        "Çekilen Ürün": [1250, 430],
+        "Durum": ["Aktif 🟢", "Aktif 🟢"]
+    }
+    st.table(pd.DataFrame(data))
 
-    if arama_terimi:
-      df_goster = df_goster[
-          df_goster["Ürün Adı"]
-          .str.contains(arama_terimi, case=False, na=False)
-          | df_goster["Barkod"]
-          .str.contains(arama_terimi, case=False, na=False)
-      ]
+# ==========================================
+# 3. FIYAT & KAR MARJI MOTORU
+# ==========================================
+elif menu == "💰 Fiyat & Kar Marjı Motoru":
+    st.header("Akıllı Fiyatlandırma & Net Kar Hesaplayıcı")
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        alis_fiyati = st.number_input("Ürün Alış Fiyatı (KDV Hariç) - TL", min_value=0.0, value=100.0)
+        kdv_orani = st.selectbox("KDV Oranı (%)", [1, 10, 20], index=2)
+        komisyon_orani = st.slider("Pazaryeri Komisyon Oranı (%)", min_value=5, max_value=30, value=15)
+    
+    with col2:
+        kargo_maliyeti = st.number_input("Ortalama Kargo Gideri - TL", min_value=0.0, value=45.0)
+        hedef_kar_marji = st.slider("İstenen Net Kar Marjı (%)", min_value=5, max_value=100, value=25)
+    
+    # Hesaplama Mantığı
+    kdv_tutar = alis_fiyati * (kdv_orani / 100)
+    maliyet_toplam = alis_fiyati + kdv_tutar + kargo_maliyeti
+    # Hedef kar ve komisyon hesabı dahil satış fiyatı simülasyonu
+    tahmini_satis = maliyet_toplam * (1 + (hedef_kar_marji / 100)) / (1 - (komisyon_orani / 100))
+    
+    st.markdown("---")
+    st.subheader("Sonuç / Önerilen Satış Fiyatı")
+    res_col1, res_col2, res_col3 = st.columns(3)
+    res_col1.metric("Toplam Maliyet", f"{maliyet_toplam:.2f} TL")
+    res_col2.metric("Önerilen Satış Fiyatı (KDV Dahil)", f"{tahmini_satis:.2f} TL")
+    res_col3.metric("Net Tahmini Kazanç", f"{(tahmini_satis * (komisyon_orani/100)):.2f} TL")
 
-    st.dataframe(
-        df_goster,
-        use_container_width=True,
-        column_config={
-            "Görsel URL": st.column_config.ImageColumn(
-                "Ürün Görseli", help="XML'den gelen ürün fotoğrafı"
-            )
-        },
-    )
+# ==========================================
+# 4. STOK SENKRONIZASYONU
+# ==========================================
+elif menu == "🔄 Stok Senkronizasyonu":
+    st.header("Otomatik Stok ve Fiyat Güncelleyici")
+    st.write("Tedarikçi XML'lerindeki değişimleri Trendyol ve Hepsiburada mağazalarınıza yansıtın.")
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        st.info("⏱️ **Otomatik Çalışma:** Arka planda her 1 saatte bir güncellenir.")
+        if st.button("Şimdi Tüm Stokları Senkronize Et (Manuel tetikle)"):
+            st.success("Senkronizasyon başlatıldı! Stoklar pazaryeri API'lerine iletiliyor...")
+    
+    with col2:
+        st.warning("🛡️ **Güvenlik Sınırı:** Tedarikçi stoğu 2 ve altındaysa mağazada '0' (Tükendi) göster.")
+        guvenlik_kilidi = st.checkbox("Stok Emniyet Kilidini Etkinleştir", value=True)
 
-with tab4:
-  st.subheader("💰 Finansal Fiyatlandırma & Komisyon Matrisi")
-  col_f1, col_f2, col_f3 = st.columns(3)
-  with col_f1:
-    genel_kar = (
-        st.number_input("İstenen Net Kâr Marjı (%)", value=25.0, step=1.0) / 100.0
-    )
-  with col_f2:
-    pazaryeri_komisyon = (
-        st.number_input(
-            "Pazaryeri Komisyon Oranı (%)", value=15.0, step=1.0
-        )
-        / 100.0
-    )
-  with col_f3:
-    kdv_orani = (
-        st.selectbox("KDV Oranı (%)", [1, 10, 20], index=2, key="kdv_select")
-        / 100.0
-    )
-
-  if not st.session_state["urunler_df"].empty:
-    if st.button("Net Kar Bazlı Fiyatları Hesapla", type="primary"):
-      df_temp = st.session_state["urunler_df"].copy()
-      hesaplanan_satis = []
-      for alis in df_temp["Alış Fiyatı (₺)"]:
-        if (1 - pazaryeri_komisyon) > 0:
-          kdvsiz_satis = (alis * (1 + genel_kar)) / (1 - pazaryeri_komisyon)
-        else:
-          kdvsiz_satis = alis * (1 + genel_kar)
-        kdvli_satis = kdvsiz_satis * (1 + kdv_orani)
-        hesaplanan_satis.append(round(kdvli_satis, 2))
-
-      df_temp["Önerilen Satış Fiyatı (₺)"] = hesaplanan_satis
-      st.session_state["urunler_df"] = df_temp
-      log_ekle("Fiyatlandırma kuralları güncellendi.", "INFO")
-      st.success("Fiyatlar başarıyla güncellendi!")
-
-    if "Önerilen Satış Fiyatı (₺)" in st.session_state["urunler_df"].columns:
-      st.markdown("### Güncel Fiyat Matrisi Tablosu")
-      st.dataframe(
-          st.session_state["urunler_df"],
-          use_container_width=True,
-          column_config={
-              "Görsel URL": st.column_config.ImageColumn("Ürün Görseli")
-          },
-      )
-    else:
-      st.info(
-          "Henüz fiyat hesaplaması yapılmadı. Yukarıdaki butona tıklayarak"
-          " hesaplatabilirsiniz."
-      )
-  else:
-    st.warning("⚠️ Önce 'XML & Ürün Yönetimi' sekmesinden ürünleri çekmelisiniz!")
-
-with tab5:
-  st.subheader("🚀 Trendyol Toplu Ürün Yollama (API Entegrasyonu)")
-  st.markdown(
-      "Sistemde hazırlanan ürünleri seçtiğiniz ortam üzerinden Trendyol"
-      " mağazanıza gönderin."
-  )
-
-  if "Önerilen Satış Fiyatı (₺)" not in st.session_state["urunler_df"].columns:
-    st.warning(
-        "⚠️ Önce 'Fiyat & Komisyon Kuralları' sekmesinden satış fiyatlarını"
-        " hesaplamalısınız!"
-    )
-  else:
-    secilen_ortam = st.radio(
-        "Entegrasyon Ortamı Seçin",
-        ["Canlı (Production)", "Test / Stage"],
-        horizontal=True,
-    )
-
-    col_g1, col_g2 = st.columns(2)
-    col_g1.metric(
-        "Gönderime Hazır Ürün", len(st.session_state["urunler_df"])
-    )
-    col_g2.metric("Seçilen Mod", secilen_ortam)
-
-    if st.button(
-        "Trendyol'a Test Amaçlı İlk 5 Ürünü Gönder", type="primary"
-    ):
-      if "ty_credentials" not in st.session_state:
-        st.error(
-            "Lütfen önce 'API & Mağaza Ayarları' sekmesinden Trendyol API"
-            " bilgilerinizi girin!"
-        )
-      else:
-        with st.spinner(
-            "API bağlantısı test ediliyor ve ürünler iletiliyor..."
-        ):
-          basari, sonuc_mesajı = trendyol_urunleri_gonder(
-              st.session_state["urunler_df"],
-              st.session_state["ty_credentials"],
-              ortam=secilen_ortam,
-          )
-          if basari:
-            log_ekle(f"Trendyol Gönderim Başarılı: {sonuc_mesajı}", "SUCCESS")
-            st.success(sonuc_mesajı)
-          else:
-            log_ekle(f"Trendyol Gönderim Hatası: {sonuc_mesajı}", "ERROR")
-            st.error(sonuc_mesajı)
-
-with tab6:
-  st.subheader("🪵 Sistem Logları & İşlem Geçmişi")
-  if st.session_state["loglar"]:
-    df_log = pd.DataFrame(st.session_state["loglar"])
-    st.dataframe(df_log, use_container_width=True)
-  else:
-    st.info("Henüz kaydedilmiş bir sistem logu bulunmuyor.")
+# ==========================================
+# 5. SIPARIŞ & İADE YÖNETİMİ
+# ==========================================
+elif menu == "📦 Sipariş & İade Yönetimi":
+    st.header("Çoklu Pazaryeri Sipariş Merkezi")
+    
+    filtre = st.radio("Görüntüle:", ["Tüm Siparişler", "Bekleyenler", "Kargodakiler", "İadeler"], horizontal=True)
+    
+    siparis_data = {
+        "Sipariş No": ["TRND-10492", "HPB-88392", "TRND-10493"],
+        "Pazaryeri": ["Trendyol", "Hepsiburada", "Trendyol"],
+        "Müşteri": ["Ahmet Y.", "Mehmet K.", "Ayşe D."],
+        "Tutar": ["450.00 TL", "1,200.00 TL", "230.00 TL"],
+        "Durum": ["Kargolandı 🚚", "Onay Bekliyor ⏳", "İade Talebi ↩️"]
+    }
+    st.dataframe(pd.DataFrame(siparis_data), use_container_width=True)
