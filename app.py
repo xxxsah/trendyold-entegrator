@@ -57,20 +57,31 @@ def duzlestir(el, onek="", cikti=None):
 
 
 def urun_dugumu_bul(kok):
+    ebeveyn = {c: p for p in kok.iter() for c in p}
     sayac = Counter()
     for el in kok.iter():
         if len(el) > 0:
             sayac[etiket(el.tag)] += 1
-    adaylar = [(t, n) for t, n in sayac.items() if n >= 2 and t != etiket(kok.tag)]
-    if not adaylar:
+    adaylar = {t for t, n in sayac.items() if n >= 2 and t != etiket(kok.tag)}
+
+    def ic_icede(el):
+        p = ebeveyn.get(el)
+        while p is not None:
+            if etiket(p.tag) in adaylar:
+                return True
+            p = ebeveyn.get(p)
+        return False
+
+    dis = {etiket(el.tag) for el in kok.iter()
+           if etiket(el.tag) in adaylar and not ic_icede(el)}
+    if not dis:
         return None
 
-    def puan(a):
-        tag, n = a
+    def puan(tag):
         ornek = next(e for e in kok.iter() if etiket(e.tag) == tag)
-        return n * len(list(ornek.iter()))
+        return sayac[tag] * len(list(ornek.iter()))
 
-    return max(adaylar, key=puan)[0]
+    return max(dis, key=puan)
 
 
 def xml_oku(veri):
@@ -123,7 +134,8 @@ def normalle(tedarikci, df, harita, marj):
         "Stok": kol("stok").map(sayi).astype(int),
         "Alış Fiyatı": alis.round(2),
         "Satış Fiyatı": (alis * (1 + marj / 100)).round(2),
-        "Görsel": kol("gorsel").astype(str).str.split("|").str[0],
+        "Görsel": (kol("gorsel").astype(str).str.split("|").str[0]
+                   .str.strip().str.replace("http://", "https://", regex=False)),
     })
 
 
@@ -141,14 +153,17 @@ if sayfa == "Ürünler (XML)":
 
     with st.expander("➕ Tedarikçi ekle", expanded=not st.session_state.ham):
         t_ad = st.text_input("Tedarikçi adı", placeholder="Örn: Yeni Toptancı")
-        t_link = st.text_input("XML linki", placeholder="https://...")
+        t_link = st.text_input("XML linki (veya XML metni)", placeholder="https://...")
         if st.button("XML'i çek", type="primary"):
             if not t_ad or not t_link:
                 st.error("Tedarikçi adı ve XML linki gerekli.")
             else:
                 try:
                     with st.spinner("XML indiriliyor..."):
-                        df = xml_oku(indir(t_link.strip()))
+                        ham_giris = t_link.strip()
+                        veri = (ham_giris.encode("utf-8") if ham_giris.startswith("<")
+                                else indir(ham_giris))
+                        df = xml_oku(veri)
                     st.session_state.ham[t_ad] = df
                     st.success(f"{len(df):,} ürün çekildi.")
                 except Exception as e:
