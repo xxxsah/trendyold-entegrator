@@ -115,11 +115,36 @@ def sayi(x):
 
 def tahmin(kolonlar, anahtarlar):
     """Kolon adlarından en olası eşleşmeyi bulur."""
+    kolonlar = list(kolonlar)
+    # 1) Tam eşleşme
+    for a in anahtarlar:
+        for k in kolonlar:
+            if k.lower() == a:
+                return k
+    # 2) İçeren, ama varyant/sayaç/kod alanlarını atla
+    for a in anahtarlar:
+        for k in kolonlar:
+            kl = k.lower()
+            if a in kl and "variant" not in kl and "count" not in kl and "code" not in kl:
+                return k
+    # 3) Herhangi biri
     for a in anahtarlar:
         for k in kolonlar:
             if a in k.lower():
                 return k
     return "(yok)"
+
+
+def ilk_gorsel(df, secili):
+    """Seçili görsel alanı boşsa diğer image alanlarından ilk dolu olanı alır."""
+    adaylar = [secili] if secili != "(yok)" else []
+    adaylar += [c for c in df.columns
+                if c != secili and "image" in c.lower() and "count" not in c.lower()]
+    sonuc = pd.Series([""] * len(df), index=df.index)
+    for c in adaylar:
+        deger = df[c].astype(str).str.split("|").str[0].str.strip()
+        sonuc = sonuc.where(sonuc != "", deger)
+    return sonuc.str.replace("http://", "https://", regex=False)
 
 
 def normalle(tedarikci, df, harita, marj):
@@ -134,8 +159,7 @@ def normalle(tedarikci, df, harita, marj):
         "Stok": kol("stok").map(sayi).astype(int),
         "Alış Fiyatı": alis.round(2),
         "Satış Fiyatı": (alis * (1 + marj / 100)).round(2),
-        "Görsel": (kol("gorsel").astype(str).str.split("|").str[0]
-                   .str.strip().str.replace("http://", "https://", regex=False)),
+        "Görsel": ilk_gorsel(df, harita["gorsel"]),
     })
 
 
@@ -186,7 +210,7 @@ if sayfa == "Ürünler (XML)":
                 "ad": sec("Ürün adı", ["urunadi", "ürünadı", "name", "title", "ad", "baslik"], "ad"),
                 "stok": sec("Stok", ["stok", "stock", "quantity", "adet", "miktar"], "stok"),
                 "fiyat": sec("Alış fiyatı", ["fiyat", "price", "alis", "alış"], "fiyat"),
-                "gorsel": sec("Görsel", ["resim", "image", "gorsel", "görsel", "picture", "foto"], "gorsel"),
+                "gorsel": sec("Görsel", ["image_1", "resim", "image", "gorsel", "görsel", "picture", "foto"], "gorsel"),
             }
             marj = st.number_input("Kâr marjı (%)", 0.0, 500.0, 30.0, 1.0, key=f"{ad}_marj")
             if st.button(f"{ad} tedarikçisini sil", key=f"{ad}_sil"):
