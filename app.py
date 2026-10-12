@@ -309,17 +309,24 @@ if sifre:
 
 
 # ---------------------------------------------------------------
-# ARAYÜZ VE ÖZEL RENKLİ MENÜ BUTONLARI
+# AÇILIR / KAPANIR SOL YAN MENÜ
 # ---------------------------------------------------------------
 if "ayarlar" not in st.session_state:
     st.session_state.ayarlar = ayar_oku()
 ayarlar = st.session_state.ayarlar
 
-if "aktif_sayfa" not in st.session_state:
-    st.session_state.aktif_sayfa = "Anasayfa & Hızlı İşlemler"
-
-# Üst Bilgilendirme ve Yedek
 st.sidebar.title("👑 ŞahEntegre")
+
+sayfa = st.sidebar.radio("Menü", [
+    "Anasayfa & Hızlı İşlemler",
+    "Ürünler (Veritabanı)", 
+    "Tedarikçiler & XML", 
+    "Trendruum Entegrasyonu", 
+    "Hepsiburada Entegrasyonu", 
+    "İdefix Entegrasyonu",
+    "🤖 ŞahAI Asistanı"
+])
+
 st.sidebar.markdown("---")
 st.sidebar.subheader("💾 Yedekleme")
 st.sidebar.download_button(
@@ -330,55 +337,66 @@ st.sidebar.download_button(
     use_container_width=True
 )
 
-# ÜST RENKLİ MENÜ BUTONLARI
-st.markdown('<div style="font-size: 22px; font-weight: 700; color: #ffffff; margin-bottom: 10px;">👑 ŞahEntegre Kontrol Paneli</div>', unsafe_allow_html=True)
-
-m_col1, m_col2, m_col3, m_col4 = st.columns(4)
-
-with m_col1:
-    if st.button("🏠 Anasayfa", use_container_width=True, type="primary" if st.session_state.aktif_sayfa == "Anasayfa & Hızlı İşlemler" else "secondary"):
-        st.session_state.aktif_sayfa = "Anasayfa & Hızlı İşlemler"
-        st.rerun()
-    if st.button("📦 Sistemdeki Ürünler", use_container_width=True, type="primary" if st.session_state.aktif_sayfa == "Ürünler (Veritabanı)" else "secondary"):
-        st.session_state.aktif_sayfa = "Ürünler (Veritabanı)"
-        st.rerun()
-
-with m_col2:
-    if st.button("📄 Tedarikçiler & XML", use_container_width=True, type="primary" if st.session_state.aktif_sayfa == "Tedarikçiler & XML" else "secondary"):
-        st.session_state.aktif_sayfa = "Tedarikçiler & XML"
-        st.rerun()
-    if st.button("🚀 Trendruum", use_container_width=True, type="primary" if st.session_state.aktif_sayfa == "Trendruum Entegrasyonu" else "secondary"):
-        st.session_state.aktif_sayfa = "Trendruum Entegrasyonu"
-        st.rerun()
-
-with m_col3:
-    if st.button("🛍️ Hepsiburada", use_container_width=True, type="primary" if st.session_state.aktif_sayfa == "Hepsiburada Entegrasyonu" else "secondary"):
-        st.session_state.aktif_sayfa = "Hepsiburada Entegrasyonu"
-        st.rerun()
-    if st.button("📚 İdefix", use_container_width=True, type="primary" if st.session_state.aktif_sayfa == "İdefix Entegrasyonu" else "secondary"):
-        st.session_state.aktif_sayfa = "İdefix Entegrasyonu"
-        st.rerun()
-
-with m_col4:
-    if st.button("🤖 ŞahAI Asistanı", use_container_width=True, type="primary" if st.session_state.aktif_sayfa == "🤖 ŞahAI Asistanı" else "secondary"):
-        st.session_state.aktif_sayfa = "🤖 ŞahAI Asistanı"
-        st.rerun()
-
-st.markdown("---")
-sayfa = st.session_state.aktif_sayfa
-
 # ---------------------------------------------------------------
-# 0. SAYFA: ANASAYFA & PAZAR YERİ KUTULARI (METENTEGRE TARZI)
+# 0. SAYFA: ANASAYFA & PAZAR YERİ KUTULARI (ÜSTTE)
 # ---------------------------------------------------------------
 if sayfa == "Anasayfa & Hızlı İşlemler":
-    st.title("⚡ Mağaza ve Pazar Yeri Özeti")
-    st.markdown("Pazar yerlerindeki gelen siparişlerinizi ve kargo durumlarını aşağıdan takip edebilirsiniz[span_6](start_span)[span_6](end_span).")
+    st.title("👑 Mağaza ve Pazar Yeri Özeti")
 
-    # Kritik Stok Sıfırlama Butonu ve Detay Raporu
+    # PAZAR YERİ KUTULARINI EN ÜSTE ALDIK
+    st.subheader("🛒 Pazar Yeri Sipariş Durumları")
+    col_p1, col_p2, col_p3 = st.columns(3)
+
+    with col_p1:
+        with st.container(border=True):
+            st.markdown("### 🟠 HEPSİBURADA")
+            st.caption("Bekleyen Sipariş Yok")
+            if st.button("Hepsiburada Detayları", key="btn_hb"):
+                st.session_state["pazar_detay"] = "Hepsiburada"
+
+        with st.container(border=True):
+            st.markdown("### 🟤 PTT AVM")
+            st.caption("Bekleyen Sipariş Yok")
+            if st.button("PTT AVM Detayları", key="btn_ptt"):
+                st.session_state["pazar_detay"] = "PTT AVM"
+
+    with col_p2:
+        with st.container(border=True):
+            st.markdown("### 🔴 TRENDYOL")
+            st.caption("Bekleyen Sipariş Yok")
+            if st.button("Trendyol Detayları", key="btn_ty"):
+                st.session_state["pazar_detay"] = "Trendyol"
+
+        with st.container(border=True):
+            st.markdown("### 🔴 N11")
+            st.caption("Bekleyen Sipariş Yok")
+            if st.button("N11 Detayları", key="btn_n11"):
+                st.session_state["pazar_detay"] = "N11"
+
+    with col_p3:
+        with st.container(border=True):
+            st.markdown("### 🌸 ÇİÇEKSEPETİ")
+            st.caption("Bekleyen Sipariş Yok")
+            if st.button("Çiçeksepeti Detayları", key="btn_cs"):
+                st.session_state["pazar_detay"] = "Çiçeksepeti"
+
+        with st.container(border=True):
+            st.markdown("### 🟢 İDEFİX")
+            st.caption("Aktif / Bağlantı Bekleniyor")
+            if st.button("İdefix Detayları", key="btn_ide"):
+                st.session_state["pazar_detay"] = "İdefix"
+
+    if "pazar_detay" in st.session_state:
+        secilen_pazar = st.session_state["pazar_detay"]
+        st.info(f"📍 **{secilen_pazar}** entegrasyon canlıya alındığında siparişleriniz doğrudan buraya dökülecektir.")
+
+    st.markdown("---")
+
+    # KRİTİK STOK SIFIRLAMA BUTONU VE RAPORU
+    st.subheader("⚡ Hızlı İşlem Araçları")
     if st.button("⚠️ Kritik Stokları Sıfırla (0 Yap)", type="primary", use_container_width=True):
         conn = baglanti_kur()
         cursor = conn.cursor()
-        # Stok eşiği düşük olanları (örn: stok <= 2 veya stok 1 olanları) sıfırlayalım
         cursor.execute("SELECT barkod, urun_adi FROM urunler WHERE stok > 0 AND stok <= 2")
         etkilenenler = cursor.fetchall()
         
@@ -390,80 +408,9 @@ if sayfa == "Anasayfa & Hızlı İşlemler":
         if etkilenenler:
             for barkod, urun_adi in etkilenenler:
                 st.markdown(f"✅ **Patron, {barkod}** Barkodlu Ürün Stok Eşiğinde — Mağazada Stok **0** Ladım! 🎯")
-            st.success(f"Tamamlandı! **{len(etkilenenler)}** ürün stok 0 yapıldı — harika patron[span_7](start_span)[span_7](end_span)!")
+            st.success(f"Tamamlandı! **{len(etkilenenler)}** ürün stok 0 yapıldı — harika patron!")
         else:
             st.info("Kritik eşikte (stok 1 veya 2 olan) güncellenecek ürün bulunamadı.")
-
-    st.markdown("---")
-    st.subheader("🛒 Pazar Yeri Sipariş ve Gönderim Kutuları")
-
-    # 6'lı Pazar Yeri Kutuları Tasarımı (Hepsiburada, Trendyol, Çiçeksepeti, PTT AVM, N11, İdefix)
-    col_p1, col_p2, col_p3 = st.columns(3)
-
-    with col_p1:
-        with st.container(border=True):
-            st.markdown("### 🟠 HEPSİBURADA")
-            st.info("📦 **4 Gönderime Hazır Sipariş**[span_8](start_span)[span_8](end_span)")
-            if st.button("Hepsiburada Detayları Aç", key="btn_hb"):
-                st.session_state["pazar_detay"] = "Hepsiburada"
-
-        with st.container(border=True):
-            st.markdown("### 🟤 PTT AVM")
-            st.caption("Sipariş yok[span_9](start_span)[span_9](end_span)")
-            if st.button("PTT AVM Detayları Aç", key="btn_ptt"):
-                st.session_state["pazar_detay"] = "PTT AVM"
-
-    with col_p2:
-        with st.container(border=True):
-            st.markdown("### 🔴 TRENDYOL")
-            st.caption("Sipariş yok[span_10](start_span)[span_10](end_span)")
-            if st.button("Trendyol Detayları Aç", key="btn_ty"):
-                st.session_state["pazar_detay"] = "Trendyol"
-
-        with st.container(border=True):
-            st.markdown("### 🔴 N11")
-            st.caption("Sipariş yok[span_11](start_span)[span_11](end_span)")
-            if st.button("N11 Detayları Aç", key="btn_n11"):
-                st.session_state["pazar_detay"] = "N11"
-
-    with col_p3:
-        with st.container(border=True):
-            st.markdown("### 🌸 ÇİÇEKSEPETİ")
-            st.caption("Sipariş yok[span_12](start_span)[span_12](end_span)")
-            if st.button("Çiçeksepeti Detayları Aç", key="btn_cs"):
-                st.session_state["pazar_detay"] = "Çiçeksepeti"
-
-        with st.container(border=True):
-            st.markdown("### 🟢 İDEFİX")
-            st.caption("Aktif / Bağlantı Bekliyor[span_13](start_span)[span_13](end_span)")
-            if st.button("İdefix Detayları Aç", key="btn_ide"):
-                st.session_state["pazar_detay"] = "İdefix"
-
-    # Eğer bir pazar yeri kutusuna tıklandıysa detayları göster
-    if "pazar_detay" in st.session_state:
-        secilen_pazar = st.session_state["pazar_detay"]
-        st.markdown("---")
-        st.subheader(f"📋 {secilen_pazar} - Sipariş ve Gönderim Detayları")
-        
-        if secilen_pazar == "Hepsiburada":
-            st.success("📦 Gönderime Hazır Siparişler Listeleniyor (Örnek Sipariş)")
-            with st.container(border=True):
-                st.markdown("**Sipariş No:** `5528539048` *(12.10.2026 23:22)*[span_14](start_span)[span_14](end_span)")
-                st.markdown("**Durum:** 🚀 Gönderime Hazır[span_15](start_span)[span_15](end_span)")
-                st.markdown("---")
-                st.markdown("**Alıcı:** Tülay Önder[span_16](start_span)[span_16](end_span)")
-                st.markdown("**Adres:** Akkent Caddesi Güzelyurt Mah. Toki 1 B Blok No:23 Yunusemre / Manisa[span_17](start_span)[span_17](end_span)")
-                st.markdown("---")
-                st.markdown("**Ürün:** Brf Store Irmakxx Ferplast Jet 10 Kedi Köpek Taşıma Çantası, Mix[span_18](start_span)[span_18](end_span)")
-                st.markdown("**SKU / Barkod:** `8690002487637` | **Adet:** `1` | **HB SKU:** `HBCV0000I9OM3C`[span_19](start_span)[span_19](end_span)")
-                st.markdown("**Tutar:** **1139.85 ₺**[span_20](start_span)[span_20](end_span)")
-                st.markdown("🚚 **Kargo:** Sürat Kargo | **Takip Barkodu:** `62955285390480`[span_21](start_span)[span_21](end_span)")
-        else:
-            st.info(f"{secilen_pazar} için şu an bekleyen aktif sipariş bulunmuyor.")
-            
-        if st.button("Kapat / Gizle"):
-            del st.session_state["pazar_detay"]
-            st.rerun()
 
 # ---------------------------------------------------------------
 # 1. SAYFA: ÜRÜNLER (VERİTABANI LİSTESİ)
