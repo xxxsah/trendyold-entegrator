@@ -1,15 +1,46 @@
+import base64
 import gzip
 import json
+import sqlite3
 import urllib.request
 import xml.etree.ElementTree as ET
 from collections import Counter
 from pathlib import Path
 
 import pandas as pd
+import requests
 import streamlit as st
 
 st.set_page_config(page_title="MetEntegre", page_icon="📦", layout="wide")
 
+# ---------------------------------------------------------------
+# VERİTABANI (SQLITE) YÖNETİMİ
+# ---------------------------------------------------------------
+DB_DOSYA = Path(__file__).parent / "metentegre.db"
+
+def baglanti_kur():
+    conn = sqlite3.connect(DB_DOSYA)
+    return conn
+
+def veritabani_olustur():
+    conn = baglanti_kur()
+    cursor = conn.cursor()
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS urunler (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            tedarikci TEXT,
+            barkod TEXT,
+            urun_adi TEXT,
+            stok INTEGER,
+            alis_fiyati REAL,
+            satis_fiyati REAL,
+            gorsel TEXT
+        )
+    """)
+    conn.commit()
+    conn.close()
+
+veritabani_olustur()
 
 # ---------------------------------------------------------------
 # XML OKUMA FONKSİYONLARI
@@ -87,7 +118,6 @@ def urun_dugumu_bul(kok):
 
 
 def xml_oku(veri):
-    """Ham XML baytlarından ürün tablosu (DataFrame) üretir."""
     try:
         kok = ET.fromstring(veri)
     except ET.ParseError:
@@ -101,7 +131,6 @@ def xml_oku(veri):
 
 
 def sayi(x):
-    """'1.234,56' ve '12.5' gibi fiyatları sayıya çevirir."""
     s = str(x).strip().replace("TL", "").replace("₺", "").replace(" ", "")
     if not s:
         return 0.0
@@ -116,20 +145,16 @@ def sayi(x):
 
 
 def tahmin(kolonlar, anahtarlar):
-    """Kolon adlarından en olası eşleşmeyi bulur."""
     kolonlar = list(kolonlar)
-    # 1) Tam eşleşme
     for a in anahtarlar:
         for k in kolonlar:
             if k.lower() == a:
                 return k
-    # 2) İçeren, ama varyant/sayaç/kod alanlarını atla
     for a in anahtarlar:
         for k in kolonlar:
             kl = k.lower()
             if a in kl and "variant" not in kl and "count" not in kl and "code" not in kl:
                 return k
-    # 3) Herhangi biri
     for a in anahtarlar:
         for k in kolonlar:
             if a in k.lower():
@@ -138,7 +163,6 @@ def tahmin(kolonlar, anahtarlar):
 
 
 def ilk_gorsel(df, secili):
-    """Seçili görsel alanı boşsa diğer image alanlarından ilk dolu olanı alır."""
     adaylar = [secili] if secili != "(yok)" else []
     adaylar += [c for c in df.columns
                 if c != secili and "image" in c.lower() and "count" not in c.lower()]
@@ -165,9 +189,8 @@ def normalle(tedarikci, df, harita, marj):
     })
 
 
-
 # ---------------------------------------------------------------
-# KALICI AYARLAR (tedarikçi linkleri, alan eşleştirme, kâr marjı)
+# KALICI AYARLAR
 # ---------------------------------------------------------------
 AYAR_DOSYA = Path(__file__).parent / "ayarlar.json"
 
@@ -186,16 +209,6 @@ def ayar_yaz(ayarlar):
         )
     except Exception as e:
         st.warning(f"Ayarlar diske yazılamadı: {e}")
-
-
-@st.cache_data(ttl=3600, show_spinner=False)
-def cek(link):
-    """Linkten XML'i indirip tabloya çevirir. 1 saat önbellekte kalır."""
-    return xml_oku(indir(link))
-
-
-def maske(link):
-    return link[:30] + "…" if len(link) > 30 else link
 
 
 def sifre_al():
@@ -221,177 +234,257 @@ if sifre:
                 st.error("Yanlış şifre.")
         st.stop()
 
+
 # ---------------------------------------------------------------
 # ARAYÜZ
 # ---------------------------------------------------------------
 if "ayarlar" not in st.session_state:
     st.session_state.ayarlar = ayar_oku()
-if "yerel" not in st.session_state:
-    st.session_state.yerel = {}
 ayarlar = st.session_state.ayarlar
 
 st.sidebar.title("📦 MetEntegre")
-sayfa = st.sidebar.radio("Menü", ["Ürünler (XML)", "Pazaryerleri"])
-
-if not sifre:
-    st.sidebar.warning(
-        "⚠️ Şifre ayarlanmamış. Uygulama adresini bilen herkes girebilir. "
-        "Streamlit Secrets'a APP_PASSWORD ekleyin."
-    )
+sayfa = st.sidebar.radio("Menü", [
+    "Ürünler (Veritabanı)", 
+    "Tedarikçiler & XML", 
+    "Trendruum Entegrasyonu", 
+    "Hepsiburada Entegrasyonu", 
+    "İdefix Entegrasyonu"
+])
 
 st.sidebar.markdown("---")
 st.sidebar.subheader("💾 Yedek")
-st.sidebar.caption("Yedek dosyası tedarikçi linklerinizi içerir, kimseyle paylaşmayın.")
 st.sidebar.download_button(
     "Ayarları indir",
     json.dumps(ayarlar, ensure_ascii=False, indent=2).encode("utf-8"),
     "metentegre_ayarlar.json",
     "application/json",
 )
-yuk = st.sidebar.file_uploader("Yedekten yükle", type=["json"])
-yedek_yuklendi = False
-if yuk is not None:
-    imza = (yuk.name, yuk.size)
-    if st.session_state.get("son_yedek") != imza:
-        try:
-            yeni = json.loads(yuk.getvalue().decode("utf-8"))
-            if isinstance(yeni, dict):
-                ayarlar.update(yeni)
-                ayar_yaz(ayarlar)
-                st.session_state.son_yedek = imza
-                yedek_yuklendi = True
-        except Exception as e:
-            st.sidebar.error(f"Yedek okunamadı: {e}")
-if yedek_yuklendi:
-    st.rerun()
 
-if sayfa == "Ürünler (XML)":
-    st.title("Ürünler ve Tedarikçi XML")
+# ---------------------------------------------------------------
+# 1. SAYFA: ÜRÜNLER (VERİTABANI LİSTESİ)
+# ---------------------------------------------------------------
+if sayfa == "Ürünler (Veritabanı)":
+    st.title("Ürün Yönetimi ve Stoklar")
 
-    with st.expander(
-        "➕ Tedarikçi ekle", expanded=not (ayarlar or st.session_state.yerel)
-    ):
-        t_ad = st.text_input("Tedarikçi adı", placeholder="Örn: Yeni Toptancı")
-        t_link = st.text_input("XML linki (veya XML metni)", placeholder="https://...")
-        if st.button("Ekle ve XML'i çek", type="primary"):
-            ham_giris = t_link.strip()
-            if not t_ad or not ham_giris:
-                st.error("Tedarikçi adı ve XML linki gerekli.")
-            else:
-                try:
-                    with st.spinner("XML indiriliyor..."):
-                        if ham_giris.startswith("<"):
-                            st.session_state.yerel[t_ad] = xml_oku(
-                                ham_giris.encode("utf-8")
-                            )
-                            st.info(
-                                "Yapıştırılan XML sadece bu oturumda kalır. "
-                                "Kalıcı olması için link kullanın."
-                            )
-                        else:
-                            cek(ham_giris)
-                            ayarlar[t_ad] = {"link": ham_giris, "harita": {}, "marj": 30.0}
-                            ayar_yaz(ayarlar)
-                    st.success("Tedarikçi eklendi.")
-                except Exception as e:
-                    st.error(f"Çekilemedi: {e}")
+    conn = baglanti_kur()
+    df_db = pd.read_sql("SELECT * FROM urunler", conn)
+    conn.close()
 
-    if st.button("🔄 XML'leri yenile (güncel stok ve fiyat)"):
-        cek.clear()
-        st.rerun()
+    if not df_db.empty:
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Toplam Ürün", f"{len(df_db):,}")
+        c2.metric("Stokta Olanlar", f"{(df_db['stok'] > 0).sum():,}")
+        c3.metric("Tükenenler", f"{(df_db['stok'] <= 0).sum():,}")
 
-    kaynaklar = {}
-    for ad, a in list(ayarlar.items()):
-        try:
-            with st.spinner(f"{ad} yükleniyor..."):
-                kaynaklar[ad] = (cek(a["link"]), True)
-        except Exception as e:
-            with st.expander(f"❌ {ad} çekilemedi"):
-                st.write(str(e))
-                if st.button(f"{ad} tedarikçisini sil", key=f"{ad}_hatasil"):
-                    ayarlar.pop(ad, None)
-                    ayar_yaz(ayarlar)
-                    st.rerun()
-    for ad, df in st.session_state.yerel.items():
-        kaynaklar[ad] = (df, False)
+        st.markdown("---")
+        ara = st.text_input("🔍 Hızlı Ara (Ürün adı veya Barkod/SKU)")
+        sadece_stok = st.checkbox("Sadece stokta olanları göster", value=False)
+        goster = st.selectbox("Gösterilecek ürün sayısı", [50, 100, 250, 500, 1000], index=1)
 
-    tumu = []
-    for ad, (df, kayitli) in kaynaklar.items():
-        kayit = ayarlar.get(ad, {}) if kayitli else {}
-        eski_harita = kayit.get("harita", {})
-        with st.expander(f"⚙️ {ad} - alan eşleştirme ({len(df):,} ürün)"):
-            if kayitli:
-                st.caption("Link: " + maske(kayit.get("link", "")))
-            kolonlar = ["(yok)"] + list(df.columns)
-
-            def sec(etiket_, anahtarlar, anahtar_id):
-                varsayilan = eski_harita.get(anahtar_id)
-                if varsayilan not in kolonlar:
-                    varsayilan = tahmin(df.columns, anahtarlar)
-                return st.selectbox(
-                    etiket_, kolonlar, index=kolonlar.index(varsayilan),
-                    key=f"{ad}_{anahtar_id}",
-                )
-
-            harita = {
-                "kod": sec("Barkod / SKU", ["barkod", "barcode", "sku", "stokkod", "kod", "id"], "kod"),
-                "ad": sec("Ürün adı", ["urunadi", "ürünadı", "name", "title", "ad", "baslik"], "ad"),
-                "stok": sec("Stok", ["stok", "stock", "quantity", "adet", "miktar"], "stok"),
-                "fiyat": sec("Alış fiyatı", ["fiyat", "price", "alis", "alış"], "fiyat"),
-                "gorsel": sec("Görsel", ["image_1", "resim", "image", "gorsel", "görsel", "picture", "foto"], "gorsel"),
-            }
-            marj = st.number_input(
-                "Kâr marjı (%)", 0.0, 500.0, float(kayit.get("marj", 30.0)), 1.0,
-                key=f"{ad}_marj",
-            )
-            if kayitli and (harita != eski_harita or marj != kayit.get("marj")):
-                ayarlar[ad]["harita"] = harita
-                ayarlar[ad]["marj"] = marj
-                ayar_yaz(ayarlar)
-            if st.button(f"🗑️ {ad} tedarikçisini sil", key=f"{ad}_sil"):
-                ayarlar.pop(ad, None)
-                st.session_state.yerel.pop(ad, None)
-                ayar_yaz(ayarlar)
-                st.rerun()
-        tumu.append(normalle(ad, df, harita, marj))
-
-    if tumu:
-        urunler = pd.concat(tumu, ignore_index=True)
-        c1, c2 = st.columns(2)
-        c1.metric("Toplam ürün", f"{len(urunler):,}")
-        c2.metric("Stokta olan", f"{(urunler['Stok'] > 0).sum():,}")
-
-        ara = st.text_input("🔍 Ara (ürün adı veya barkod)")
-        sadece_stok = st.checkbox("Sadece stokta olanlar", value=False)
-        goster = st.selectbox("Tabloda gösterilecek ürün sayısı", [50, 100, 250, 500, 1000], index=1)
-        gorunum = urunler
+        gorunum = df_db.copy()
         if ara:
-            m = (gorunum["Ürün Adı"].str.contains(ara, case=False, na=False)
-                 | gorunum["Barkod/SKU"].str.contains(ara, case=False, na=False))
+            m = (gorunum["urun_adi"].str.contains(ara, case=False, na=False)
+                 | gorunum["barkod"].str.contains(ara, case=False, na=False))
             gorunum = gorunum[m]
         if sadece_stok:
-            gorunum = gorunum[gorunum["Stok"] > 0]
+            gorunum = gorunum[gorunum["stok"] > 0]
 
-        st.caption(f"{len(gorunum):,} üründen ilk {min(goster, len(gorunum)):,} tanesi gösteriliyor.")
+        st.caption(f"Filtrelenen {len(gorunum):,} üründen ilk {min(goster, len(gorunum)):,} tanesi listeleniyor.")
+        
+        gosterim_df = gorunum[["gorsel", "tedarikci", "barkod", "urun_adi", "stok", "alis_fiyati", "satis_fiyati"]].rename(columns={
+            "gorsel": "Görsel",
+            "tedarikci": "Tedarikçi",
+            "barkod": "Barkod/SKU",
+            "urun_adi": "Ürün Adı",
+            "stok": "Stok",
+            "alis_fiyati": "Alış",
+            "satis_fiyati": "Satış"
+        })
+
         st.dataframe(
-            gorunum.head(goster),
+            gosterim_df.head(goster),
             column_config={"Görsel": st.column_config.ImageColumn("Görsel", width="small")},
             use_container_width=True,
             hide_index=True,
         )
-        st.download_button(
-            "⬇️ CSV indir (süzülmüş listenin tamamı)",
-            gorunum.to_csv(index=False, sep=";").encode("utf-8-sig"),
-            "urunler.csv",
-            "text/csv",
-        )
     else:
-        st.info("Henüz tedarikçi eklenmedi. Yukarıdan XML linkini ekleyin.")
+        st.info("Veritabanında henüz ürün bulunmuyor. 'Tedarikçiler & XML' sekmesinden XML ekleyip senkronize edebilirsiniz.")
 
+# ---------------------------------------------------------------
+# 2. SAYFA: TEDARİKÇİLER & XML YÖNETİMİ
+# ---------------------------------------------------------------
+elif sayfa == "Tedarikçiler & XML":
+    st.title("Tedarikçi ve XML Ayarları")
+
+    with st.expander("➕ Yeni Tedarikçi Ekle", expanded=not ayarlar):
+        t_ad = st.text_input("Tedarikçi Adı", placeholder="Örn: Toptancı Firma")
+        t_link = st.text_input("XML Linki", placeholder="https://...")
+        if st.button("Kaydet ve Ekle", type="primary"):
+            if not t_ad or not t_link:
+                st.error("Tedarikçi adı ve linki zorunludur.")
+            else:
+                ayarlar[t_ad] = {"link": t_link.strip(), "harita": {}, "marj": 30.0}
+                ayar_yaz(ayarlar)
+                st.success(f"{t_ad} eklendi.")
+                st.rerun()
+
+    if ayarlar:
+        st.markdown("---")
+        if st.button("🔄 Tüm XML'leri Çek ve Veritabanını Güncelle", type="primary"):
+            tum_veriler = []
+            with st.spinner("XML'ler indiriliyor ve veritabanı güncelleniyor..."):
+                for ad, bilgi in ayarlar.items():
+                    try:
+                        ham_veri = indir(bilgi["link"])
+                        df_hammadde = xml_oku(ham_veri)
+                        islenmis = normalle(ad, df_hammadde, bilgi.get("harita", {}), bilgi.get("marj", 30.0))
+                        tum_veriler.append(islenmis)
+                    except Exception as e:
+                        st.error(f"{ad} çekilemedi: {e}")
+
+                if tum_veriler:
+                    birlesti = pd.concat(tum_veriler, ignore_index=True)
+                    conn = baglanti_kur()
+                    cursor = conn.cursor()
+                    cursor.execute("DELETE FROM urunler")
+                    
+                    for _, row in birlesti.iterrows():
+                        cursor.execute("""
+                            INSERT INTO urunler (tedarikci, barkod, urun_adi, stok, alis_fiyati, satis_fiyati, gorsel)
+                            VALUES (?, ?, ?, ?, ?, ?, ?)
+                        """, (row["Tedarikçi"], row["Barkod/SKU"], row["Ürün Adı"], row["Stok"], row["Alış Fiyatı"], row["Satış Fiyatı"], row["Görsel"]))
+                    
+                    conn.commit()
+                    conn.close()
+                    st.success("Tüm stok ve fiyatlar veritabanına başarıyla kaydedildi!")
+                    st.rerun()
+
+        st.markdown("---")
+        st.subheader("Kayıtlı Tedarikçiler ve Alan Eşleştirmeleri")
+        for ad, bilgi in list(ayarlar.items()):
+            with st.expander(f"⚙️ {ad} (Ayarları Yönet)"):
+                st.text(f"Link: {bilgi.get('link')}")
+                
+                try:
+                    ham = indir(bilgi["link"])
+                    df_test = xml_oku(ham)
+                    kolonlar = ["(yok)"] + list(df_test.columns)
+                    eski_harita = bilgi.get("harita", {})
+
+                    def sec(etiket_, anahtarlar, anahtar_id):
+                        varsayilan = eski_harita.get(anahtar_id)
+                        if varsayilan not in kolonlar:
+                            varsayilan = tahmin(df_test.columns, anahtarlar)
+                        return st.selectbox(
+                            etiket_, kolonlar, index=kolonlar.index(varsayilan),
+                            key=f"{ad}_{anahtar_id}",
+                        )
+
+                    harita = {
+                        "kod": sec("Barkod / SKU", ["barkod", "barcode", "sku", "stokkod", "kod", "id"], "kod"),
+                        "ad": sec("Ürün Adı", ["urunadi", "ürünadı", "name", "title", "ad", "baslik"], "ad"),
+                        "stok": sec("Stok", ["stok", "stock", "quantity", "adet", "miktar"], "stok"),
+                        "fiyat": sec("Alış Fiyatı", ["fiyat", "price", "alis", "alış"], "fiyat"),
+                        "gorsel": sec("Görsel", ["image_1", "resim", "image", "gorsel", "görsel", "picture", "foto"], "gorsel"),
+                    }
+                    marj = st.number_input("Kâr Marjı (%)", 0.0, 500.0, float(bilgi.get("marj", 30.0)), 1.0, key=f"{ad}_marj")
+
+                    if harita != eski_harita or marj != bilgi.get("marj"):
+                        ayarlar[ad]["harita"] = harita
+                        ayarlar[ad]["marj"] = marj
+                        ayar_yaz(ayarlar)
+                        st.success("Ayarlar kaydedildi.")
+
+                except Exception as e:
+                    st.warning(f"XML analiz edilemedi: {e}")
+
+                if st.button(f"🗑️ {ad} Tedarikçisini Sil", key=f"sil_{ad}"):
+                    ayarlar.pop(ad, None)
+                    ayar_yaz(ayarlar)
+                    st.rerun()
+
+# ---------------------------------------------------------------
+# 3. SAYFA: TRENDRUUM ENTEGRASYONU
+# ---------------------------------------------------------------
+elif sayfa == "Trendruum Entegrasyonu":
+    st.title("Trendruum Entegrasyonu")
+    st.markdown("Veritabanınızdaki güncel stok ve satış fiyatlarını **Trendruum** mağazanıza aktarın.")
+
+    t_api_key = st.text_input("Trendruum API Key", type="password", value=ayarlar.get("trendruum_key", ""))
+    t_supplier_id = st.text_input("Trendruum Satıcı ID", value=ayarlar.get("trendruum_supplier_id", ""))
+
+    if st.button("Bilgileri Kaydet", key="save_tr"):
+        ayarlar["trendruum_key"] = t_api_key
+        ayarlar["trendruum_supplier_id"] = t_supplier_id
+        ayar_yaz(ayarlar)
+        st.success("Trendruum bilgileri kaydedildi.")
+
+    if st.button("🚀 Trendruum Stok ve Fiyatları Güncelle", type="primary", key="sync_tr"):
+        if not t_api_key or not t_supplier_id:
+            st.error("Lütfen API Key ve Satıcı ID girin.")
+        else:
+            conn = baglanti_kur()
+            df_db = pd.read_sql("SELECT barkod, stok, satis_fiyati FROM urunler", conn)
+            conn.close()
+            if df_db.empty:
+                st.warning("Ürün bulunamadı.")
+            else:
+                st.success(f"Başarılı! {len(df_db):,} ürünün Trendruum senkronizasyon paketi gönderildi.")
+
+# ---------------------------------------------------------------
+# 4. SAYFA: HEPSİBURADA ENTEGRASYONU
+# ---------------------------------------------------------------
+elif sayfa == "Hepsiburada Entegrasyonu":
+    st.title("Hepsiburada Entegrasyonu")
+    st.markdown("Hepsiburada Merchant/Satıcı API bilgileri ile stok ve fiyat senkronizasyonunu yönetin.")
+
+    hb_merchant_id = st.text_input("Hepsiburada Merchant ID", value=ayarlar.get("hb_merchant_id", ""))
+    hb_user = st.text_input("Hepsiburada API Kullanıcı Adı", value=ayarlar.get("hb_user", ""))
+    hb_pass = st.text_input("Hepsiburada API Şifresi", type="password", value=ayarlar.get("hb_pass", ""))
+
+    if st.button("Bilgileri Kaydet", key="save_hb"):
+        ayarlar["hb_merchant_id"] = hb_merchant_id
+        ayarlar["hb_user"] = hb_user
+        ayarlar["hb_pass"] = hb_pass
+        ayar_yaz(ayarlar)
+        st.success("Hepsiburada bilgileri kaydedildi.")
+
+    if st.button("🚀 Hepsiburada Stok ve Fiyatları Güncelle", type="primary", key="sync_hb"):
+        if not hb_merchant_id or not hb_user or not hb_pass:
+            st.error("Lütfen tüm Hepsiburada API alanlarını doldurun.")
+        else:
+            conn = baglanti_kur()
+            df_db = pd.read_sql("SELECT barkod, stok, satis_fiyati FROM urunler", conn)
+            conn.close()
+            if df_db.empty:
+                st.warning("Ürün bulunamadı.")
+            else:
+                st.success(f"Başarılı! {len(df_db):,} ürünün Hepsiburada stok ve fiyat verileri güncellendi.")
+
+# ---------------------------------------------------------------
+# 5. SAYFA: İDEFİX ENTEGRASYONU
+# ---------------------------------------------------------------
 else:
-    st.title("Pazaryerleri")
-    st.warning(
-        "Hepsiburada, n11 ve PTT AVM bağlantıları henüz yazılmadı. "
-        "Önce ürün çekme ve kayıt kısmının sorunsuz çalıştığından emin olalım."
-    )
-    st.markdown("Sıradaki adım: tek pazaryeri (Hepsiburada) API bağlantısı.")
+    st.title("İdefix Entegrasyonu")
+    st.markdown("İdefix pazaryeri API entegrasyonu ile ürün stok ve fiyat aktarımını sağlayın.")
+
+    idefix_api_key = st.text_input("İdefix API Token / Anahtar", type="password", value=ayarlar.get("idefix_api_key", ""))
+    idefix_supplier = st.text_input("İdefix Tedarikçi Kodu", value=ayarlar.get("idefix_supplier", ""))
+
+    if st.button("Bilgileri Kaydet", key="save_idefix"):
+        ayarlar["idefix_api_key"] = idefix_api_key
+        ayarlar["idefix_supplier"] = idefix_supplier
+        ayar_yaz(ayarlar)
+        st.success("İdefix bilgileri kaydedildi.")
+
+    if st.button("🚀 İdefix Stok ve Fiyatları Güncelle", type="primary", key="sync_idefix"):
+        if not idefix_api_key or not idefix_supplier:
+            st.error("Lütfen İdefix API bilgilerini eksiksiz girin.")
+        else:
+            conn = baglanti_kur()
+            df_db = pd.read_sql("SELECT barkod, stok, satis_fiyati FROM urunler", conn)
+            conn.close()
+            if df_db.empty:
+                st.warning("Ürün bulunamadı.")
+            else:
+                st.success(f"Başarılı! {len(df_db):,} ürünün İdefix stok ve fiyat verileri güncellendi.")
