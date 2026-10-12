@@ -173,18 +173,20 @@ def ilk_gorsel(df, secili):
     return sonuc.str.replace("http://", "https://", regex=False)
 
 
-def normalle(tedarikci, df, harita, marj):
+def normalle(tedarikci, df, harita, marj, sabit_ek):
     def kol(ad):
         return df[harita[ad]] if harita[ad] != "(yok)" else pd.Series([""] * len(df))
 
     alis = kol("fiyat").map(sayi)
+    # Satış Fiyatı = (Alış * (1 + Marj / 100)) + Sabit Ek Ücret (Kargo vb.)
+    satis = (alis * (1 + marj / 100)) + sabit_ek
     return pd.DataFrame({
         "Tedarikçi": tedarikci,
         "Barkod/SKU": kol("kod").astype(str),
         "Ürün Adı": kol("ad").astype(str),
         "Stok": kol("stok").map(sayi).astype(int),
         "Alış Fiyatı": alis.round(2),
-        "Satış Fiyatı": (alis * (1 + marj / 100)).round(2),
+        "Satış Fiyatı": satis.round(2),
         "Görsel": ilk_gorsel(df, harita["gorsel"]),
     })
 
@@ -198,14 +200,20 @@ VARSAYILAN_AYARLAR = {
     "HepsiBayi": {
         "link": "https://hepsicdn.com.tr/xml/MTAyMXwzNDUxMDQwNjU2NA==.87dc64ceb93877f2445185e59ef953febddfb61c01c326e4a4fc364220b20905", 
         "harita": {}, 
-        "marj": 30.0
+        "marj": 30.0,
+        "sabit_ek": 0.0
     }
 }
 
 def ayar_oku():
     try:
         if AYAR_DOSYA.exists():
-            return json.loads(AYAR_DOSYA.read_text(encoding="utf-8"))
+            veri = json.loads(AYAR_DOSYA.read_text(encoding="utf-8"))
+            # Eski ayarlarda sabit_ek yoksa ekle
+            for k in veri:
+                if "sabit_ek" not in veri[k]:
+                    veri[k]["sabit_ek"] = 0.0
+            return veri
         else:
             ayar_yaz(VARSAYILAN_AYARLAR)
             return VARSAYILAN_AYARLAR
@@ -334,7 +342,7 @@ elif sayfa == "Tedarikçiler & XML":
             if not t_ad or not t_link:
                 st.error("Tedarikçi adı ve linki zorunludur.")
             else:
-                ayarlar[t_ad] = {"link": t_link.strip(), "harita": {}, "marj": 30.0}
+                ayarlar[t_ad] = {"link": t_link.strip(), "harita": {}, "marj": 30.0, "sabit_ek": 0.0}
                 ayar_yaz(ayarlar)
                 st.success(f"{t_ad} eklendi.")
                 st.rerun()
@@ -348,7 +356,9 @@ elif sayfa == "Tedarikçiler & XML":
                     try:
                         ham_veri = indir(bilgi["link"])
                         df_hammadde = xml_oku(ham_veri)
-                        islenmis = normalle(ad, df_hammadde, bilgi.get("harita", {}), bilgi.get("marj", 30.0))
+                        marj = bilgi.get("marj", 30.0)
+                        sabit_ek = bilgi.get("sabit_ek", 0.0)
+                        islenmis = normalle(ad, df_hammadde, bilgi.get("harita", {}), marj, sabit_ek)
                         tum_veriler.append(islenmis)
                     except Exception as e:
                         st.error(f"{ad} çekilemedi: {e}")
@@ -367,11 +377,11 @@ elif sayfa == "Tedarikçiler & XML":
                     
                     conn.commit()
                     conn.close()
-                    st.success("Tüm stok ve fiyatlar veritabanına başarıyla kaydedildi!")
+                    st.success("Tüm stok ve fiyatlar güncel kâr/kargo ayarlarıyla veritabanına kaydedildi!")
                     st.rerun()
 
         st.markdown("---")
-        st.subheader("Kayıtlı Tedarikçiler ve Alan Eşleştirmeleri")
+        st.subheader("Kayıtlı Tedarikçiler, Marj ve Sabit Kargo Ayarları")
         for ad, bilgi in list(ayarlar.items()):
             with st.expander(f"⚙️ {ad} (Ayarları Yönet)"):
                 st.text(f"Link: {bilgi.get('link')}")
@@ -398,13 +408,16 @@ elif sayfa == "Tedarikçiler & XML":
                         "fiyat": sec("Alış Fiyatı", ["fiyat", "price", "alis", "alış"], "fiyat"),
                         "gorsel": sec("Görsel", ["image_1", "resim", "image", "gorsel", "görsel", "picture", "foto"], "gorsel"),
                     }
+                    
                     marj = st.number_input("Kâr Marjı (%)", 0.0, 500.0, float(bilgi.get("marj", 30.0)), 1.0, key=f"{ad}_marj")
+                    sabit_ek = st.number_input("Sabit Ek Ücret / Kargo Bedeli (TL)", 0.0, 5000.0, float(bilgi.get("sabit_ek", 0.0)), 5.0, key=f"{ad}_sabit_ek")
 
-                    if harita != eski_harita or marj != bilgi.get("marj"):
+                    if harita != eski_harita or marj != bilgi.get("marj") or sabit_ek != bilgi.get("sabit_ek"):
                         ayarlar[ad]["harita"] = harita
                         ayarlar[ad]["marj"] = marj
+                        ayarlar[ad]["sabit_ek"] = sabit_ek
                         ayar_yaz(ayarlar)
-                        st.success("Ayarlar kaydedildi.")
+                        st.success("Fiyatlandırma ayarları kaydedildi.")
 
                 except Exception as e:
                     st.warning(f"XML analiz edilemedi: {e}")
