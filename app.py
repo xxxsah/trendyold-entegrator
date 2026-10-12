@@ -194,10 +194,9 @@ def normalle(tedarikci, df, harita, marj):
 # ---------------------------------------------------------------
 AYAR_DOSYA = Path(__file__).parent / "ayarlar.json"
 
-# Varsayılan Tedarikçi (Buraya sık kullandığın XML linkini kalıcı olarak yazabilirsin)
 VARSAYILAN_AYARLAR = {
     "HepsiBayi": {
-        "link": "BURAYA_XML_LINKINI_YAZABİLİRSİN", 
+        "link": "https://hepsicdn.com.tr/xml/MTAyMXwzNDUxMDQwNjU2NA==.87dc64ceb93877f2445185e59ef953febddfb61c01c326e4a4fc364220b20905", 
         "harita": {}, 
         "marj": 30.0
     }
@@ -208,7 +207,6 @@ def ayar_oku():
         if AYAR_DOSYA.exists():
             return json.loads(AYAR_DOSYA.read_text(encoding="utf-8"))
         else:
-            # Dosya yoksa varsayılanları kaydet ve döndür
             ayar_yaz(VARSAYILAN_AYARLAR)
             return VARSAYILAN_AYARLAR
     except Exception:
