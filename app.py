@@ -191,7 +191,7 @@ def normalle(tedarikci, df, harita, marj, sabit_ek):
 
 
 # ---------------------------------------------------------------
-# KALICI AYARLAR
+# KALICI AYARLAR (SABİT TEDARİKÇİ & TRENDRUUM DEĞERLERİ)
 # ---------------------------------------------------------------
 AYAR_DOSYA = Path(__file__).parent / "ayarlar.json"
 
@@ -201,16 +201,24 @@ VARSAYILAN_AYARLAR = {
         "harita": {}, 
         "marj": 30.0,
         "sabit_ek": 0.0
-    }
+    },
+    "trendruum_key": "A2f75d22-d4d4-4abc-9368-b993c3313e2e",
+    "trendruum_secret": "SmnlXEUt72gTnhw53El4TsoLi8JiUxbUdwn7suma"
 }
 
 def ayar_oku():
     try:
         if AYAR_DOSYA.exists():
             veri = json.loads(AYAR_DOSYA.read_text(encoding="utf-8"))
-            for k in veri:
-                if "sabit_ek" not in veri[k]:
-                    veri[k]["sabit_ek"] = 0.0
+            # Eksik anahtarlar varsa varsayılanlardan tamamla
+            if "trendruum_key" not in veri:
+                veri["trendruum_key"] = VARSAYILAN_AYARLAR["trendruum_key"]
+            if "trendruum_secret" not in veri:
+                veri["trendruum_secret"] = VARSAYILAN_AYARLAR["trendruum_secret"]
+            for k in list(veri.keys()):
+                if k not in ["trendruum_key", "trendruum_secret"]:
+                    if isinstance(veri[k], dict) and "sabit_ek" not in veri[k]:
+                        veri[k]["sabit_ek"] = 0.0
             return veri
         else:
             ayar_yaz(VARSAYILAN_AYARLAR)
@@ -333,7 +341,7 @@ if sayfa == "Ürünler (Veritabanı)":
 elif sayfa == "Tedarikçiler & XML":
     st.title("Tedarikçi ve XML Ayarları")
 
-    with st.expander("➕ Yeni Tedarikçi Ekle", expanded=not ayarlar):
+    with st.expander("➕ Yeni Tedarikçi Ekle", expanded=not any(k not in ["trendruum_key", "trendruum_secret"] for k in ayarlar)):
         t_ad = st.text_input("Tedarikçi Adı", placeholder="Örn: HepsiBayi")
         t_link = st.text_input("XML Linki", placeholder="https://...")
         if st.button("Kaydet ve Ekle", type="primary"):
@@ -345,12 +353,13 @@ elif sayfa == "Tedarikçiler & XML":
                 st.success(f"{t_ad} eklendi.")
                 st.rerun()
 
-    if ayarlar:
+    tedarikciler = {k: v for k, v in ayarlar.items() if k not in ["trendruum_key", "trendruum_secret"]}
+    if tedarikciler:
         st.markdown("---")
         if st.button("🔄 Tüm XML'leri Çek ve Veritabanını Güncelle", type="primary"):
             tum_veriler = []
             with st.spinner("XML'ler indiriliyor ve veritabanı güncelleniyor..."):
-                for ad, bilgi in ayarlar.items():
+                for ad, bilgi in tedarikciler.items():
                     try:
                         ham_veri = indir(bilgi["link"])
                         df_hammadde = xml_oku(ham_veri)
@@ -380,7 +389,7 @@ elif sayfa == "Tedarikçiler & XML":
 
         st.markdown("---")
         st.subheader("Kayıtlı Tedarikçiler, Marj ve Sabit Kargo Ayarları")
-        for ad, bilgi in list(ayarlar.items()):
+        for ad, bilgi in list(tedarikciler.items()):
             with st.expander(f"⚙️ {ad} (Ayarları Yönet)"):
                 st.text(f"Link: {bilgi.get('link')}")
                 
@@ -426,20 +435,20 @@ elif sayfa == "Tedarikçiler & XML":
                     st.rerun()
 
 # ---------------------------------------------------------------
-# 3. SAYFA: TRENDRUUM ENTEGRASYONU (REQUEST / RESPONSE LOGLU)
+# 3. SAYFA: TRENDRUUM ENTEGRASYONU (SABİT KEY & SECRET)
 # ---------------------------------------------------------------
 elif sayfa == "Trendruum Entegrasyonu":
     st.title("Trendruum Entegrasyonu ve Ürün Yükleme")
-    st.markdown("Trendruum satıcı panelinden aldığınız **API Key (Client ID)** ve **API Secret (Client Secret)** bilgilerini giriniz.")
+    st.markdown("Trendruum API anahtarlarınız koda kalıcı olarak tanımlanmıştır.")
 
-    t_api_key = st.text_input("Trendruum API Key (Client ID)", type="password", value=ayarlar.get("trendruum_key", ""))
-    t_supplier_id = st.text_input("Trendruum API Secret (Client Secret)", type="password", value=ayarlar.get("trendruum_supplier_id", ""))
+    t_api_key = st.text_input("Trendruum API Key (Client ID)", type="password", value=ayarlar.get("trendruum_key", "A2f75d22-d4d4-4abc-9368-b993c3313e2e"))
+    t_supplier_id = st.text_input("Trendruum API Secret (Client Secret)", type="password", value=ayarlar.get("trendruum_secret", "SmnlXEUt72gTnhw53El4TsoLi8JiUxbUdwn7suma"))
 
-    if st.button("Bilgileri Kaydet", key="save_tr"):
+    # Değişiklik olursa hafızaya yaz
+    if t_api_key != ayarlar.get("trendruum_key") or t_supplier_id != ayarlar.get("trendruum_secret"):
         ayarlar["trendruum_key"] = t_api_key
-        ayarlar["trendruum_supplier_id"] = t_supplier_id
+        ayarlar["trendruum_secret"] = t_supplier_id
         ayar_yaz(ayarlar)
-        st.success("Trendruum bilgileri kaydedildi.")
 
     st.markdown("---")
     c_sec1, c_sec2 = st.columns(2)
@@ -478,10 +487,8 @@ elif sayfa == "Trendruum Entegrasyonu":
                                 })
                             
                             payload = {"items": sample_items}
-                            
                             response = requests.post(target_url, json=payload, headers=headers, timeout=30)
                             
-                            # Ekip için Request ve Response detay metni oluştur
                             log_text = f"""=== REQUEST (GÖNDERİLEN İSTEK) ===
 URL: {target_url}
 METHOD: POST
@@ -505,11 +512,9 @@ RESPONSE BODY:
         if st.button("🔄 Trendruum Stok/Fiyat Güncelle", key="sync_tr"):
             st.info("Sıfırdan yükleme ekranındaki logları kontrol edebilirsiniz.")
 
-    # Request / Response Logunu Kullanıcıya Göster
     if "tr_debug_log" in st.session_state:
         st.markdown("---")
         st.subheader("🔍 API İstek ve Yanıt Detayları (Request / Response)")
-        st.caption("Aşağıdaki kutudaki tüm metni kopyalayıp Trendruum destek ekibine iletebilirsiniz:")
         st.code(st.session_state["tr_debug_log"], language="text")
 
 # ---------------------------------------------------------------
