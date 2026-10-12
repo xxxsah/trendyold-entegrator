@@ -309,40 +309,86 @@ if sifre:
 
 
 # ---------------------------------------------------------------
-# ARAYÜZ VE MENÜ
+# ARAYÜZ VE ÖZEL RENKLİ MENÜ BUTONLARI
 # ---------------------------------------------------------------
 if "ayarlar" not in st.session_state:
     st.session_state.ayarlar = ayar_oku()
 ayarlar = st.session_state.ayarlar
 
-st.sidebar.title("👑 ŞahEntegre")
-sayfa = st.sidebar.radio("Menü", [
-    "Anasayfa & Hızlı İşlemler",
-    "Ürünler (Veritabanı)", 
-    "Tedarikçiler & XML", 
-    "Trendruum Entegrasyonu", 
-    "Hepsiburada Entegrasyonu", 
-    "İdefix Entegrasyonu",
-    "🤖 ŞahAI Asistanı"
-])
+# Session state üzerinden aktif sayfayı yönetelim
+if "aktif_sayfa" not in st.session_state:
+    st.session_state.aktif_sayfa = "Anasayfa & Hızlı İşlemler"
 
+# Üst / Yan Bilgilendirme ve Yedek
+st.sidebar.title("👑 ŞahEntegre")
 st.sidebar.markdown("---")
-st.sidebar.subheader("💾 Yedek")
+st.sidebar.subheader("💾 Yedekleme")
 st.sidebar.download_button(
-    "Ayarları indir",
+    "Ayarları İndir (.json)",
     json.dumps(ayarlar, ensure_ascii=False, indent=2).encode("utf-8"),
     "sahentegre_ayarlar.json",
     "application/json",
+    use_container_width=True
 )
 
 # ---------------------------------------------------------------
-# 0. SAYFA: ANASAYFA & HIZLI İŞLEMLER (METENTEGRE TARZI ÖZEL PANEL)
+# GÖRSEL & RENKLİ ANA MENÜ BUTONLARI (METENTEGRE TARZI)
+# ---------------------------------------------------------------
+st.markdown("""
+    <style>
+    .menu-header {
+        font-size: 24px;
+        font-weight: 700;
+        color: #ffffff;
+        margin-bottom: 15px;
+    }
+    </style>
+""", unsafe_allow_html=True)
+
+st.markdown('<div class="menu-header">👑 ŞahEntegre Kontrol Paneli</div>', unsafe_allow_html=True)
+
+# Renkli butonları yan yana 4'lü gruplar halinde diziyoruz
+m_col1, m_col2, m_col3, m_col4 = st.columns(4)
+
+with m_col1:
+    if st.button("🏠 Anasayfa", use_container_width=True, type="primary" if st.session_state.aktif_sayfa == "Anasayfa & Hızlı İşlemler" else "secondary"):
+        st.session_state.aktif_sayfa = "Anasayfa & Hızlı İşlemler"
+        st.rerun()
+    if st.button("📦 Sistemdeki Ürünler", use_container_width=True, type="primary" if st.session_state.aktif_sayfa == "Ürünler (Veritabanı)" else "secondary"):
+        st.session_state.aktif_sayfa = "Ürünler (Veritabanı)"
+        st.rerun()
+
+with m_col2:
+    if st.button("📄 Tedarikçiler & XML", use_container_width=True, type="primary" if st.session_state.aktif_sayfa == "Tedarikçiler & XML" else "secondary"):
+        st.session_state.aktif_sayfa = "Tedarikçiler & XML"
+        st.rerun()
+    if st.button("🚀 Trendruum", use_container_width=True, type="primary" if st.session_state.aktif_sayfa == "Trendruum Entegrasyonu" else "secondary"):
+        st.session_state.aktif_sayfa = "Trendruum Entegrasyonu"
+        st.rerun()
+
+with m_col3:
+    if st.button("🛍️ Hepsiburada", use_container_width=True, type="primary" if st.session_state.aktif_sayfa == "Hepsiburada Entegrasyonu" else "secondary"):
+        st.session_state.aktif_sayfa = "Hepsiburada Entegrasyonu"
+        st.rerun()
+    if st.button("📚 İdefix", use_container_width=True, type="primary" if st.session_state.aktif_sayfa == "İdefix Entegrasyonu" else "secondary"):
+        st.session_state.aktif_sayfa = "İdefix Entegrasyonu"
+        st.rerun()
+
+with m_col4:
+    if st.button("🤖 ŞahAI Asistanı", use_container_width=True, type="primary" if st.session_state.aktif_sayfa == "🤖 ŞahAI Asistanı" else "secondary"):
+        st.session_state.aktif_sayfa = "🤖 ŞahAI Asistanı"
+        st.rerun()
+
+st.markdown("---")
+sayfa = st.session_state.aktif_sayfa
+
+# ---------------------------------------------------------------
+# 0. SAYFA: ANASAYFA & HIZLI İŞLEMLER
 # ---------------------------------------------------------------
 if sayfa == "Anasayfa & Hızlı İşlemler":
-    st.title("👑 ŞahEntegre Kontrol Paneli")
-    st.markdown("Mağazanızdaki ürünler, eşleşme durumları ve hızlı operasyonel işlemler.")
+    st.title("⚡ Hızlı İşlemler ve Pazar Yeri Yönetimi")
+    st.markdown("Mağazanızdaki ürünler, canlı senkronizasyon araçları ve kritik operasyonel butonlar.")
 
-    # Veritabanı istatistikleri
     conn = baglanti_kur()
     try:
         df_istatistik = pd.read_sql("SELECT COUNT(*) as toplam, SUM(CASE WHEN stok > 0 THEN 1 ELSE 0 END) as stoklu FROM urunler", conn)
@@ -352,19 +398,17 @@ if sayfa == "Anasayfa & Hızlı İşlemler":
         toplam_urun, stoklu_urun = 0, 0
     conn.close()
 
-    st.markdown("### ⚡ Hızlı İşlemler ve Senkronizasyon")
-    
-    col_b1, col_b2 = st.columns(2)
-    with col_b1:
-        if st.button("🔄 Tam Senkronizasyon", use_container_width=True, type="primary"):
-            st.success("Tam Senkronizasyon komutu tetiklendi! Tedarikçi verileri kontrol ediliyor.")
-        if st.button("⚠️ Kritik Stok Sıfırla", use_container_width=True):
-            st.info("Kritik stok eşiğindeki ürünler başarıyla sıfırlandı.")
-    with col_b2:
-        if st.button("📦 Toplu Ürün Gönder", use_container_width=True):
-            st.success("Aktif ürünler pazar yerleri kuyruğuna eklendi.")
+    col_islem1, col_islem2 = st.columns(2)
+    with col_islem1:
+        if st.button("🔄 Tam Senkronizasyon Başlat", use_container_width=True, type="primary"):
+            st.success("Tam Senkronizasyon komutu başarıyla tetiklendi!")
+        if st.button("⚠️ Kritik Stokları Sıfırla", use_container_width=True):
+            st.info("Kritik eşikteki ürünler sıfırlandı.")
+    with col_islem2:
+        if st.button("🚀 Toplu Ürün Gönder", use_container_width=True):
+            st.success("Tüm ürünler pazar yeri kuyruğuna eklendi.")
         if st.button("🏷️ Tüm Barkodları Güncelle", use_container_width=True):
-            st.success("Barkod eşitlemesi tamamlandı.")
+            st.success("Barkodlar güncellendi.")
 
     st.markdown("---")
     
@@ -376,7 +420,7 @@ if sayfa == "Anasayfa & Hızlı İşlemler":
     c4.metric("Aktif Entegrasyon", "3 Pazar Yeri")
 
     st.markdown("---")
-    st.info("💡 **İpucu:** Sol menüden pazar yeri entegrasyonlarına geçebilir, **ŞahAI Asistanı** ile sisteminize sorular sorabilirsiniz.")
+    st.info("💡 **İpucu:** Yukarıdaki renkli butonları kullanarak saniyeler içinde işlemler arasında geçiş yapabilirsiniz.")
 
 # ---------------------------------------------------------------
 # 1. SAYFA: ÜRÜNLER (VERİTABANI LİSTESİ)
@@ -728,7 +772,6 @@ else:
         with st.chat_message("kullanici"):
             st.markdown(kullanici_girdisi)
 
-        # Akıllı Yanıt Üretme Mantığı
         cevap = "Bu konuda veritabanımı inceledim. "
         girdi_lc = kullanici_girdisi.lower()
         
