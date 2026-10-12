@@ -178,7 +178,6 @@ def normalle(tedarikci, df, harita, marj, sabit_ek):
         return df[harita[ad]] if harita[ad] != "(yok)" else pd.Series([""] * len(df))
 
     alis = kol("fiyat").map(sayi)
-    # Satış Fiyatı = (Alış * (1 + Marj / 100)) + Sabit Ek Ücret (Kargo vb.)
     satis = (alis * (1 + marj / 100)) + sabit_ek
     return pd.DataFrame({
         "Tedarikçi": tedarikci,
@@ -192,7 +191,7 @@ def normalle(tedarikci, df, harita, marj, sabit_ek):
 
 
 # ---------------------------------------------------------------
-# KALICI AYARLAR (Varsayılan Sabit Tedarikçi Desteği)
+# KALICI AYARLAR
 # ---------------------------------------------------------------
 AYAR_DOSYA = Path(__file__).parent / "ayarlar.json"
 
@@ -209,7 +208,6 @@ def ayar_oku():
     try:
         if AYAR_DOSYA.exists():
             veri = json.loads(AYAR_DOSYA.read_text(encoding="utf-8"))
-            # Eski ayarlarda sabit_ek yoksa ekle
             for k in veri:
                 if "sabit_ek" not in veri[k]:
                     veri[k]["sabit_ek"] = 0.0
@@ -377,7 +375,7 @@ elif sayfa == "Tedarikçiler & XML":
                     
                     conn.commit()
                     conn.close()
-                    st.success("Tüm stok ve fiyatlar güncel kâr/kargo ayarlarıyla veritabanına kaydedildi!")
+                    st.success("Tüm stok ve fiyatlar kuralına göre güncellendi!")
                     st.rerun()
 
         st.markdown("---")
@@ -417,7 +415,7 @@ elif sayfa == "Tedarikçiler & XML":
                         ayarlar[ad]["marj"] = marj
                         ayarlar[ad]["sabit_ek"] = sabit_ek
                         ayar_yaz(ayarlar)
-                        st.success("Fiyatlandırma ayarları kaydedildi.")
+                        st.success("Ayarlar kaydedildi.")
 
                 except Exception as e:
                     st.warning(f"XML analiz edilemedi: {e}")
@@ -428,10 +426,12 @@ elif sayfa == "Tedarikçiler & XML":
                     st.rerun()
 
 # ---------------------------------------------------------------
-# 3. SAYFA: TRENDRUUM ENTEGRASYONU
+# 3. SAYFA: TRENDRUUM ENTEGRASYONU (CANLI API)
 # ---------------------------------------------------------------
 elif sayfa == "Trendruum Entegrasyonu":
     st.title("Trendruum Entegrasyonu ve Ürün Yükleme")
+    st.markdown("Trendruum mağaza bilgilerinizi girerek ürünlerinizi canlı olarak aktarabilir ve güncelleyebilirsiniz.")
+
     t_api_key = st.text_input("Trendruum API Key", type="password", value=ayarlar.get("trendruum_key", ""))
     t_supplier_id = st.text_input("Trendruum Satıcı ID", value=ayarlar.get("trendruum_supplier_id", ""))
 
@@ -446,9 +446,10 @@ elif sayfa == "Trendruum Entegrasyonu":
     
     with c_sec1:
         st.subheader("1. Sıfırdan Ürün Yükleme (Create)")
+        st.info("Veritabanındaki tüm ürünleri Trendruum mağazanıza ilk kez kaydeder.")
         if st.button("📤 Trendruum'a Ürünleri Yükle", type="primary", key="create_tr"):
             if not t_api_key or not t_supplier_id:
-                st.error("Lütfen API Key ve Satıcı ID girin.")
+                st.error("Lütfen önce Trendruum API Key ve Satıcı ID bilgilerini girip kaydedin.")
             else:
                 conn = baglanti_kur()
                 df_db = pd.read_sql("SELECT * FROM urunler", conn)
@@ -456,10 +457,38 @@ elif sayfa == "Trendruum Entegrasyonu":
                 if df_db.empty:
                     st.warning("Veritabanında ürün bulunamadı.")
                 else:
-                    st.success(f"Başarılı! {len(df_db):,} ürün Trendruum'a gönderildi.")
+                    try:
+                        with st.spinner("Ürünler Trendruum API'sine gönderiliyor..."):
+                            api_url = f"https://api.trendruum.com/v1/suppliers/{t_supplier_id}/products"
+                            headers = {
+                                "Authorization": f"Bearer {t_api_key}",
+                                "Content-Type": "application/json"
+                            }
+                            
+                            # Ürünleri paketle
+                            urunler_listesi = []
+                            for _, row in df_db.iterrows():
+                                urunler_listesi.append({
+                                    "barcode": str(row["barkod"]),
+                                    "title": str(row["urun_adi"]),
+                                    "quantity": int(row["stok"]),
+                                    "listPrice": float(row["satis_fiyati"]),
+                                    "salePrice": float(row["satis_fiyati"]),
+                                    "images": [{"url": str(row["gorsel"])}] if row["gorsel"] else []
+                                })
+                            
+                            # Gerçek API İsteği (Gerekirse toplu parçalar halinde de atılabilir)
+                            response = requests.post(api_url, json={"items": urunler_listesi}, headers=headers, timeout=60)
+                            if response.status_code in [200, 201]:
+                                st.success(f"Başarılı! {len(urunler_listesi):,} ürün Trendruum kataloğuna yüklendi.")
+                            else:
+                                st.warning(f"API Yanıtı ({response.status_code}): {response.text}")
+                    except Exception as e:
+                        st.error(f"Bağlantı hatası: {e}")
 
     with c_sec2:
         st.subheader("2. Stok ve Fiyat Güncelleme")
+        st.info("Sadece stok ve satış fiyatı değişikliklerini Trendruum'a iletir.")
         if st.button("🔄 Trendruum Stok/Fiyat Güncelle", key="sync_tr"):
             if not t_api_key or not t_supplier_id:
                 st.error("Lütfen API Key ve Satıcı ID girin.")
@@ -470,7 +499,29 @@ elif sayfa == "Trendruum Entegrasyonu":
                 if df_db.empty:
                     st.warning("Ürün bulunamadı.")
                 else:
-                    st.success(f"Başarılı! {len(df_db):,} ürünün stok ve fiyatları güncellendi.")
+                    try:
+                        with st.spinner("Stok ve fiyatlar Trendruum'a gönderiliyor..."):
+                            api_url = f"https://api.trendruum.com/v1/suppliers/{t_supplier_id}/items/price-and-inventory"
+                            headers = {
+                                "Authorization": f"Bearer {t_api_key}",
+                                "Content-Type": "application/json"
+                            }
+                            
+                            stok_fiyat_listesi = []
+                            for _, row in df_db.iterrows():
+                                stok_fiyat_listesi.append({
+                                    "barcode": str(row["barkod"]),
+                                    "quantity": int(row["stok"]),
+                                    "salePrice": float(row["satis_fiyati"])
+                                })
+                            
+                            response = requests.post(api_url, json={"items": stok_fiyat_listesi}, headers=headers, timeout=60)
+                            if response.status_code == 200:
+                                st.success(f"Başarılı! {len(stok_fiyat_listesi):,} ürünün stok ve fiyatları güncellendi.")
+                            else:
+                                st.warning(f"API Yanıtı ({response.status_code}): {response.text}")
+                    except Exception as e:
+                        st.error(f"Bağlantı hatası: {e}")
 
 # ---------------------------------------------------------------
 # 4. SAYFA: HEPSİBURADA ENTEGRASYONU
