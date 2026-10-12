@@ -11,7 +11,7 @@ import pandas as pd
 import requests
 import streamlit as st
 
-st.set_page_config(page_title="Şahentegre", page_icon="👑", layout="wide")
+st.set_page_config(page_title="ŞahEntegre", page_icon="👑", layout="wide")
 
 # ---------------------------------------------------------------
 # VERİTABANI (SQLITE) YÖNETİMİ
@@ -191,7 +191,7 @@ def normalle(tedarikci, df, harita, marj, sabit_ek):
 
 
 # ---------------------------------------------------------------
-# KALICI AYARLAR (SABİT DEĞERLER)
+# KALICI AYARLAR (AKILLI OKUMA VE GÜNCELLEME)
 # ---------------------------------------------------------------
 AYAR_DOSYA = Path(__file__).parent / "ayarlar.json"
 
@@ -218,13 +218,17 @@ def ayar_oku():
     try:
         if AYAR_DOSYA.exists():
             veri = json.loads(AYAR_DOSYA.read_text(encoding="utf-8"))
+            degisti = False
             for k in OZEL_SABITLER:
                 if k not in veri:
                     veri[k] = VARSAYILAN_AYARLAR[k]
-            for k in list(veri.keys()):
-                if k not in OZEL_SABITLER:
-                    if isinstance(veri[k], dict) and "sabit_ek" not in veri[k]:
-                        veri[k]["sabit_ek"] = 0.0
+                    degisti = True
+            for k, v in VARSAYILAN_AYARLAR.items():
+                if k not in veri:
+                    veri[k] = v
+                    degisti = True
+            if degisti:
+                ayar_yaz(veri)
             return veri
         else:
             ayar_yaz(VARSAYILAN_AYARLAR)
@@ -250,7 +254,7 @@ def sifre_al():
 
 
 # ---------------------------------------------------------------
-# ŞİFRE KORUMASI (CANLI VE GÖRKEMLİ GİRİŞ EKRANI)
+# ŞİFRE KORUMASI (GÖRKEMLİ GİRİŞ EKRANI)
 # ---------------------------------------------------------------
 sifre = sifre_al()
 if sifre:
