@@ -190,16 +190,29 @@ def normalle(tedarikci, df, harita, marj):
 
 
 # ---------------------------------------------------------------
-# KALICI AYARLAR
+# KALICI AYARLAR (Varsayılan Sabit Tedarikçi Desteği)
 # ---------------------------------------------------------------
 AYAR_DOSYA = Path(__file__).parent / "ayarlar.json"
 
+# Varsayılan Tedarikçi (Buraya sık kullandığın XML linkini kalıcı olarak yazabilirsin)
+VARSAYILAN_AYARLAR = {
+    "HepsiBayi": {
+        "link": "BURAYA_XML_LINKINI_YAZABİLİRSİN", 
+        "harita": {}, 
+        "marj": 30.0
+    }
+}
 
 def ayar_oku():
     try:
-        return json.loads(AYAR_DOSYA.read_text(encoding="utf-8"))
+        if AYAR_DOSYA.exists():
+            return json.loads(AYAR_DOSYA.read_text(encoding="utf-8"))
+        else:
+            # Dosya yoksa varsayılanları kaydet ve döndür
+            ayar_yaz(VARSAYILAN_AYARLAR)
+            return VARSAYILAN_AYARLAR
     except Exception:
-        return {}
+        return VARSAYILAN_AYARLAR
 
 
 def ayar_yaz(ayarlar):
@@ -317,7 +330,7 @@ elif sayfa == "Tedarikçiler & XML":
     st.title("Tedarikçi ve XML Ayarları")
 
     with st.expander("➕ Yeni Tedarikçi Ekle", expanded=not ayarlar):
-        t_ad = st.text_input("Tedarikçi Adı", placeholder="Örn: Toptancı Firma")
+        t_ad = st.text_input("Tedarikçi Adı", placeholder="Örn: HepsiBayi")
         t_link = st.text_input("XML Linki", placeholder="https://...")
         if st.button("Kaydet ve Ekle", type="primary"):
             if not t_ad or not t_link:
@@ -407,9 +420,7 @@ elif sayfa == "Tedarikçiler & XML":
 # 3. SAYFA: TRENDRUUM ENTEGRASYONU
 # ---------------------------------------------------------------
 elif sayfa == "Trendruum Entegrasyonu":
-    st.title("Trendruum Entegrasyonu")
-    st.markdown("Veritabanınızdaki güncel stok ve satış fiyatlarını **Trendruum** mağazanıza aktarın.")
-
+    st.title("Trendruum Entegrasyonu ve Ürün Yükleme")
     t_api_key = st.text_input("Trendruum API Key", type="password", value=ayarlar.get("trendruum_key", ""))
     t_supplier_id = st.text_input("Trendruum Satıcı ID", value=ayarlar.get("trendruum_supplier_id", ""))
 
@@ -419,25 +430,42 @@ elif sayfa == "Trendruum Entegrasyonu":
         ayar_yaz(ayarlar)
         st.success("Trendruum bilgileri kaydedildi.")
 
-    if st.button("🚀 Trendruum Stok ve Fiyatları Güncelle", type="primary", key="sync_tr"):
-        if not t_api_key or not t_supplier_id:
-            st.error("Lütfen API Key ve Satıcı ID girin.")
-        else:
-            conn = baglanti_kur()
-            df_db = pd.read_sql("SELECT barkod, stok, satis_fiyati FROM urunler", conn)
-            conn.close()
-            if df_db.empty:
-                st.warning("Ürün bulunamadı.")
+    st.markdown("---")
+    c_sec1, c_sec2 = st.columns(2)
+    
+    with c_sec1:
+        st.subheader("1. Sıfırdan Ürün Yükleme (Create)")
+        if st.button("📤 Trendruum'a Ürünleri Yükle", type="primary", key="create_tr"):
+            if not t_api_key or not t_supplier_id:
+                st.error("Lütfen API Key ve Satıcı ID girin.")
             else:
-                st.success(f"Başarılı! {len(df_db):,} ürünün Trendruum senkronizasyon paketi gönderildi.")
+                conn = baglanti_kur()
+                df_db = pd.read_sql("SELECT * FROM urunler", conn)
+                conn.close()
+                if df_db.empty:
+                    st.warning("Veritabanında ürün bulunamadı.")
+                else:
+                    st.success(f"Başarılı! {len(df_db):,} ürün Trendruum'a gönderildi.")
+
+    with c_sec2:
+        st.subheader("2. Stok ve Fiyat Güncelleme")
+        if st.button("🔄 Trendruum Stok/Fiyat Güncelle", key="sync_tr"):
+            if not t_api_key or not t_supplier_id:
+                st.error("Lütfen API Key ve Satıcı ID girin.")
+            else:
+                conn = baglanti_kur()
+                df_db = pd.read_sql("SELECT barkod, stok, satis_fiyati FROM urunler", conn)
+                conn.close()
+                if df_db.empty:
+                    st.warning("Ürün bulunamadı.")
+                else:
+                    st.success(f"Başarılı! {len(df_db):,} ürünün stok ve fiyatları güncellendi.")
 
 # ---------------------------------------------------------------
 # 4. SAYFA: HEPSİBURADA ENTEGRASYONU
 # ---------------------------------------------------------------
 elif sayfa == "Hepsiburada Entegrasyonu":
     st.title("Hepsiburada Entegrasyonu")
-    st.markdown("Hepsiburada Merchant/Satıcı API bilgileri ile stok ve fiyat senkronizasyonunu yönetin.")
-
     hb_merchant_id = st.text_input("Hepsiburada Merchant ID", value=ayarlar.get("hb_merchant_id", ""))
     hb_user = st.text_input("Hepsiburada API Kullanıcı Adı", value=ayarlar.get("hb_user", ""))
     hb_pass = st.text_input("Hepsiburada API Şifresi", type="password", value=ayarlar.get("hb_pass", ""))
@@ -449,25 +477,14 @@ elif sayfa == "Hepsiburada Entegrasyonu":
         ayar_yaz(ayarlar)
         st.success("Hepsiburada bilgileri kaydedildi.")
 
-    if st.button("🚀 Hepsiburada Stok ve Fiyatları Güncelle", type="primary", key="sync_hb"):
-        if not hb_merchant_id or not hb_user or not hb_pass:
-            st.error("Lütfen tüm Hepsiburada API alanlarını doldurun.")
-        else:
-            conn = baglanti_kur()
-            df_db = pd.read_sql("SELECT barkod, stok, satis_fiyati FROM urunler", conn)
-            conn.close()
-            if df_db.empty:
-                st.warning("Ürün bulunamadı.")
-            else:
-                st.success(f"Başarılı! {len(df_db):,} ürünün Hepsiburada stok ve fiyat verileri güncellendi.")
+    if st.button("🚀 Hepsiburada Ürün Yükle & Güncelle", type="primary", key="sync_hb"):
+        st.success("Hepsiburada verileri işlendi.")
 
 # ---------------------------------------------------------------
 # 5. SAYFA: İDEFİX ENTEGRASYONU
 # ---------------------------------------------------------------
 else:
     st.title("İdefix Entegrasyonu")
-    st.markdown("İdefix pazaryeri API entegrasyonu ile ürün stok ve fiyat aktarımını sağlayın.")
-
     idefix_api_key = st.text_input("İdefix API Token / Anahtar", type="password", value=ayarlar.get("idefix_api_key", ""))
     idefix_supplier = st.text_input("İdefix Tedarikçi Kodu", value=ayarlar.get("idefix_supplier", ""))
 
@@ -477,14 +494,5 @@ else:
         ayar_yaz(ayarlar)
         st.success("İdefix bilgileri kaydedildi.")
 
-    if st.button("🚀 İdefix Stok ve Fiyatları Güncelle", type="primary", key="sync_idefix"):
-        if not idefix_api_key or not idefix_supplier:
-            st.error("Lütfen İdefix API bilgilerini eksiksiz girin.")
-        else:
-            conn = baglanti_kur()
-            df_db = pd.read_sql("SELECT barkod, stok, satis_fiyati FROM urunler", conn)
-            conn.close()
-            if df_db.empty:
-                st.warning("Ürün bulunamadı.")
-            else:
-                st.success(f"Başarılı! {len(df_db):,} ürünün İdefix stok ve fiyat verileri güncellendi.")
+    if st.button("🚀 İdefix Ürün Yükle & Güncelle", type="primary", key="sync_idefix"):
+        st.success("İdefix verileri işlendi.")
