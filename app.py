@@ -11,7 +11,7 @@ import pandas as pd
 import requests
 import streamlit as st
 
-st.set_page_config(page_title="MetEntegre", page_icon="📦", layout="wide")
+st.set_page_config(page_title="Şahentegre", page_icon="👑", layout="wide")
 
 # ---------------------------------------------------------------
 # VERİTABANI (SQLITE) YÖNETİMİ
@@ -250,19 +250,57 @@ def sifre_al():
 
 
 # ---------------------------------------------------------------
-# ŞİFRE KORUMASI
+# ŞİFRE KORUMASI (CANLI VE GÖRKEMLİ GİRİŞ EKRANI)
 # ---------------------------------------------------------------
 sifre = sifre_al()
 if sifre:
     if not st.session_state.get("giris_ok"):
-        st.title("🔒 MetEntegre")
-        girilen = st.text_input("Şifre", type="password")
-        if st.button("Giriş", type="primary"):
-            if girilen == sifre:
-                st.session_state.giris_ok = True
-                st.rerun()
-            else:
-                st.error("Yanlış şifre.")
+        st.markdown("""
+            <style>
+            .stApp {
+                background: linear-gradient(135deg, #1f1c2c 0%, #928dab 100%);
+            }
+            .login-card {
+                background: rgba(255, 255, 255, 0.08);
+                padding: 40px;
+                border-radius: 20px;
+                box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
+                backdrop-filter: blur(8px);
+                -webkit-backdrop-filter: blur(8px);
+                border: 1px solid rgba(255, 255, 255, 0.18);
+                text-align: center;
+                max-width: 450px;
+                margin: 80px auto;
+            }
+            .sah-title {
+                font-size: 42px;
+                font-weight: 800;
+                color: #ffffff;
+                letter-spacing: 1px;
+                margin-bottom: 10px;
+            }
+            .sah-logo {
+                font-size: 60px;
+                margin-bottom: -10px;
+            }
+            </style>
+            
+            <div class="login-card">
+                <div class="sah-logo">👑</div>
+                <div class="sah-title"><span style="color: #ffd700; font-size: 50px;">Ş</span>ahEntegre</div>
+                <p style="color: #e0e0e0; font-size: 15px; margin-bottom: 25px;">Yönetim Paneli Giriş Ekranı</p>
+            </div>
+        """, unsafe_allow_html=True)
+        
+        col1, col2, col3 = st.columns([1, 1.2, 1])
+        with col2:
+            girilen = st.text_input("🔑 Yönetici Şifresi", type="password")
+            if st.button("Sisteme Giriş Yap", type="primary", use_container_width=True):
+                if girilen == sifre:
+                    st.session_state.giris_ok = True
+                    st.rerun()
+                else:
+                    st.error("❌ Hatalı şifre, lütfen tekrar deneyin.")
         st.stop()
 
 
@@ -273,7 +311,7 @@ if "ayarlar" not in st.session_state:
     st.session_state.ayarlar = ayar_oku()
 ayarlar = st.session_state.ayarlar
 
-st.sidebar.title("📦 MetEntegre")
+st.sidebar.title("👑 ŞahEntegre")
 sayfa = st.sidebar.radio("Menü", [
     "Ürünler (Veritabanı)", 
     "Tedarikçiler & XML", 
@@ -287,7 +325,7 @@ st.sidebar.subheader("💾 Yedek")
 st.sidebar.download_button(
     "Ayarları indir",
     json.dumps(ayarlar, ensure_ascii=False, indent=2).encode("utf-8"),
-    "metentegre_ayarlar.json",
+    "sahentegre_ayarlar.json",
     "application/json",
 )
 
@@ -538,7 +576,7 @@ elif sayfa == "Hepsiburada Entegrasyonu":
         st.success("Hepsiburada verileri işlendi.")
 
 # ---------------------------------------------------------------
-# 5. SAYFA: İDEFİX ENTEGRASYONU (CANLI API & LOGLU)
+# 5. SAYFA: İDEFİX ENTEGRASYONU
 # ---------------------------------------------------------------
 else:
     st.title("İdefix Entegrasyonu ve Ürün Yükleme")
@@ -573,16 +611,13 @@ else:
                 else:
                     try:
                         with st.spinner("İdefix'e ürünler gönderiliyor..."):
-                            # İdefix standart pazar yeri entegrasyon endpoint yapısı (Test/Canlı)
                             target_url = f"https://api.idefix.com/suppliers/{idefix_satici_id}/products"
-                            
                             headers = {
                                 "Authorization": f"Bearer {idefix_token}",
                                 "X-Supplier-Secret": idefix_secret,
                                 "Content-Type": "application/json",
                                 "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
                             }
-                            
                             sample_items = []
                             for _, row in df_db.head(3).iterrows():
                                 sample_items.append({
@@ -592,7 +627,6 @@ else:
                                     "price": float(row["satis_fiyati"]),
                                     "imageUrl": str(row["gorsel"])
                                 })
-                            
                             payload = {"products": sample_items}
                             response = requests.post(target_url, json=payload, headers=headers, timeout=30)
                             
