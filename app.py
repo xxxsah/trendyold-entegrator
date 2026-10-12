@@ -191,9 +191,14 @@ def normalle(tedarikci, df, harita, marj, sabit_ek):
 
 
 # ---------------------------------------------------------------
-# KALICI AYARLAR (SABİT TEDARİKÇİ & TRENDRUUM DEĞERLERİ)
+# KALICI AYARLAR (SABİT DEĞERLER)
 # ---------------------------------------------------------------
 AYAR_DOSYA = Path(__file__).parent / "ayarlar.json"
+
+OZEL_SABITLER = [
+    "trendruum_key", "trendruum_secret", 
+    "idefix_satici_id", "idefix_token", "idefix_secret"
+]
 
 VARSAYILAN_AYARLAR = {
     "HepsiBayi": {
@@ -203,20 +208,21 @@ VARSAYILAN_AYARLAR = {
         "sabit_ek": 0.0
     },
     "trendruum_key": "A2f75d22-d4d4-4abc-9368-b993c3313e2e",
-    "trendruum_secret": "SmnlXEUt72gTnhw53El4TsoLi8JiUxbUdwn7suma"
+    "trendruum_secret": "SmnlXEUt72gTnhw53El4TsoLi8JiUxbUdwn7suma",
+    "idefix_satici_id": "27837",
+    "idefix_token": "929c122e-87bd-4aba-a293-0c731bf4e5ff",
+    "idefix_secret": "8c510c89-9d4c-4d36-b411-9024c0b7f42d"
 }
 
 def ayar_oku():
     try:
         if AYAR_DOSYA.exists():
             veri = json.loads(AYAR_DOSYA.read_text(encoding="utf-8"))
-            # Eksik anahtarlar varsa varsayılanlardan tamamla
-            if "trendruum_key" not in veri:
-                veri["trendruum_key"] = VARSAYILAN_AYARLAR["trendruum_key"]
-            if "trendruum_secret" not in veri:
-                veri["trendruum_secret"] = VARSAYILAN_AYARLAR["trendruum_secret"]
+            for k in OZEL_SABITLER:
+                if k not in veri:
+                    veri[k] = VARSAYILAN_AYARLAR[k]
             for k in list(veri.keys()):
-                if k not in ["trendruum_key", "trendruum_secret"]:
+                if k not in OZEL_SABITLER:
                     if isinstance(veri[k], dict) and "sabit_ek" not in veri[k]:
                         veri[k]["sabit_ek"] = 0.0
             return veri
@@ -341,7 +347,7 @@ if sayfa == "Ürünler (Veritabanı)":
 elif sayfa == "Tedarikçiler & XML":
     st.title("Tedarikçi ve XML Ayarları")
 
-    with st.expander("➕ Yeni Tedarikçi Ekle", expanded=not any(k not in ["trendruum_key", "trendruum_secret"] for k in ayarlar)):
+    with st.expander("➕ Yeni Tedarikçi Ekle", expanded=not any(k not in OZEL_SABITLER for k in ayarlar)):
         t_ad = st.text_input("Tedarikçi Adı", placeholder="Örn: HepsiBayi")
         t_link = st.text_input("XML Linki", placeholder="https://...")
         if st.button("Kaydet ve Ekle", type="primary"):
@@ -353,7 +359,7 @@ elif sayfa == "Tedarikçiler & XML":
                 st.success(f"{t_ad} eklendi.")
                 st.rerun()
 
-    tedarikciler = {k: v for k, v in ayarlar.items() if k not in ["trendruum_key", "trendruum_secret"]}
+    tedarikciler = {k: v for k, v in ayarlar.items() if k not in OZEL_SABITLER}
     if tedarikciler:
         st.markdown("---")
         if st.button("🔄 Tüm XML'leri Çek ve Veritabanını Güncelle", type="primary"):
@@ -435,7 +441,7 @@ elif sayfa == "Tedarikçiler & XML":
                     st.rerun()
 
 # ---------------------------------------------------------------
-# 3. SAYFA: TRENDRUUM ENTEGRASYONU (SABİT KEY & SECRET)
+# 3. SAYFA: TRENDRUUM ENTEGRASYONU
 # ---------------------------------------------------------------
 elif sayfa == "Trendruum Entegrasyonu":
     st.title("Trendruum Entegrasyonu ve Ürün Yükleme")
@@ -444,7 +450,6 @@ elif sayfa == "Trendruum Entegrasyonu":
     t_api_key = st.text_input("Trendruum API Key (Client ID)", type="password", value=ayarlar.get("trendruum_key", "A2f75d22-d4d4-4abc-9368-b993c3313e2e"))
     t_supplier_id = st.text_input("Trendruum API Secret (Client Secret)", type="password", value=ayarlar.get("trendruum_secret", "SmnlXEUt72gTnhw53El4TsoLi8JiUxbUdwn7suma"))
 
-    # Değişiklik olursa hafızaya yaz
     if t_api_key != ayarlar.get("trendruum_key") or t_supplier_id != ayarlar.get("trendruum_secret"):
         ayarlar["trendruum_key"] = t_api_key
         ayarlar["trendruum_secret"] = t_supplier_id
@@ -468,13 +473,11 @@ elif sayfa == "Trendruum Entegrasyonu":
                     try:
                         with st.spinner("İstek hazırlanıyor ve gönderiliyor..."):
                             target_url = "https://seller.trendruum.com/api/v1/products"
-                            
                             headers = {
                                 "Authorization": f"Bearer {t_api_key}",
                                 "Content-Type": "application/json",
                                 "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
                             }
-                            
                             sample_items = []
                             for _, row in df_db.head(3).iterrows():
                                 sample_items.append({
@@ -485,7 +488,6 @@ elif sayfa == "Trendruum Entegrasyonu":
                                     "salePrice": float(row["satis_fiyati"]),
                                     "images": [{"url": str(row["gorsel"])}] if row["gorsel"] else []
                                 })
-                            
                             payload = {"items": sample_items}
                             response = requests.post(target_url, json=payload, headers=headers, timeout=30)
                             
@@ -503,7 +505,6 @@ RESPONSE BODY:
 """
                             st.session_state["tr_debug_log"] = log_text
                             st.rerun()
-
                     except Exception as e:
                         st.error(f"Hata oluştu: {e}")
 
@@ -514,7 +515,7 @@ RESPONSE BODY:
 
     if "tr_debug_log" in st.session_state:
         st.markdown("---")
-        st.subheader("🔍 API İstek ve Yanıt Detayları (Request / Response)")
+        st.subheader("🔍 Trendruum API İstek ve Yanıt Detayları")
         st.code(st.session_state["tr_debug_log"], language="text")
 
 # ---------------------------------------------------------------
@@ -537,18 +538,87 @@ elif sayfa == "Hepsiburada Entegrasyonu":
         st.success("Hepsiburada verileri işlendi.")
 
 # ---------------------------------------------------------------
-# 5. SAYFA: İDEFİX ENTEGRASYONU
+# 5. SAYFA: İDEFİX ENTEGRASYONU (CANLI API & LOGLU)
 # ---------------------------------------------------------------
 else:
-    st.title("İdefix Entegrasyonu")
-    idefix_api_key = st.text_input("İdefix API Token / Anahtar", type="password", value=ayarlar.get("idefix_api_key", ""))
-    idefix_supplier = st.text_input("İdefix Tedarikçi Kodu", value=ayarlar.get("idefix_supplier", ""))
+    st.title("İdefix Entegrasyonu ve Ürün Yükleme")
+    st.markdown("İdefix satıcı bilgileriniz ve API anahtarlarınız kalıcı olarak tanımlanmıştır.")
 
-    if st.button("Bilgileri Kaydet", key="save_idefix"):
-        ayarlar["idefix_api_key"] = idefix_api_key
-        ayarlar["idefix_supplier"] = idefix_supplier
+    idefix_satici_id = st.text_input("İdefix Tedarikçi / Satıcı ID", value=ayarlar.get("idefix_satici_id", "27837"))
+    idefix_token = st.text_input("İdefix API Token / Key", type="password", value=ayarlar.get("idefix_token", "929c122e-87bd-4aba-a293-0c731bf4e5ff"))
+    idefix_secret = st.text_input("İdefix API Secret", type="password", value=ayarlar.get("idefix_secret", "8c510c89-9d4c-4d36-b411-9024c0b7f42d"))
+
+    if (idefix_satici_id != ayarlar.get("idefix_satici_id") or 
+        idefix_token != ayarlar.get("idefix_token") or 
+        idefix_secret != ayarlar.get("idefix_secret")):
+        ayarlar["idefix_satici_id"] = idefix_satici_id
+        ayarlar["idefix_token"] = idefix_token
+        ayarlar["idefix_secret"] = idefix_secret
         ayar_yaz(ayarlar)
-        st.success("İdefix bilgileri kaydedildi.")
 
-    if st.button("🚀 İdefix Ürün Yükle & Güncelle", type="primary", key="sync_idefix"):
-        st.success("İdefix verileri işlendi.")
+    st.markdown("---")
+    c_ide1, c_ide2 = st.columns(2)
+
+    with c_ide1:
+        st.subheader("1. İdefix Ürün Yükleme")
+        if st.button("📤 İdefix'e Ürünleri Gönder", type="primary", key="create_idefix"):
+            if not idefix_token or not idefix_satici_id:
+                st.error("Lütfen İdefix Satıcı ID ve Token bilgilerini kontrol edin.")
+            else:
+                conn = baglanti_kur()
+                df_db = pd.read_sql("SELECT * FROM urunler", conn)
+                conn.close()
+                if df_db.empty:
+                    st.warning("Veritabanında ürün bulunamadı.")
+                else:
+                    try:
+                        with st.spinner("İdefix'e ürünler gönderiliyor..."):
+                            # İdefix standart pazar yeri entegrasyon endpoint yapısı (Test/Canlı)
+                            target_url = f"https://api.idefix.com/suppliers/{idefix_satici_id}/products"
+                            
+                            headers = {
+                                "Authorization": f"Bearer {idefix_token}",
+                                "X-Supplier-Secret": idefix_secret,
+                                "Content-Type": "application/json",
+                                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
+                            }
+                            
+                            sample_items = []
+                            for _, row in df_db.head(3).iterrows():
+                                sample_items.append({
+                                    "barcode": str(row["barkod"]),
+                                    "name": str(row["urun_adi"]),
+                                    "stock": int(row["stok"]),
+                                    "price": float(row["satis_fiyati"]),
+                                    "imageUrl": str(row["gorsel"])
+                                })
+                            
+                            payload = {"products": sample_items}
+                            response = requests.post(target_url, json=payload, headers=headers, timeout=30)
+                            
+                            log_text = f"""=== İDEFİX REQUEST (GÖNDERİLEN İSTEK) ===
+URL: {target_url}
+METHOD: POST
+HEADERS: {json.dumps(headers, indent=2)}
+BODY: {json.dumps(payload, ensure_ascii=False, indent=2)}
+
+=== İDEFİX RESPONSE (SUNUCUDAN GELEN YANIT) ===
+STATUS CODE: {response.status_code}
+RESPONSE HEADERS: {json.dumps(dict(response.headers), indent=2)}
+RESPONSE BODY:
+{response.text[:1500]}
+"""
+                            st.session_state["idefix_debug_log"] = log_text
+                            st.rerun()
+                    except Exception as e:
+                        st.error(f"Bağlantı hatası: {e}")
+
+    with c_ide2:
+        st.subheader("2. İdefix Stok/Fiyat Güncelle")
+        if st.button("🔄 İdefix Stok/Fiyat Güncelle", key="sync_idefix_stock"):
+            st.info("İdefix yükleme ekranındaki logları kontrol edebilirsiniz.")
+
+    if "idefix_debug_log" in st.session_state:
+        st.markdown("---")
+        st.subheader("🔍 İdefix API İstek ve Yanıt Detayları")
+        st.code(st.session_state["idefix_debug_log"], language="text")
