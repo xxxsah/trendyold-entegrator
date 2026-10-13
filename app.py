@@ -563,7 +563,7 @@ elif sayfa == "Tedarikçiler & XML":
                     st.rerun()
 
 # ---------------------------------------------------------------
-# 3. SAYFA: TRENDRUUM ENTEGRASYONU (100'ERLİ PAKETLER HALİNDE GÖNDERİM)
+# 3. SAYFA: TRENDRUUM ENTEGRASYONU (ULTRA GÜVENLİ PAKET GÖNDERİMİ)
 # ---------------------------------------------------------------
 elif sayfa == "Trendruum Entegrasyonu":
     st.title("Trendruum Entegrasyonu ve Kolay ID Seçimi")
@@ -600,7 +600,7 @@ elif sayfa == "Trendruum Entegrasyonu":
                                       json={"client_id": t_api_key, "client_secret": t_supplier_secret}, timeout=15)
                 l_json = {}
                 try:
-                    l_json = l_res.json()
+                    l_json = l_res.json() if l_res.text else {}
                 except Exception:
                     pass
                 
@@ -613,7 +613,7 @@ elif sayfa == "Trendruum Entegrasyonu":
                                          headers={"Authorization": f"Bearer {token}"}, timeout=20)
                     c_json = {}
                     try:
-                        c_json = c_res.json()
+                        c_json = c_res.json() if c_res.text else {}
                     except Exception:
                         pass
                     
@@ -624,7 +624,7 @@ elif sayfa == "Trendruum Entegrasyonu":
                                                  headers={"Authorization": f"Bearer {token}"}, timeout=20)
                         c_all_json = {}
                         try:
-                            c_all_json = c_res_all.json()
+                            c_all_json = c_res_all.json() if c_res_all.text else {}
                         except Exception:
                             pass
                         data = c_all_json.get("data", []) if isinstance(c_all_json, dict) else []
@@ -667,7 +667,7 @@ elif sayfa == "Trendruum Entegrasyonu":
                                       json={"client_id": t_api_key, "client_secret": t_supplier_secret}, timeout=15)
                 l_json = {}
                 try:
-                    l_json = l_res.json()
+                    l_json = l_res.json() if l_res.text else {}
                 except Exception:
                     pass
                 
@@ -680,7 +680,7 @@ elif sayfa == "Trendruum Entegrasyonu":
                                          headers={"Authorization": f"Bearer {token}"}, timeout=20)
                     b_json = {}
                     try:
-                        b_json = b_res.json()
+                        b_json = b_res.json() if b_res.text else {}
                     except Exception:
                         pass
                     
@@ -734,7 +734,7 @@ elif sayfa == "Trendruum Entegrasyonu":
                             
                             login_json = {}
                             try:
-                                login_json = login_res.json()
+                                login_json = login_res.json() if login_res.text else {}
                             except Exception:
                                 pass
 
@@ -773,28 +773,33 @@ elif sayfa == "Trendruum Entegrasyonu":
                                     ]
                                 })
                             
-                            # 100'erli paketlere bölerek gönderelim
+                            # 100'erli paketler halinde güvenli gönderim
                             paket_boyutu = 100
                             basarili_paket = 0
                             son_yanit = ""
                             son_kod = 200
+                            toplam_paket = (len(tum_urunler) + paket_boyutu - 1) // paket_boyutu
 
                             for i in range(0, len(tum_urunler), paket_boyutu):
                                 paket = tum_urunler[i:i + paket_boyutu]
                                 payload = {"products": paket}
-                                response = requests.post(target_url, json=payload, headers=headers, timeout=60)
-                                son_kod = response.status_code
-                                son_yanit = response.text if response.text else "[Boş Yanıt]"
-                                if response.status_code in [200, 202]:
-                                    basarili_paket += 1
+                                try:
+                                    response = requests.post(target_url, json=payload, headers=headers, timeout=60)
+                                    son_kod = response.status_code
+                                    son_yanit = response.text if response.text else "[Boş Yanıt]"
+                                    if response.status_code in [200, 202]:
+                                        basarili_paket += 1
+                                except Exception as inner_e:
+                                    son_yanit = f"İstek Hatası: {inner_e}"
 
+                            parsed_res = son_yanit
                             try:
                                 parsed_res = json.dumps(json.loads(son_yanit), ensure_ascii=False, indent=2)
                             except Exception:
-                                parsed_res = son_yanit
+                                pass
 
                             log_text = f"""=== TOPLU GÖNDERİM RAPORU ({len(tum_urunler)} Ürün, {paket_boyutu}'erli paketler) ===
-BAŞARIYLA GÖNDERİLEN PAKET SAYISI: {basarili_paket} / {(len(tum_urunler) + paket_boyutu - 1) // paket_boyutu}
+BAŞARIYLA GÖNDERİLEN PAKET SAYISI: {basarili_paket} / {toplam_paket}
 SON SUNUCU DURUM KODU: {son_kod}
 SON SUNUCU YANITI:
 {parsed_res}
@@ -859,7 +864,7 @@ else:
 
     if "mesajlar" not in st.session_state:
         st.session_state.mesajlar = [
-            {"rol": "asistan", "icerik": "Merhaba! Ben ŞahAI. Ürünler 100'erli paketler halinde gönderilecek şekilde güncellendi."}
+            {"rol": "asistan", "icerik": "Merhaba! Ben ŞahAI. API yanıt koruması güçlendirildi."}
         ]
 
     for mesaj in st.session_state.mesajlar:
