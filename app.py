@@ -563,7 +563,7 @@ elif sayfa == "Tedarikçiler & XML":
                     st.rerun()
 
 # ---------------------------------------------------------------
-# 3. SAYFA: TRENDRUUM ENTEGRASYONU & DETAYLI 422 HATA AYIKLAMA
+# 3. SAYFA: TRENDRUUM ENTEGRASYONU & TAM DETAYLI HATA AYIKLAMA
 # ---------------------------------------------------------------
 elif sayfa == "Trendruum Entegrasyonu":
     st.title("Trendruum Entegrasyonu ve Kolay ID Seçimi")
@@ -708,8 +708,7 @@ elif sayfa == "Trendruum Entegrasyonu":
                             }
                             
                             products_list = []
-                            for _, row in df_db.head(2).iterrows(): # İlk 2 ürünle test edelim
-                                # Dokümana göre her varyantta images dizisi zorunludur
+                            for _, row in df_db.head(1).iterrows(): # Tek ürünle nokta atışı test edelim
                                 gorsel_url = str(row["gorsel"])
                                 images_arr = [{"url": gorsel_url}] if gorsel_url else [{"url": "https://via.placeholder.com/600"}]
                                 
@@ -732,13 +731,19 @@ elif sayfa == "Trendruum Entegrasyonu":
                             response = requests.post(target_url, json=payload, headers=headers, timeout=30)
                             res_body = response.text if response.text else "[Boş Yanıt]"
 
+                            # JSON yanıtı güzelleştirerek tam gösterelim
+                            try:
+                                parsed_res = json.dumps(response.json(), ensure_ascii=False, indent=2)
+                            except Exception:
+                                parsed_res = res_body
+
                             log_text = f"""=== GÖNDERİLEN PAYLOAD (İSTEK) ===
 {json.dumps(payload, ensure_ascii=False, indent=2)}
 
-=== BULK PRODUCTS RESPONSE ===
+=== BULK PRODUCTS RESPONSE (SUNUCU YANITI) ===
 STATUS CODE: {response.status_code}
 RESPONSE BODY:
-{res_body[:3000]}
+{parsed_res}
 """
                             st.session_state["tr_debug_log"] = log_text
                             st.rerun()
@@ -756,7 +761,7 @@ RESPONSE BODY:
     if "tr_debug_log" in st.session_state:
         st.markdown("---")
         st.subheader("🔍 Trendruum API İstek ve Yanıt Detayları")
-        st.code(st.session_state["tr_debug_log"], language="text")
+        st.text_area("Log Detayı", st.session_state["tr_debug_log"], height=350)
 
 # ---------------------------------------------------------------
 # 4. SAYFA: HEPSİBURADA ENTEGRASYONU
@@ -800,7 +805,7 @@ else:
 
     if "mesajlar" not in st.session_state:
         st.session_state.mesajlar = [
-            {"rol": "asistan", "icerik": "Merhaba! Ben ŞahAI. 422 hata detayını görmek için güncellemeyi yaptık."}
+            {"rol": "asistan", "icerik": "Merhaba! Ben ŞahAI. Hata logunu metin kutusunda eksiksiz görebilmeniz için güncellemeyi tamamladım."}
         ]
 
     for mesaj in st.session_state.mesajlar:
@@ -809,7 +814,7 @@ else:
 
     kullanici_girdisi = st.chat_input("ŞahAI'ye bir şeyler sorun...")
     if kullanici_girdisi:
-        st.session_state.mesajlar.append({"rol": "kullanici", "icerik": kullanici_girdisi})
+        st.session_state.mesajlar.append({"rol": "kullanici", "icerik": kullnici_girdisi})
         with st.chat_message("kullanici"):
             st.markdown(kullanici_girdisi)
 
