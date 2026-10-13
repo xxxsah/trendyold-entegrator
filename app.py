@@ -564,7 +564,7 @@ elif sayfa == "Tedarikçiler & XML":
                     st.rerun()
 
 # ---------------------------------------------------------------
-# 3. SAYFA: TRENDRUUM ENTEGRASYONU (CANLI İLERLEME ÇUBUKLU & LİMİTSİZ)
+# 3. SAYFA: TRENDRUUM ENTEGRASYONU (HATA AYIKLAMA GÖRSELLEŞTİRME)
 # ---------------------------------------------------------------
 elif sayfa == "Trendruum Entegrasyonu":
     st.title("Trendruum Entegrasyonu ve Kolay ID Seçimi")
@@ -716,7 +716,7 @@ elif sayfa == "Trendruum Entegrasyonu":
     
     with c_sec1:
         st.subheader("2. Toplu Ürün Gönder (/products/bulk)")
-        gonderim_miktari = st.selectbox("Kaç Ürün Gönderilsin?", ["İlk 500 Ürün (Önerilen/Hızlı)", "İlk 1000 Ürün", "Tüm Veritabanı"], index=0)
+        gonderim_miktari = st.selectbox("Kaç Ürün Gönderilsin?", ["Sadece Tek Ürün (Test İçin)", "İlk 100 Ürün", "İlk 500 Ürün", "Tüm Veritabanı"], index=0)
 
         if st.button("📤 Trendruum'a Toplu Ürün Gönder", type="primary", key="create_tr_bulk"):
             if not t_api_key or not t_supplier_secret:
@@ -728,10 +728,12 @@ elif sayfa == "Trendruum Entegrasyonu":
                 df_db = pd.read_sql("SELECT * FROM urunler", conn)
                 conn.close()
 
-                if "500" in gonderim_miktari:
+                if "Tek Ürün" in gonderim_miktari:
+                    df_db = df_db.head(1)
+                elif "100 Ürün" in gonderim_miktari:
+                    df_db = df_db.head(100)
+                elif "500 Ürün" in gonderim_miktari:
                     df_db = df_db.head(500)
-                elif "1000" in gonderim_miktari:
-                    df_db = df_db.head(1000)
 
                 if df_db.empty:
                     st.warning("Veritabanında ürün bulunamadı.")
@@ -781,7 +783,7 @@ elif sayfa == "Trendruum Entegrasyonu":
                                     ]
                                 })
                             
-                            paket_boyutu = 100
+                            paket_boyutu = 50  # Hata detayını net görmek için paket boyutunu küçük tutuyoruz
                             toplam_paket = (len(tum_urunler) + paket_boyutu - 1) // paket_boyutu
                             basarili_paket = 0
                             
@@ -794,7 +796,7 @@ elif sayfa == "Trendruum Entegrasyonu":
                             for idx, i in enumerate(range(0, len(tum_urunler), paket_boyutu)):
                                 paket = tum_urunler[i:i + paket_boyutu]
                                 current_p = idx + 1
-                                status_text.info(f"⏳ **Paket {current_p} / {toplam_paket} gönderiliyor...** ({len(paket)} Ürün)")
+                                status_text.info(f"⏳ **Paket {current_p} / {toplam_paket} gönderiliyor...**")
                                 
                                 payload = {"products": paket}
                                 try:
@@ -803,15 +805,21 @@ elif sayfa == "Trendruum Entegrasyonu":
                                         basarili_paket += 1
                                         detay_loglar.append(f"✅ Paket {current_p}: Başarılı (HTTP {response.status_code})")
                                     else:
-                                        detay_loglar.append(f"❌ Paket {current_p}: Hata (HTTP {response.status_code}) - {response.text[:150]}")
+                                        # 422 hatasının detayını ekrana tam basalım
+                                        try:
+                                            err_json = response.json()
+                                            err_str = json.dumps(err_json, ensure_ascii=False, indent=2)
+                                        except Exception:
+                                            err_str = response.text
+                                        detay_loglar.append(f"❌ Paket {current_p} HATA (HTTP {response.status_code}):\n{err_str}")
                                 except Exception as inner_e:
-                                    detay_loglar.append(f"⚠️ Paket {current_p}: Bağlantı Hatası - {inner_e}")
+                                    detay_loglar.append(f"⚠️ Paket {current_p} Bağlantı Hatası: {inner_e}")
                                 
                                 prog_bar.progress(current_p / toplam_paket)
-                                log_box.code("\n".join(detay_loglar))
+                                log_box.code("\n\n".join(detay_loglar))
                                 time.sleep(0.1)
 
-                            status_text.success(f"🎉 **Gönderim Tamamlandı!** {basarili_paket} / {toplam_paket} paket Trendruum kuyruğuna alındı.")
+                            status_text.success(f"🎉 **İşlem Tamamlandı!** Başarılı Paket: {basarili_paket} / {toplam_paket}")
                         else:
                             st.error(f"Giriş Yapılamadı (HTTP {login_res.status_code}). Yanıt: {login_res.text}")
 
@@ -865,7 +873,7 @@ else:
 
     if "mesajlar" not in st.session_state:
         st.session_state.mesajlar = [
-            {"rol": "asistan", "icerik": "Merhaba! Ben ŞahAI. Canlı gönderim çubuğu aktif edildi."}
+            {"rol": "asistan", "icerik": "Merhaba! Ben ŞahAI. 422 hata detayları log ekranına eklendi."}
         ]
 
     for mesaj in st.session_state.mesajlar:
@@ -874,7 +882,7 @@ else:
 
     kullanici_girdisi = st.chat_input("ŞahAI'ye bir şeyler sorun...")
     if kullanici_girdisi:
-        st.session_state.mesajlar.append({"rol": "kullanici", "icerik": kullanici_girdisi})
+        st.session_state.mesajlar.append({"rol": "kullanici", "icerik": kullnici_girdisi})
         with st.chat_message("kullanici"):
             st.markdown(kullanici_girdisi)
 
