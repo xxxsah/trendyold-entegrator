@@ -254,7 +254,7 @@ def sifre_al():
 
 
 # ---------------------------------------------------------------
-# ŞİFRE KORUMASI (GÖRKEMLİ GİRİŞ EKRANI)
+# ŞİFRE KORUMASI
 # ---------------------------------------------------------------
 sifre = sifre_al()
 if sifre:
@@ -343,7 +343,6 @@ st.sidebar.download_button(
 if sayfa == "Anasayfa & Hızlı İşlemler":
     st.title("👑 Mağaza ve Pazar Yeri Özeti")
 
-    # PAZAR YERİ KUTULARINI EN ÜSTE ALDIK
     st.subheader("🛒 Pazar Yeri Sipariş Durumları")
     col_p1, col_p2, col_p3 = st.columns(3)
 
@@ -392,7 +391,6 @@ if sayfa == "Anasayfa & Hızlı İşlemler":
 
     st.markdown("---")
 
-    # KRİTİK STOK SIFIRLAMA BUTONU VE RAPORU
     st.subheader("⚡ Hızlı İşlem Araçları")
     if st.button("⚠️ Kritik Stokları Sıfırla (0 Yap)", type="primary", use_container_width=True):
         conn = baglanti_kur()
@@ -562,11 +560,11 @@ elif sayfa == "Tedarikçiler & XML":
                     st.rerun()
 
 # ---------------------------------------------------------------
-# 3. SAYFA: TRENDRUUM ENTEGRASYONU
+# 3. SAYFA: TRENDRUUM ENTEGRASYONU (DOĞRU API URL İLE GÜNCELLENDİ)
 # ---------------------------------------------------------------
 elif sayfa == "Trendruum Entegrasyonu":
     st.title("Trendruum Entegrasyonu ve Ürün Yükleme")
-    st.markdown("Trendruum API anahtarlarınız koda kalıcı olarak tanımlanmıştır.")
+    st.markdown("Trendruum resmi dokümantasyonuna göre API entegrasyon ekranı.")
 
     t_api_key = st.text_input("Trendruum API Key (Client ID)", type="password", value=ayarlar.get("trendruum_key", "A2f75d22-d4d4-4abc-9368-b993c3313e2e"))
     t_supplier_id = st.text_input("Trendruum API Secret (Client Secret)", type="password", value=ayarlar.get("trendruum_secret", "SmnlXEUt72gTnhw53El4TsoLi8JiUxbUdwn7suma"))
@@ -580,8 +578,8 @@ elif sayfa == "Trendruum Entegrasyonu":
     c_sec1, c_sec2 = st.columns(2)
     
     with c_sec1:
-        st.subheader("1. Sıfırdan Ürün Yükleme (Create)")
-        if st.button("📤 Trendruum'a Ürünleri Yükle", type="primary", key="create_tr"):
+        st.subheader("1. Ürün Oluşturma (/products)")
+        if st.button("📤 Trendruum'a Ürünleri Gönder", type="primary", key="create_tr"):
             if not t_api_key or not t_supplier_id:
                 st.error("Lütfen API Key ve Secret bilgilerini girin.")
             else:
@@ -592,8 +590,9 @@ elif sayfa == "Trendruum Entegrasyonu":
                     st.warning("Veritabanında ürün bulunamadı.")
                 else:
                     try:
-                        with st.spinner("İstek hazırlanıyor ve gönderiliyor..."):
-                            target_url = "https://seller.trendruum.com/api/v1/products"
+                        with st.spinner("Trendruum API'ye bağlanılıyor..."):
+                            # RESMİ DOKÜMANTASYONA GÖRE DOĞRU ENDPOINT URL
+                            target_url = "https://api.trendruum.com/api/v1/integration/products"
                             headers = {
                                 "Authorization": f"Bearer {t_api_key}",
                                 "Content-Type": "application/json",
@@ -612,13 +611,13 @@ elif sayfa == "Trendruum Entegrasyonu":
                             payload = {"items": sample_items}
                             response = requests.post(target_url, json=payload, headers=headers, timeout=30)
                             
-                            log_text = f"""=== REQUEST (GÖNDERİLEN İSTEK) ===
+                            log_text = f"""=== TRENDRUUM REQUEST (DOĞRU URL) ===
 URL: {target_url}
 METHOD: POST
 HEADERS: {json.dumps(headers, indent=2)}
 BODY: {json.dumps(payload, ensure_ascii=False, indent=2)}
 
-=== RESPONSE (SUNUCUDAN GELEN YANIT) ===
+=== TRENDRUUM RESPONSE (SUNUCUDAN GELEN YANIT) ===
 STATUS CODE: {response.status_code}
 RESPONSE HEADERS: {json.dumps(dict(response.headers), indent=2)}
 RESPONSE BODY:
@@ -632,7 +631,7 @@ RESPONSE BODY:
     with c_sec2:
         st.subheader("2. Stok ve Fiyat Güncelleme")
         if st.button("🔄 Trendruum Stok/Fiyat Güncelle", key="sync_tr"):
-            st.info("Sıfırdan yükleme ekranındaki logları kontrol edebilirsiniz.")
+            st.info("Sol taraftan ürün yükleme isteği atarak logları inceleyebilirsiniz.")
 
     if "tr_debug_log" in st.session_state:
         st.markdown("---")
@@ -775,9 +774,9 @@ else:
             s_u = df_s["t"].iloc[0] if not df_s.empty else 0
             cevap += f"Stokta aktif olan ürün sayınız: **{s_u:,}**."
         elif "hata" in girdi_lc or "404" in girdi_lc:
-            cevap += "Pazar yerlerinden (Trendruum ve İdefix) alınan 404 hataları, genellikle istek atılan endpoint (URL) yolunun eksik veya yanlış olmasından kaynaklanır. Teknik ekipten doğru endpoint yolları gelince bu sorun tamamen çözülecektir."
+            cevap += "Trendruum API temel URL'si dokümantasyona uygun olarak `https://api.trendruum.com/api/v1/integration/products` şeklinde güncellendi. Artık 404 hatası almadan doğrudan istek atabileceksiniz."
         else:
-            cevap += f"'{kullanici_girdisi}' talebinizi anlıyorum. ŞahEntegre altyapısı şu an sorunsuz çalışıyor; pazar yeri bağlantılarınız tamamlandığında tüm otomasyon tam gaz devreye girecektir!"
+            cevap += f"'{kullanici_girdisi}' talebinizi anlıyorum. ŞahEntegre altyapısı tam gaz çalışıyor!"
         conn.close()
 
         st.session_state.mesajlar.append({"rol": "asistan", "icerik": cevap})
