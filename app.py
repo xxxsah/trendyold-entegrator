@@ -207,8 +207,8 @@ VARSAYILAN_AYARLAR = {
         "marj": 30.0,
         "sabit_ek": 0.0
     },
-    "trendruum_key": "A2f75d22-d4d4-4abc-9368-b993c3313e2e",
-    "trendruum_secret": "SmnlXEUt72gTnhw53El4TsoLi8JiUxbUdwn7suma",
+    "trendruum_key": "A2f857dc-4829-4be0-b8f0-e75f23ef15c2",
+    "trendruum_secret": "AItjHiLTDCdF47NmxT9fvvppo3UGGpxLAa7eV0ZS",
     "idefix_satici_id": "27837",
     "idefix_token": "929c122e-87bd-4aba-a293-0c731bf4e5ff",
     "idefix_secret": "8c510c89-9d4c-4d36-b411-9024c0b7f42d"
@@ -560,14 +560,14 @@ elif sayfa == "Tedarikçiler & XML":
                     st.rerun()
 
 # ---------------------------------------------------------------
-# 3. SAYFA: TRENDRUUM ENTEGRASYONU (GARANTİLİ YANIT GÖSTERİMİ)
+# 3. SAYFA: TRENDRUUM ENTEGRASYONU (YENİ ANAHTARLAR İLE)
 # ---------------------------------------------------------------
 elif sayfa == "Trendruum Entegrasyonu":
     st.title("Trendruum Entegrasyonu ve Ürün Yükleme")
-    st.markdown("Trendruum resmi dokümantasyonuna göre API entegrasyon ekranı.")
+    st.markdown("Trendruum güncel API anahtarlarınız sisteme tanımlanmıştır.")
 
-    t_api_key = st.text_input("Trendruum API Key (Client ID)", type="password", value=ayarlar.get("trendruum_key", "A2f75d22-d4d4-4abc-9368-b993c3313e2e"))
-    t_supplier_id = st.text_input("Trendruum API Secret (Client Secret)", type="password", value=ayarlar.get("trendruum_secret", "SmnlXEUt72gTnhw53El4TsoLi8JiUxbUdwn7suma"))
+    t_api_key = st.text_input("Trendruum API Key (Client ID)", type="password", value=ayarlar.get("trendruum_key", "A2f857dc-4829-4be0-b8f0-e75f23ef15c2"))
+    t_supplier_id = st.text_input("Trendruum API Secret (Client Secret)", type="password", value=ayarlar.get("trendruum_secret", "AItjHiLTDCdF47NmxT9fvvppo3UGGpxLAa7eV0ZS"))
 
     if t_api_key != ayarlar.get("trendruum_key") or t_supplier_id != ayarlar.get("trendruum_secret"):
         ayarlar["trendruum_key"] = t_api_key
@@ -590,7 +590,7 @@ elif sayfa == "Trendruum Entegrasyonu":
                     st.warning("Veritabanında ürün bulunamadı.")
                 else:
                     try:
-                        with st.spinner("Trendruum API'ye bağlanılıyor..."):
+                        with st.spinner("Trendruum API'ye yeni anahtarlar ile bağlanılıyor..."):
                             target_url = "https://api.trendruum.com/api/v1/integration/products"
                             headers = {
                                 "Authorization": f"Bearer {t_api_key}",
@@ -609,13 +609,10 @@ elif sayfa == "Trendruum Entegrasyonu":
                                 })
                             payload = {"items": sample_items}
                             
-                            # İstek atılıyor
                             response = requests.post(target_url, json=payload, headers=headers, timeout=30)
-                            
-                            # Yanıtın boş dönme ihtimaline karşı metin kontrolü
-                            res_body = response.text if response.text else "[Sunucu boş yanıt döndürdü (Boş Body)]"
+                            res_body = response.text if response.text else "[Sunucu boş yanıt döndürdü]"
 
-                            log_text = f"""=== TRENDRUUM REQUEST (DOĞRU URL) ===
+                            log_text = f"""=== TRENDRUUM REQUEST (YENİ ANAHTARLAR) ===
 URL: {target_url}
 METHOD: POST
 HEADERS: {json.dumps(headers, indent=2)}
@@ -778,10 +775,10 @@ else:
             df_s = pd.read_sql("SELECT COUNT(*) as t FROM urunler WHERE stok > 0", conn)
             s_u = df_s["t"].iloc[0] if not df_s.empty else 0
             cevap += f"Stokta aktif olan ürün sayınız: **{s_u:,}**."
-        elif "hata" in girdi_lc or "404" in girdi_lc:
-            cevap += "Trendruum API yanıt kontrolü güçlendirildi. Artık sunucudan dönen Status Code ve Response Body mesajları log ekranında net bir şekilde görünecektir."
+        elif "hata" in girdi_lc or "401" in girdi_lc:
+            cevap += "Trendruum API anahtarları güncellendi. Artık 401 Unauthorized hatası aşılmış olmalıdır."
         else:
-            cevap += f"'{kullanici_girdisi}' talebinizi anlıyorum. ŞahEntegre altyapısı tam gaz çalışıyor!"
+            cevap += f"'{kullanici_girdisi}' talebinizi anlıyorum. ŞahEntegre altyapısı sorunsuz çalışıyor!"
         conn.close()
 
         st.session_state.mesajlar.append({"rol": "asistan", "icerik": cevap})
