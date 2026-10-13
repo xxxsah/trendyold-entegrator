@@ -563,7 +563,7 @@ elif sayfa == "Tedarikçiler & XML":
                     st.rerun()
 
 # ---------------------------------------------------------------
-# 3. SAYFA: TRENDRUUM ENTEGRASYONU (KESİNTİSİZ & HATA KORUMALI)
+# 3. SAYFA: TRENDRUUM ENTEGRASYONU (100'ERLİ PAKETLER HALİNDE GÖNDERİM)
 # ---------------------------------------------------------------
 elif sayfa == "Trendruum Entegrasyonu":
     st.title("Trendruum Entegrasyonu ve Kolay ID Seçimi")
@@ -728,7 +728,7 @@ elif sayfa == "Trendruum Entegrasyonu":
                     st.warning("Veritabanında ürün bulunamadı.")
                 else:
                     try:
-                        with st.spinner("Oturum açılıyor ve TÜM ürünler gönderiliyor..."):
+                        with st.spinner("Oturum açılıyor ve ürünler 100'erli paketler halinde gönderiliyor..."):
                             login_url = "https://api.trendruum.com/api/v1/integration/auth/login"
                             login_res = requests.post(login_url, json={"client_id": t_api_key.strip(), "client_secret": t_supplier_secret.strip()}, timeout=30)
                             
@@ -750,13 +750,13 @@ elif sayfa == "Trendruum Entegrasyonu":
                                 "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
                             }
                             
-                            products_list = []
+                            tum_urunler = []
                             for _, row in df_db.iterrows():
                                 barkod = str(row["barkod"]).strip()
                                 gorsel_url = str(row["gorsel"]).strip()
                                 images_arr = [gorsel_url] if gorsel_url else ["https://via.placeholder.com/600"]
                                 
-                                products_list.append({
+                                tum_urunler.append({
                                     "name": str(row["urun_adi"]),
                                     "model_code": barkod,
                                     "category_id": t_category_id.strip(),
@@ -773,18 +773,30 @@ elif sayfa == "Trendruum Entegrasyonu":
                                     ]
                                 })
                             
-                            payload = {"products": products_list}
-                            response = requests.post(target_url, json=payload, headers=headers, timeout=60)
-                            res_body = response.text if response.text else "[Boş Yanıt]"
+                            # 100'erli paketlere bölerek gönderelim
+                            paket_boyutu = 100
+                            basarili_paket = 0
+                            son_yanit = ""
+                            son_kod = 200
+
+                            for i in range(0, len(tum_urunler), paket_boyutu):
+                                paket = tum_urunler[i:i + paket_boyutu]
+                                payload = {"products": paket}
+                                response = requests.post(target_url, json=payload, headers=headers, timeout=60)
+                                son_kod = response.status_code
+                                son_yanit = response.text if response.text else "[Boş Yanıt]"
+                                if response.status_code in [200, 202]:
+                                    basarili_paket += 1
 
                             try:
-                                parsed_res = json.dumps(response.json(), ensure_ascii=False, indent=2)
+                                parsed_res = json.dumps(json.loads(son_yanit), ensure_ascii=False, indent=2)
                             except Exception:
-                                parsed_res = res_body
+                                parsed_res = son_yanit
 
-                            log_text = f"""=== TÜM ÜRÜNLER İÇİN BULK PRODUCTS RESPONSE ===
-STATUS CODE: {response.status_code}
-RESPONSE BODY:
+                            log_text = f"""=== TOPLU GÖNDERİM RAPORU ({len(tum_urunler)} Ürün, {paket_boyutu}'erli paketler) ===
+BAŞARIYLA GÖNDERİLEN PAKET SAYISI: {basarili_paket} / {(len(tum_urunler) + paket_boyutu - 1) // paket_boyutu}
+SON SUNUCU DURUM KODU: {son_kod}
+SON SUNUCU YANITI:
 {parsed_res}
 """
                             st.session_state["tr_debug_log"] = log_text
@@ -847,7 +859,7 @@ else:
 
     if "mesajlar" not in st.session_state:
         st.session_state.mesajlar = [
-            {"rol": "asistan", "icerik": "Merhaba! Ben ŞahAI. API login ve veri kontrolü tam korumalı hale getirildi."}
+            {"rol": "asistan", "icerik": "Merhaba! Ben ŞahAI. Ürünler 100'erli paketler halinde gönderilecek şekilde güncellendi."}
         ]
 
     for mesaj in st.session_state.mesajlar:
