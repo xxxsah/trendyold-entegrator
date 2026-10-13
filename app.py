@@ -560,11 +560,11 @@ elif sayfa == "Tedarikçiler & XML":
                     st.rerun()
 
 # ---------------------------------------------------------------
-# 3. SAYFA: TRENDRUUM ENTEGRASYONU (ÖNCE LOGIN, SONRA ÜRÜN GÖNDERME)
+# 3. SAYFA: TRENDRUUM ENTEGRASYONU (DOĞRU client_id & client_secret)
 # ---------------------------------------------------------------
 elif sayfa == "Trendruum Entegrasyonu":
     st.title("Trendruum Entegrasyonu ve Ürün Yükleme")
-    st.markdown("Trendruum API kimlik doğrulama (`/auth/login`) ve ürün yönetimi ekranı.")
+    st.markdown("Trendruum resmi dokümantasyonuna uygun `client_id` ve `client_secret` kimlik doğrulama ekranı.")
 
     t_api_key = st.text_input("Trendruum API Key (Client ID)", type="password", value=ayarlar.get("trendruum_key", "A2f857dc-4829-4be0-b8f0-e75f23ef15c2"))
     t_supplier_secret = st.text_input("Trendruum API Secret (Client Secret)", type="password", value=ayarlar.get("trendruum_secret", "AItjHiLTDCdF47NmxT9fvvppo3UGGpxLAa7eV0ZS"))
@@ -578,7 +578,7 @@ elif sayfa == "Trendruum Entegrasyonu":
     c_sec1, c_sec2 = st.columns(2)
     
     with c_sec1:
-        st.subheader("1. Token Al ve Ürün Gönder (/auth/login + /products)")
+        st.subheader("1. Oturum Aç ve Ürün Gönder (/auth/login + /products)")
         if st.button("📤 Trendruum'a Oturum Aç ve Ürün Gönder", type="primary", key="create_tr"):
             if not t_api_key or not t_supplier_secret:
                 st.error("Lütfen API Key ve Secret bilgilerini girin.")
@@ -590,11 +590,12 @@ elif sayfa == "Trendruum Entegrasyonu":
                     st.warning("Veritabanında ürün bulunamadı.")
                 else:
                     try:
-                        with st.spinner("Önce /auth/login ile Token alınıyor..."):
+                        with st.spinner("Resmi dokümantasyona göre /auth/login isteği atılıyor..."):
                             login_url = "https://api.trendruum.com/api/v1/integration/auth/login"
+                            # DOĞRU PARAMETRE İSİMLERİ: client_id ve client_secret
                             login_payload = {
-                                "key": t_api_key,
-                                "secret": t_supplier_secret
+                                "client_id": t_api_key,
+                                "client_secret": t_supplier_secret
                             }
                             login_headers = {
                                 "Content-Type": "application/json",
@@ -607,14 +608,14 @@ elif sayfa == "Trendruum Entegrasyonu":
                             token = None
                             try:
                                 res_json = login_res.json()
-                                # Token yapısı farklı anahtarlarda gelebilir, yaygın olanları arayalım
-                                token = res_json.get("token") or res_json.get("accessToken") or res_json.get("data", {}).get("token")
+                                # Dokümantasyona göre token alanı data.token içinde yer alıyor
+                                token = res_json.get("data", {}).get("token") or res_json.get("token") or res_json.get("accessToken")
                             except Exception:
                                 pass
 
                         if login_res.status_code == 200 and token:
-                            st.success("Token başarıyla alındı! Şimdi ürünler gönderiliyor...")
-                            with st.spinner("Ürünler Trendruum'a yükleniyor..."):
+                            st.success("Token başarıyla alındı! Şimdi ürünler Trendruum'a gönderiliyor...")
+                            with st.spinner("Ürünler yükleniyor..."):
                                 target_url = "https://api.trendruum.com/api/v1/integration/products"
                                 headers = {
                                     "Authorization": f"Bearer {token}",
@@ -635,12 +636,12 @@ elif sayfa == "Trendruum Entegrasyonu":
                                 response = requests.post(target_url, json=payload, headers=headers, timeout=30)
                                 res_body = response.text if response.text else "[Sunucu boş yanıt döndürdü]"
 
-                                log_text = f"""=== 1. LOGIN REQUEST & RESPONSE ===
+                                log_text = f"""=== 1. LOGIN (BAŞARILI) ===
 URL: {login_url}
 STATUS: {login_res.status_code}
 RESPONSE: {login_body}
 
-=== 2. PRODUCTS REQUEST & RESPONSE ===
+=== 2. PRODUCTS RESPONSE ===
 URL: {target_url}
 STATUS CODE: {response.status_code}
 RESPONSE BODY:
@@ -652,6 +653,7 @@ RESPONSE BODY:
                             log_text = f"""=== LOGIN BAŞARISIZ ===
 URL: {login_url}
 STATUS CODE: {login_res.status_code}
+PAYLOAD GÖNDERİLEN: {json.dumps(login_payload, indent=2)}
 RESPONSE BODY:
 {login_body}
 """
@@ -807,8 +809,8 @@ else:
             df_s = pd.read_sql("SELECT COUNT(*) as t FROM urunler WHERE stok > 0", conn)
             s_u = df_s["t"].iloc[0] if not df_s.empty else 0
             cevap += f"Stokta aktif olan ürün sayınız: **{s_u:,}**."
-        elif "hata" in girdi_lc or "login" in girdi_lc:
-            cevap += "Trendruum için önce /auth/login ile kimlik doğrulama yapıp token alma mekanizması koda eklendi."
+        elif "hata" in girdi_lc or "422" in girdi_lc:
+            cevap += "Trendruum /auth/login isteği dokümantasyona uygun olarak `client_id` ve `client_secret` parametreleriyle güncellendi."
         else:
             cevap += f"'{kullanici_girdisi}' talebinizi anlıyorum. ŞahEntegre altyapısı sorunsuz çalışıyor!"
         conn.close()
