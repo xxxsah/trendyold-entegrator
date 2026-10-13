@@ -560,27 +560,27 @@ elif sayfa == "Tedarikçiler & XML":
                     st.rerun()
 
 # ---------------------------------------------------------------
-# 3. SAYFA: TRENDRUUM ENTEGRASYONU (YENİ ANAHTARLAR İLE)
+# 3. SAYFA: TRENDRUUM ENTEGRASYONU (ÖNCE LOGIN, SONRA ÜRÜN GÖNDERME)
 # ---------------------------------------------------------------
 elif sayfa == "Trendruum Entegrasyonu":
     st.title("Trendruum Entegrasyonu ve Ürün Yükleme")
-    st.markdown("Trendruum güncel API anahtarlarınız sisteme tanımlanmıştır.")
+    st.markdown("Trendruum API kimlik doğrulama (`/auth/login`) ve ürün yönetimi ekranı.")
 
     t_api_key = st.text_input("Trendruum API Key (Client ID)", type="password", value=ayarlar.get("trendruum_key", "A2f857dc-4829-4be0-b8f0-e75f23ef15c2"))
-    t_supplier_id = st.text_input("Trendruum API Secret (Client Secret)", type="password", value=ayarlar.get("trendruum_secret", "AItjHiLTDCdF47NmxT9fvvppo3UGGpxLAa7eV0ZS"))
+    t_supplier_secret = st.text_input("Trendruum API Secret (Client Secret)", type="password", value=ayarlar.get("trendruum_secret", "AItjHiLTDCdF47NmxT9fvvppo3UGGpxLAa7eV0ZS"))
 
-    if t_api_key != ayarlar.get("trendruum_key") or t_supplier_id != ayarlar.get("trendruum_secret"):
+    if t_api_key != ayarlar.get("trendruum_key") or t_supplier_secret != ayarlar.get("trendruum_secret"):
         ayarlar["trendruum_key"] = t_api_key
-        ayarlar["trendruum_secret"] = t_supplier_id
+        ayarlar["trendruum_secret"] = t_supplier_secret
         ayar_yaz(ayarlar)
 
     st.markdown("---")
     c_sec1, c_sec2 = st.columns(2)
     
     with c_sec1:
-        st.subheader("1. Ürün Oluşturma (/products)")
-        if st.button("📤 Trendruum'a Ürünleri Gönder", type="primary", key="create_tr"):
-            if not t_api_key or not t_supplier_id:
+        st.subheader("1. Token Al ve Ürün Gönder (/auth/login + /products)")
+        if st.button("📤 Trendruum'a Oturum Aç ve Ürün Gönder", type="primary", key="create_tr"):
+            if not t_api_key or not t_supplier_secret:
                 st.error("Lütfen API Key ve Secret bilgilerini girin.")
             else:
                 conn = baglanti_kur()
@@ -590,42 +590,74 @@ elif sayfa == "Trendruum Entegrasyonu":
                     st.warning("Veritabanında ürün bulunamadı.")
                 else:
                     try:
-                        with st.spinner("Trendruum API'ye yeni anahtarlar ile bağlanılıyor..."):
-                            target_url = "https://api.trendruum.com/api/v1/integration/products"
-                            headers = {
-                                "Authorization": f"Bearer {t_api_key}",
+                        with st.spinner("Önce /auth/login ile Token alınıyor..."):
+                            login_url = "https://api.trendruum.com/api/v1/integration/auth/login"
+                            login_payload = {
+                                "key": t_api_key,
+                                "secret": t_supplier_secret
+                            }
+                            login_headers = {
                                 "Content-Type": "application/json",
                                 "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
                             }
-                            sample_items = []
-                            for _, row in df_db.head(3).iterrows():
-                                sample_items.append({
-                                    "barcode": str(row["barkod"]),
-                                    "title": str(row["urun_adi"]),
-                                    "quantity": int(row["stok"]),
-                                    "listPrice": float(row["satis_fiyati"]),
-                                    "salePrice": float(row["satis_fiyati"]),
-                                    "images": [{"url": str(row["gorsel"])}] if row["gorsel"] else []
-                                })
-                            payload = {"items": sample_items}
                             
-                            response = requests.post(target_url, json=payload, headers=headers, timeout=30)
-                            res_body = response.text if response.text else "[Sunucu boş yanıt döndürdü]"
+                            login_res = requests.post(login_url, json=login_payload, headers=login_headers, timeout=30)
+                            login_body = login_res.text if login_res.text else "[Boş Yanıt]"
+                            
+                            token = None
+                            try:
+                                res_json = login_res.json()
+                                # Token yapısı farklı anahtarlarda gelebilir, yaygın olanları arayalım
+                                token = res_json.get("token") or res_json.get("accessToken") or res_json.get("data", {}).get("token")
+                            except Exception:
+                                pass
 
-                            log_text = f"""=== TRENDRUUM REQUEST (YENİ ANAHTARLAR) ===
+                        if login_res.status_code == 200 and token:
+                            st.success("Token başarıyla alındı! Şimdi ürünler gönderiliyor...")
+                            with st.spinner("Ürünler Trendruum'a yükleniyor..."):
+                                target_url = "https://api.trendruum.com/api/v1/integration/products"
+                                headers = {
+                                    "Authorization": f"Bearer {token}",
+                                    "Content-Type": "application/json",
+                                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
+                                }
+                                sample_items = []
+                                for _, row in df_db.head(3).iterrows():
+                                    sample_items.append({
+                                        "barcode": str(row["barkod"]),
+                                        "title": str(row["urun_adi"]),
+                                        "quantity": int(row["stok"]),
+                                        "listPrice": float(row["satis_fiyati"]),
+                                        "salePrice": float(row["satis_fiyati"]),
+                                        "images": [{"url": str(row["gorsel"])}] if row["gorsel"] else []
+                                    })
+                                payload = {"items": sample_items}
+                                response = requests.post(target_url, json=payload, headers=headers, timeout=30)
+                                res_body = response.text if response.text else "[Sunucu boş yanıt döndürdü]"
+
+                                log_text = f"""=== 1. LOGIN REQUEST & RESPONSE ===
+URL: {login_url}
+STATUS: {login_res.status_code}
+RESPONSE: {login_body}
+
+=== 2. PRODUCTS REQUEST & RESPONSE ===
 URL: {target_url}
-METHOD: POST
-HEADERS: {json.dumps(headers, indent=2)}
-BODY: {json.dumps(payload, ensure_ascii=False, indent=2)}
-
-=== TRENDRUUM RESPONSE (SUNUCUDAN GELEN YANIT) ===
 STATUS CODE: {response.status_code}
-RESPONSE HEADERS: {json.dumps(dict(response.headers), indent=2)}
 RESPONSE BODY:
 {res_body[:2000]}
 """
+                                st.session_state["tr_debug_log"] = log_text
+                                st.rerun()
+                        else:
+                            log_text = f"""=== LOGIN BAŞARISIZ ===
+URL: {login_url}
+STATUS CODE: {login_res.status_code}
+RESPONSE BODY:
+{login_body}
+"""
                             st.session_state["tr_debug_log"] = log_text
                             st.rerun()
+
                     except Exception as e:
                         st.error(f"Bağlantı hatası oluştu: {e}")
 
@@ -775,8 +807,8 @@ else:
             df_s = pd.read_sql("SELECT COUNT(*) as t FROM urunler WHERE stok > 0", conn)
             s_u = df_s["t"].iloc[0] if not df_s.empty else 0
             cevap += f"Stokta aktif olan ürün sayınız: **{s_u:,}**."
-        elif "hata" in girdi_lc or "401" in girdi_lc:
-            cevap += "Trendruum API anahtarları güncellendi. Artık 401 Unauthorized hatası aşılmış olmalıdır."
+        elif "hata" in girdi_lc or "login" in girdi_lc:
+            cevap += "Trendruum için önce /auth/login ile kimlik doğrulama yapıp token alma mekanizması koda eklendi."
         else:
             cevap += f"'{kullanici_girdisi}' talebinizi anlıyorum. ŞahEntegre altyapısı sorunsuz çalışıyor!"
         conn.close()
