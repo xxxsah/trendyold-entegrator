@@ -563,7 +563,7 @@ elif sayfa == "Tedarikçiler & XML":
                     st.rerun()
 
 # ---------------------------------------------------------------
-# 3. SAYFA: TRENDRUUM ENTEGRASYONU & TAM DETAYLI HATA AYIKLAMA
+# 3. SAYFA: TRENDRUUM ENTEGRASYONU & TAM UYUMLU PAYLOAD
 # ---------------------------------------------------------------
 elif sayfa == "Trendruum Entegrasyonu":
     st.title("Trendruum Entegrasyonu ve Kolay ID Seçimi")
@@ -708,21 +708,24 @@ elif sayfa == "Trendruum Entegrasyonu":
                             }
                             
                             products_list = []
-                            for _, row in df_db.head(1).iterrows(): # Tek ürünle nokta atışı test edelim
-                                gorsel_url = str(row["gorsel"])
-                                images_arr = [{"url": gorsel_url}] if gorsel_url else [{"url": "https://via.placeholder.com/600"}]
+                            for _, row in df_db.head(1).iterrows():
+                                barkod = str(row["barkod"]).strip()
+                                gorsel_url = str(row["gorsel"]).strip()
                                 
+                                # Hata logunda istenen tüm zorunlu alanlar (stock_code, tax, temizlenmiş images url) eklendi
                                 products_list.append({
                                     "name": str(row["urun_adi"]),
-                                    "model_code": str(row["barkod"]),
+                                    "model_code": barkod,
                                     "category_id": t_category_id.strip(),
                                     "brand_id": t_brand_id.strip(),
                                     "children_products": [
                                         {
-                                            "barcode": str(row["barkod"]),
+                                            "barcode": barkod,
+                                            "stock_code": barkod,
                                             "price": float(row["satis_fiyati"]),
                                             "stock": int(row["stok"]),
-                                            "images": images_arr
+                                            "tax": 20,
+                                            "images": [{"url": gorsel_url}] if gorsel_url else [{"url": "https://via.placeholder.com/600"}]
                                         }
                                     ]
                                 })
@@ -731,7 +734,6 @@ elif sayfa == "Trendruum Entegrasyonu":
                             response = requests.post(target_url, json=payload, headers=headers, timeout=30)
                             res_body = response.text if response.text else "[Boş Yanıt]"
 
-                            # JSON yanıtı güzelleştirerek tam gösterelim
                             try:
                                 parsed_res = json.dumps(response.json(), ensure_ascii=False, indent=2)
                             except Exception:
@@ -805,7 +807,7 @@ else:
 
     if "mesajlar" not in st.session_state:
         st.session_state.mesajlar = [
-            {"rol": "asistan", "icerik": "Merhaba! Ben ŞahAI. Hata logunu metin kutusunda eksiksiz görebilmeniz için güncellemeyi tamamladım."}
+            {"rol": "asistan", "icerik": "Merhaba! Ben ŞahAI. Zorunlu alanlar (`stock_code`, `tax`) eklendi."}
         ]
 
     for mesaj in st.session_state.mesajlar:
@@ -814,7 +816,7 @@ else:
 
     kullanici_girdisi = st.chat_input("ŞahAI'ye bir şeyler sorun...")
     if kullanici_girdisi:
-        st.session_state.mesajlar.append({"rol": "kullanici", "icerik": kullnici_girdisi})
+        st.session_state.mesajlar.append({"rol": "kullanici", "icerik": kullanici_girdisi})
         with st.chat_message("kullanici"):
             st.markdown(kullanici_girdisi)
 
