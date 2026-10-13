@@ -16,7 +16,7 @@ import streamlit as st
 st.set_page_config(page_title="ŞahEntegre", page_icon="👑", layout="wide")
 
 # ---------------------------------------------------------------
-# VERİTABANI (SQLITE) YÖNETİMİ VE GÜNCELLEME
+# VERİTABANI (SQLITE) YÖNETİMİ
 # ---------------------------------------------------------------
 DB_DOSYA = Path(__file__).parent / "metentegre.db"
 
@@ -40,7 +40,6 @@ def veritabani_olustur():
             kategori TEXT
         )
     """)
-    # Eğer tablo daha önceden var ve kategori sütunu eksikse ekleyelim
     try:
         cursor.execute("ALTER TABLE urunler ADD COLUMN kategori TEXT")
     except Exception:
@@ -189,7 +188,11 @@ def normalle(tedarikci, df, harita, marj, sabit_ek):
     satis = (alis * (1 + marj / 100)) + sabit_ek
     
     kat_kolon = harita.get("kategori", "(yok)")
-    kategori_seri = df[kat_kolon].astype(str) if kat_kolon in df.columns and kat_kolon != "(yok)" else pd.Series(["Genel"] * len(df))
+    if kat_kolon == "(yok)" or kat_kolon not in df.columns:
+        # Otomatik Kategori Kolonu Tahmini
+        kat_kolon = tahmin(df.columns, ["kategori", "category", "cat", "tur", "grup", "maincategory"])
+
+    kategori_seri = df[kat_kolon].astype(str) if kat_kolon != "(yok)" and kat_kolon in df.columns else pd.Series(["Genel"] * len(df))
 
     return pd.DataFrame({
         "Tedarikçi": tedarikci,
@@ -558,7 +561,7 @@ elif sayfa == "Tedarikçiler & XML":
                         "stok": sec("Stok", ["stok", "stock", "quantity", "adet", "miktar"], "stok"),
                         "fiyat": sec("Alış Fiyatı", ["fiyat", "price", "alis", "alış"], "fiyat"),
                         "gorsel": sec("Görsel", ["image_1", "resim", "image", "gorsel", "görsel", "picture", "foto"], "gorsel"),
-                        "kategori": sec("Kategori", ["kategori", "category", "cat", "tur", "grup"], "kategori")
+                        "kategori": sec("Kategori", ["kategori", "category", "cat", "tur", "grup", "maincategory"], "kategori")
                     }
                     
                     marj = st.number_input("Kâr Marjı (%)", 0.0, 500.0, float(bilgi.get("marj", 30.0)), 1.0, key=f"{ad}_marj")
@@ -898,7 +901,7 @@ else:
 
     if "mesajlar" not in st.session_state:
         st.session_state.mesajlar = [
-            {"rol": "asistan", "icerik": "Merhaba! Ben ŞahAI. Veritabanı tablo güncelleme koruması eklendi."}
+            {"rol": "asistan", "icerik": "Merhaba! Ben ŞahAI. Kategori alanı düzeltildi."}
         ]
 
     for mesaj in st.session_state.mesajlar:
