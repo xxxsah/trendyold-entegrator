@@ -563,7 +563,7 @@ elif sayfa == "Tedarikçiler & XML":
                     st.rerun()
 
 # ---------------------------------------------------------------
-# 3. SAYFA: TRENDRUUM ENTEGRASYONU & TAM UYUMLU PAYLOAD
+# 3. SAYFA: TRENDRUUM ENTEGRASYONU & DÜZELTİLMİŞ RESİM FORMATI
 # ---------------------------------------------------------------
 elif sayfa == "Trendruum Entegrasyonu":
     st.title("Trendruum Entegrasyonu ve Kolay ID Seçimi")
@@ -712,7 +712,9 @@ elif sayfa == "Trendruum Entegrasyonu":
                                 barkod = str(row["barkod"]).strip()
                                 gorsel_url = str(row["gorsel"]).strip()
                                 
-                                # Hata logunda istenen tüm zorunlu alanlar (stock_code, tax, temizlenmiş images url) eklendi
+                                # Trendruum toplu yüklemede images dizisini düz metin URL listesi olarak bekler
+                                images_arr = [gorsel_url] if gorsel_url else ["https://via.placeholder.com/600"]
+                                
                                 products_list.append({
                                     "name": str(row["urun_adi"]),
                                     "model_code": barkod,
@@ -725,7 +727,7 @@ elif sayfa == "Trendruum Entegrasyonu":
                                             "price": float(row["satis_fiyati"]),
                                             "stock": int(row["stok"]),
                                             "tax": 20,
-                                            "images": [{"url": gorsel_url}] if gorsel_url else [{"url": "https://via.placeholder.com/600"}]
+                                            "images": images_arr
                                         }
                                     ]
                                 })
@@ -807,7 +809,7 @@ else:
 
     if "mesajlar" not in st.session_state:
         st.session_state.mesajlar = [
-            {"rol": "asistan", "icerik": "Merhaba! Ben ŞahAI. Zorunlu alanlar (`stock_code`, `tax`) eklendi."}
+            {"rol": "asistan", "icerik": "Merhaba! Ben ŞahAI. Görsel alanı Trendruum'un toplu yükleme (`/products/bulk`) şemasına göre düz metin URL listesi olarak güncellendi."}
         ]
 
     for mesaj in st.session_state.mesajlar:
@@ -816,7 +818,7 @@ else:
 
     kullanici_girdisi = st.chat_input("ŞahAI'ye bir şeyler sorun...")
     if kullanici_girdisi:
-        st.session_state.mesajlar.append({"rol": "kullanici", "icerik": kullanici_girdisi})
+        st.session_state.mesajlar.append({"rol": "kullanici", "icerik": kullnici_girdisi})
         with st.chat_message("kullanici"):
             st.markdown(kullanici_girdisi)
 
