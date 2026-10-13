@@ -560,28 +560,39 @@ elif sayfa == "Tedarikçiler & XML":
                     st.rerun()
 
 # ---------------------------------------------------------------
-# 3. SAYFA: TRENDRUUM ENTEGRASYONU (DOĞRU client_id & client_secret)
+# 3. SAYFA: TRENDRUUM ENTEGRASYONU (DOĞRU /products/bulk ŞEMASI)
 # ---------------------------------------------------------------
 elif sayfa == "Trendruum Entegrasyonu":
     st.title("Trendruum Entegrasyonu ve Ürün Yükleme")
-    st.markdown("Trendruum resmi dokümantasyonuna uygun `client_id` ve `client_secret` kimlik doğrulama ekranı.")
+    st.markdown("Trendruum resmi dokümantasyonuna uygun toplu ürün oluşturma (`/products/bulk`) ekranı.")
 
     t_api_key = st.text_input("Trendruum API Key (Client ID)", type="password", value=ayarlar.get("trendruum_key", "A2f857dc-4829-4be0-b8f0-e75f23ef15c2"))
     t_supplier_secret = st.text_input("Trendruum API Secret (Client Secret)", type="password", value=ayarlar.get("trendruum_secret", "AItjHiLTDCdF47NmxT9fvvppo3UGGpxLAa7eV0ZS"))
+    
+    # Kategori ve Marka ID'leri için ek giriş alanları (Dokümantasyona göre 24 haneli object_id gerekir)
+    t_category_id = st.text_input("Trendruum Category ID (24 haneli Object ID)", value=ayarlar.get("trendruum_category", ""))
+    t_brand_id = st.text_input("Trendruum Brand ID (24 haneli Object ID)", value=ayarlar.get("trendruum_brand", ""))
 
-    if t_api_key != ayarlar.get("trendruum_key") or t_supplier_secret != ayarlar.get("trendruum_secret"):
+    if (t_api_key != ayarlar.get("trendruum_key") or 
+        t_supplier_secret != ayarlar.get("trendruum_secret") or
+        t_category_id != ayarlar.get("trendruum_category") or
+        t_brand_id != ayarlar.get("trendruum_brand")):
         ayarlar["trendruum_key"] = t_api_key
         ayarlar["trendruum_secret"] = t_supplier_secret
+        ayarlar["trendruum_category"] = t_category_id
+        ayarlar["trendruum_brand"] = t_brand_id
         ayar_yaz(ayarlar)
 
     st.markdown("---")
     c_sec1, c_sec2 = st.columns(2)
     
     with c_sec1:
-        st.subheader("1. Oturum Aç ve Ürün Gönder (/auth/login + /products)")
-        if st.button("📤 Trendruum'a Oturum Aç ve Ürün Gönder", type="primary", key="create_tr"):
+        st.subheader("1. Toplu Ürün Gönder (/auth/login + /products/bulk)")
+        if st.button("📤 Trendruum'a Toplu Ürün Gönder", type="primary", key="create_tr_bulk"):
             if not t_api_key or not t_supplier_secret:
                 st.error("Lütfen API Key ve Secret bilgilerini girin.")
+            elif not t_category_id or not t_brand_id:
+                st.error("Lütfen dokümantasyona uygun 24 haneli Category ID ve Brand ID alanlarını doldurun.")
             else:
                 conn = baglanti_kur()
                 df_db = pd.read_sql("SELECT * FROM urunler", conn)
@@ -590,9 +601,8 @@ elif sayfa == "Trendruum Entegrasyonu":
                     st.warning("Veritabanında ürün bulunamadı.")
                 else:
                     try:
-                        with st.spinner("Resmi dokümantasyona göre /auth/login isteği atılıyor..."):
+                        with st.spinner("Önce /auth/login ile Token alınıyor..."):
                             login_url = "https://api.trendruum.com/api/v1/integration/auth/login"
-                            # DOĞRU PARAMETRE İSİMLERİ: client_id ve client_secret
                             login_payload = {
                                 "client_id": t_api_key,
                                 "client_secret": t_supplier_secret
@@ -608,40 +618,46 @@ elif sayfa == "Trendruum Entegrasyonu":
                             token = None
                             try:
                                 res_json = login_res.json()
-                                # Dokümantasyona göre token alanı data.token içinde yer alıyor
                                 token = res_json.get("data", {}).get("token") or res_json.get("token") or res_json.get("accessToken")
                             except Exception:
                                 pass
 
                         if login_res.status_code == 200 and token:
-                            st.success("Token başarıyla alındı! Şimdi ürünler Trendruum'a gönderiliyor...")
-                            with st.spinner("Ürünler yükleniyor..."):
-                                target_url = "https://api.trendruum.com/api/v1/integration/products"
+                            st.success("Token alındı! Resmi /products/bulk şemasıyla ürünler gönderiliyor...")
+                            with st.spinner("Ürünler Trendruum'a yükleniyor..."):
+                                target_url = "https://api.trendruum.com/api/v1/integration/products/bulk"
                                 headers = {
                                     "Authorization": f"Bearer {token}",
                                     "Content-Type": "application/json",
                                     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
                                 }
-                                sample_items = []
-                                for _, row in df_db.head(3).iterrows():
-                                    sample_items.append({
-                                        "barcode": str(row["barkod"]),
-                                        "title": str(row["urun_adi"]),
-                                        "quantity": int(row["stok"]),
-                                        "listPrice": float(row["satis_fiyati"]),
-                                        "salePrice": float(row["satis_fiyati"]),
-                                        "images": [{"url": str(row["gorsel"])}] if row["gorsel"] else []
+                                
+                                products_list = []
+                                for _, row in df_db.head(5).iterrows():
+                                    products_list.append({
+                                        "name": str(row["urun_adi"]),
+                                        "model_code": str(row["barkod"]),
+                                        "category_id": t_category_id.strip(),
+                                        "brand_id": t_brand_id.strip(),
+                                        "children_products": [
+                                            {
+                                                "barcode": str(row["barkod"]),
+                                                "price": float(row["satis_fiyati"]),
+                                                "stock": int(row["stok"]),
+                                                "images": [{"url": str(row["gorsel"])}] if row["gorsel"] else []
+                                            }
+                                        ]
                                     })
-                                payload = {"items": sample_items}
+                                
+                                payload = {"products": products_list}
                                 response = requests.post(target_url, json=payload, headers=headers, timeout=30)
                                 res_body = response.text if response.text else "[Sunucu boş yanıt döndürdü]"
 
                                 log_text = f"""=== 1. LOGIN (BAŞARILI) ===
 URL: {login_url}
 STATUS: {login_res.status_code}
-RESPONSE: {login_body}
 
-=== 2. PRODUCTS RESPONSE ===
+=== 2. BULK PRODUCTS REQUEST & RESPONSE ===
 URL: {target_url}
 STATUS CODE: {response.status_code}
 RESPONSE BODY:
@@ -653,7 +669,6 @@ RESPONSE BODY:
                             log_text = f"""=== LOGIN BAŞARISIZ ===
 URL: {login_url}
 STATUS CODE: {login_res.status_code}
-PAYLOAD GÖNDERİLEN: {json.dumps(login_payload, indent=2)}
 RESPONSE BODY:
 {login_body}
 """
@@ -666,7 +681,7 @@ RESPONSE BODY:
     with c_sec2:
         st.subheader("2. Stok ve Fiyat Güncelleme")
         if st.button("🔄 Trendruum Stok/Fiyat Güncelle", key="sync_tr"):
-            st.info("Sol taraftan ürün yükleme isteği atarak logları inceleyebilirsiniz.")
+            st.info("Sol taraftan toplu ürün yükleme isteği atarak logları inceleyebilirsiniz.")
 
     if "tr_debug_log" in st.session_state:
         st.markdown("---")
@@ -765,7 +780,7 @@ RESPONSE BODY:
                     except Exception as e:
                         st.error(f"Bağlantı hatası: {e}")
 
-    with c_ide2:
+    with c_sec2:
         st.subheader("2. İdefix Stok/Fiyat Güncelle")
         if st.button("🔄 İdefix Stok/Fiyat Güncelle", key="sync_idefix_stock"):
             st.info("İdefix yükleme ekranındaki logları kontrol edebilirsiniz.")
@@ -793,7 +808,7 @@ else:
 
     kullanici_girdisi = st.chat_input("ŞahAI'ye bir şeyler sorun (Örn: Kaç ürünümüz var?, XML hatası nasıl çözülür?)")
     if kullanici_girdisi:
-        st.session_state.mesajlar.append({"rol": "kullanici", "icerik": kullanici_girdisi})
+        st.session_state.mesajlar.append({"rol": "kullanici", "icerik": kullnici_girdisi})
         with st.chat_message("kullanici"):
             st.markdown(kullanici_girdisi)
 
@@ -809,8 +824,8 @@ else:
             df_s = pd.read_sql("SELECT COUNT(*) as t FROM urunler WHERE stok > 0", conn)
             s_u = df_s["t"].iloc[0] if not df_s.empty else 0
             cevap += f"Stokta aktif olan ürün sayınız: **{s_u:,}**."
-        elif "hata" in girdi_lc or "422" in girdi_lc:
-            cevap += "Trendruum /auth/login isteği dokümantasyona uygun olarak `client_id` ve `client_secret` parametreleriyle güncellendi."
+        elif "hata" in girdi_lc or "bulk" in girdi_lc:
+            cevap += "Trendruum ürün yükleme uç noktası resmi dokümantasyona uygun olarak `/products/bulk` ve `children_products` şemasıyla tamamen güncellendi."
         else:
             cevap += f"'{kullanici_girdisi}' talebinizi anlıyorum. ŞahEntegre altyapısı sorunsuz çalışıyor!"
         conn.close()
