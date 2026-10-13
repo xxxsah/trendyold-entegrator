@@ -563,11 +563,11 @@ elif sayfa == "Tedarikçiler & XML":
                     st.rerun()
 
 # ---------------------------------------------------------------
-# 3. SAYFA: TRENDRUUM ENTEGRASYONU & KATEGORİ/MARKA KEŞFİ
+# 3. SAYFA: TRENDRUUM ENTEGRASYONU & GELİŞMİŞ KEŞİF TABLOSU
 # ---------------------------------------------------------------
 elif sayfa == "Trendruum Entegrasyonu":
-    st.title("Trendruum Entegrasyonu ve Kategori/Marka Keşfi")
-    st.markdown("Trendruum API anahtarlarınızı girin ve kategori/marka ID'lerinizi aratıp bulun.")
+    st.title("Trendruum Entegrasyonu ve Kolay ID Seçimi")
+    st.markdown("Trendruum API anahtarlarınız ve kategori/marka seçim paneli.")
 
     t_api_key = st.text_input("Trendruum API Key (Client ID)", type="password", value=ayarlar.get("trendruum_key", "A2f857dc-4829-4be0-b8f0-e75f23ef15c2"))
     t_supplier_secret = st.text_input("Trendruum API Secret (Client Secret)", type="password", value=ayarlar.get("trendruum_secret", "AItjHiLTDCdF47NmxT9fvvppo3UGGpxLAa7eV0ZS"))
@@ -587,43 +587,93 @@ elif sayfa == "Trendruum Entegrasyonu":
 
     st.markdown("---")
     
-    # KATEGORİ VE MARKA ARAMA / KEŞİF ARACI
-    st.subheader("🔍 Kategori ve Marka ID Keşif Aracı")
+    # GELİŞMİŞ KATEGORİ VE MARKA BULUCU (TABLO + OTOMATİK SEÇİM)
+    st.subheader("🔍 Kategori ve Marka Arama Aracı")
     col_kesif1, col_kesif2 = st.columns(2)
 
     with col_kesif1:
-        kategori_arama = st.text_input("Kategori Ara (Örn: Çanta, Telefon)", "")
-        if st.button("Kategorilerde Ara"):
+        st.markdown("##### 📂 Kategori Bul")
+        kat_kelime = st.text_input("Kategori Kelimesi", value="Sarj", key="kat_input")
+        if st.button("Kategorileri Getir", key="btn_kat"):
             try:
-                login_url = "https://api.trendruum.com/api/v1/integration/auth/login"
-                l_res = requests.post(login_url, json={"client_id": t_api_key, "client_secret": t_supplier_secret}, timeout=15)
-                l_json = l_res.json()
-                token = l_json.get("data", {}).get("token") or l_json.get("token")
+                l_res = requests.post("https://api.trendruum.com/api/v1/integration/auth/login", 
+                                      json={"client_id": t_api_key, "client_secret": t_supplier_secret}, timeout=15)
+                token = l_res.json().get("data", {}).get("token") or l_res.json().get("token")
                 
                 if token:
-                    cat_url = f"https://api.trendruum.com/api/v1/integration/categories?name={kategori_arama}" if kategori_arama else "https://api.trendruum.com/api/v1/integration/categories"
-                    c_res = requests.get(cat_url, headers={"Authorization": f"Bearer {token}"}, timeout=20)
-                    st.code(c_res.text[:2500], language="json")
+                    c_res = requests.get(f"https://api.trendruum.com/api/v1/integration/categories?name={kat_kelime}", 
+                                         headers={"Authorization": f"Bearer {token}"}, timeout=20)
+                    data = c_res.json().get("data", [])
+                    
+                    if not data:
+                        # Kelimeiz tüm kategorileri çekmeyi dene
+                        c_res_all = requests.get("https://api.trendruum.com/api/v1/integration/categories", 
+                                                 headers={"Authorization": f"Bearer {token}"}, timeout=20)
+                        data = c_res_all.json().get("data", [])
+
+                    # Gelen veriyi derle
+                    liste = []
+                    def duz_oku(items):
+                        for item in items:
+                            _id = item.get("_id") or item.get("id")
+                            _name = item.get("name") or item.get("title")
+                            if _id and _name:
+                                liste.append({"ID (Kopyala)": _id, "Kategori Adı": _name})
+                            if "children" in item and item["children"]:
+                                duz_oku(item["children"])
+
+                    if isinstance(data, list):
+                        duz_oku(data)
+
+                    if liste:
+                        df_kat = pd.DataFrame(liste)
+                        st.dataframe(df_kat, use_container_width=True, hide_index=True)
+                        secilen_cat = st.selectbox("Aşağıdan Seçin (ID yukarıya kaydolur)", df_kat["ID (Kopyala)"] + " - " + df_kat["Kategori Adı"])
+                        if secilen_cat:
+                            ayarlar["trendruum_category"] = secilen_cat.split(" - ")[0]
+                            ayar_yaz(ayarlar)
+                            st.success(f"Category ID kaydedildi: {secilen_cat.split(' - ')[0]}")
+                    else:
+                        st.warning("Hiç kategori bulunamadı, farklı bir kelime yazmayı deneyin.")
                 else:
-                    st.error("Token alınamadı.")
+                    st.error("Giriş yapılamadı.")
             except Exception as e:
                 st.error(f"Hata: {e}")
 
     with col_kesif2:
-        marka_arama = st.text_input("Marka Ara (Örn: Brf, Apple)", "")
-        if st.button("Markalarda Ara"):
+        st.markdown("##### 🏷️ Marka Bul")
+        mar_kelime = st.text_input("Marka Kelimesi", value="Irmak", key="mar_input")
+        if st.button("Markaları Getir", key="btn_mar"):
             try:
-                login_url = "https://api.trendruum.com/api/v1/integration/auth/login"
-                l_res = requests.post(login_url, json={"client_id": t_api_key, "client_secret": t_supplier_secret}, timeout=15)
-                l_json = l_res.json()
-                token = l_json.get("data", {}).get("token") or l_json.get("token")
+                l_res = requests.post("https://api.trendruum.com/api/v1/integration/auth/login", 
+                                      json={"client_id": t_api_key, "client_secret": t_supplier_secret}, timeout=15)
+                token = l_res.json().get("data", {}).get("token") or l_res.json().get("token")
                 
                 if token:
-                    brand_url = f"https://api.trendruum.com/api/v1/integration/brands?search={marka_arama}" if marka_arama else "https://api.trendruum.com/api/v1/integration/brands"
-                    b_res = requests.get(brand_url, headers={"Authorization": f"Bearer {token}"}, timeout=20)
-                    st.code(b_res.text[:2500], language="json")
+                    b_res = requests.get(f"https://api.trendruum.com/api/v1/integration/brands?search={mar_kelime}", 
+                                         headers={"Authorization": f"Bearer {token}"}, timeout=20)
+                    data = b_res.json().get("data", [])
+
+                    liste = []
+                    if isinstance(data, list):
+                        for item in data:
+                            _id = item.get("_id") or item.get("id")
+                            _name = item.get("name") or item.get("title")
+                            if _id and _name:
+                                liste.append({"ID (Kopyala)": _id, "Marka Adı": _name})
+
+                    if liste:
+                        df_mar = pd.DataFrame(liste)
+                        st.dataframe(df_mar, use_container_width=True, hide_index=True)
+                        secilen_brand = st.selectbox("Aşağıdan Seçin (ID yukarıya kaydolur)", df_mar["ID (Kopyala)"] + " - " + df_mar["Marka Adı"])
+                        if secilen_brand:
+                            ayarlar["trendruum_brand"] = secilen_brand.split(" - ")[0]
+                            ayar_yaz(ayarlar)
+                            st.success(f"Brand ID kaydedildi: {secilen_brand.split(' - ')[0]}")
+                    else:
+                        st.warning("Bu isimde marka bulunamadı. Genel markaları aratabilirsiniz.")
                 else:
-                    st.error("Token alınamadı.")
+                    st.error("Giriş yapılamadı.")
             except Exception as e:
                 st.error(f"Hata: {e}")
 
@@ -636,7 +686,7 @@ elif sayfa == "Trendruum Entegrasyonu":
             if not t_api_key or not t_supplier_secret:
                 st.error("Lütfen API Key ve Secret bilgilerini girin.")
             elif not t_category_id or not t_brand_id:
-                st.error("Lütfen keşif aracından bulduğunuz 24 haneli Category ID ve Brand ID alanlarını doldurun.")
+                st.error("Lütfen yukarıdaki bulma aracından Kategori ve Marka seçimi yapın.")
             else:
                 conn = baglanti_kur()
                 df_db = pd.read_sql("SELECT * FROM urunler", conn)
@@ -645,7 +695,7 @@ elif sayfa == "Trendruum Entegrasyonu":
                     st.warning("Veritabanında ürün bulunamadı.")
                 else:
                     try:
-                        with st.spinner("Oturum açılıyor ve toplu ürünler gönderiliyor..."):
+                        with st.spinner("Oturum açılıyor ve ürünler gönderiliyor..."):
                             login_url = "https://api.trendruum.com/api/v1/integration/auth/login"
                             login_res = requests.post(login_url, json={"client_id": t_api_key, "client_secret": t_supplier_secret}, timeout=30)
                             login_json = login_res.json()
@@ -745,7 +795,7 @@ else:
 
     if "mesajlar" not in st.session_state:
         st.session_state.mesajlar = [
-            {"rol": "asistan", "icerik": "Merhaba! Ben ŞahAI. Kategori ve marka keşif aracı ile ID'lerinizi kolayca bulabilirsiniz."}
+            {"rol": "asistan", "icerik": "Merhaba! Ben ŞahAI. Kategori ve marka arama aracıyla sonuçları tablo olarak seçebilirsiniz."}
         ]
 
     for mesaj in st.session_state.mesajlar:
@@ -758,7 +808,7 @@ else:
         with st.chat_message("kullanici"):
             st.markdown(kullanici_girdisi)
 
-        cevap = "ŞahEntegre sisteminiz tam gaz çalışıyor! Kategori ve marka ID'lerini Trendruum sekmesindeki arama aracıyla bulabilirsiniz."
+        cevap = "ŞahEntegre sisteminiz tam gaz çalışıyor! Kategori ve marka ID'lerini arama butonlarına basarak tablodan seçebilirsiniz."
         st.session_state.mesajlar.append({"rol": "asistan", "icerik": cevap})
         with st.chat_message("asistan"):
             st.markdown(cevap)
