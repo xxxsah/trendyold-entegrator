@@ -36,7 +36,8 @@ def veritabani_olustur():
             stok INTEGER,
             alis_fiyati REAL,
             satis_fiyati REAL,
-            gorsel TEXT
+            gorsel TEXT,
+            kategori TEXT
         )
     """)
     conn.commit()
@@ -181,6 +182,10 @@ def normalle(tedarikci, df, harita, marj, sabit_ek):
 
     alis = kol("fiyat").map(sayi)
     satis = (alis * (1 + marj / 100)) + sabit_ek
+    
+    kat_kolon = harita.get("kategori", "(yok)")
+    kategori_seri = df[kat_kolon].astype(str) if kat_kolon in df.columns and kat_kolon != "(yok)" else pd.Series(["Genel"] * len(df))
+
     return pd.DataFrame({
         "Tedarikçi": tedarikci,
         "Barkod/SKU": kol("kod").astype(str),
@@ -189,6 +194,7 @@ def normalle(tedarikci, df, harita, marj, sabit_ek):
         "Alış Fiyatı": alis.round(2),
         "Satış Fiyatı": satis.round(2),
         "Görsel": ilk_gorsel(df, harita["gorsel"]),
+        "Kategori": kategori_seri
     })
 
 
@@ -446,14 +452,16 @@ elif sayfa == "Ürünler (Veritabanı)":
 
         st.caption(f"Filtrelenen {len(gorunum):,} üründen ilk {min(goster, len(gorunum)):,} tanesi listeleniyor.")
         
-        gosterim_df = gorunum[["gorsel", "tedarikci", "barkod", "urun_adi", "stok", "alis_fiyati", "satis_fiyati"]].rename(columns={
+        gosterim_cols = [c for c in ["gorsel", "tedarikci", "barkod", "urun_adi", "stok", "alis_fiyati", "satis_fiyati", "kategori"] if c in gorunum.columns]
+        gosterim_df = gorunum[gosterim_cols].rename(columns={
             "gorsel": "Görsel",
             "tedarikci": "Tedarikçi",
             "barkod": "Barkod/SKU",
             "urun_adi": "Ürün Adı",
             "stok": "Stok",
             "alis_fiyati": "Alış",
-            "satis_fiyati": "Satış"
+            "satis_fiyati": "Satış",
+            "kategori": "Kategori"
         })
 
         st.dataframe(
@@ -507,10 +515,11 @@ elif sayfa == "Tedarikçiler & XML":
                     cursor.execute("DELETE FROM urunler")
                     
                     for _, row in birlesti.iterrows():
+                        kat = row.get("Kategori", "Genel")
                         cursor.execute("""
-                            INSERT INTO urunler (tedarikci, barkod, urun_adi, stok, alis_fiyati, satis_fiyati, gorsel)
-                            VALUES (?, ?, ?, ?, ?, ?, ?)
-                        """, (row["Tedarikçi"], row["Barkod/SKU"], row["Ürün Adı"], row["Stok"], row["Alış Fiyatı"], row["Satış Fiyatı"], row["Görsel"]))
+                            INSERT INTO urunler (tedarikci, barkod, urun_adi, stok, alis_fiyati, satis_fiyati, gorsel, kategori)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                        """, (row["Tedarikçi"], row["Barkod/SKU"], row["Ürün Adı"], row["Stok"], row["Alış Fiyatı"], row["Satış Fiyatı"], row["Görsel"], kat))
                     
                     conn.commit()
                     conn.close()
@@ -544,6 +553,7 @@ elif sayfa == "Tedarikçiler & XML":
                         "stok": sec("Stok", ["stok", "stock", "quantity", "adet", "miktar"], "stok"),
                         "fiyat": sec("Alış Fiyatı", ["fiyat", "price", "alis", "alış"], "fiyat"),
                         "gorsel": sec("Görsel", ["image_1", "resim", "image", "gorsel", "görsel", "picture", "foto"], "gorsel"),
+                        "kategori": sec("Kategori", ["kategori", "category", "cat", "tur", "grup"], "kategori")
                     }
                     
                     marj = st.number_input("Kâr Marjı (%)", 0.0, 500.0, float(bilgi.get("marj", 30.0)), 1.0, key=f"{ad}_marj")
@@ -565,7 +575,7 @@ elif sayfa == "Tedarikçiler & XML":
                     st.rerun()
 
 # ---------------------------------------------------------------
-# 3. SAYFA: TRENDRUUM ENTEGRASYONU (OTOMATİK BARKOD DÖNÜŞTÜRÜCÜ)
+# 3. SAYFA: TRENDRUUM ENTEGRASYONU (DİNAMİK KATEGORİ DESTEKLİ)
 # ---------------------------------------------------------------
 elif sayfa == "Trendruum Entegrasyonu":
     st.title("Trendruum Entegrasyonu ve Kolay ID Seçimi")
@@ -574,6 +584,7 @@ elif sayfa == "Trendruum Entegrasyonu":
     t_api_key = st.text_input("Trendruum API Key (Client ID)", type="password", value=ayarlar.get("trendruum_key", "A2f857dc-4829-4be0-b8f0-e75f23ef15c2"))
     t_supplier_secret = st.text_input("Trendruum API Secret (Client Secret)", type="password", value=ayarlar.get("trendruum_secret", "AItjHiLTDCdF47NmxT9fvvppo3UGGpxLAa7eV0ZS"))
     
+    st.caption("👇 **Aşağıdaki Kategori ID'si arama motorundan seçtiğiniz doğru kategorinin ID'sidir:**")
     t_category_id = st.text_input("Trendruum Category ID (24 haneli Object ID)", value=ayarlar.get("trendruum_category", "689f312ebc7c381f4a07f47f"))
     t_brand_id = st.text_input("Trendruum Brand ID (24 haneli Object ID)", value=ayarlar.get("trendruum_brand", "689f57d8bef381990805c0c0"))
 
@@ -591,11 +602,12 @@ elif sayfa == "Trendruum Entegrasyonu":
     
     # KATEGORİ VE MARKA BULUCU
     st.subheader("🔍 Kategori ve Marka Arama Aracı")
+    st.info("💡 **İpucu:** Babydoll/Fantazi Giyim gibi ürünleri göndermeden önce Kategori Arama kutusuna örn: **Babydoll** veya **Giyim** yazıp 'Kategorileri Getir'e basın. Seçtiğiniz kategori otomatik kaydedilir.")
     col_kesif1, col_kesif2 = st.columns(2)
 
     with col_kesif1:
         st.markdown("##### 📂 Kategori Bul")
-        kat_kelime = st.text_input("Kategori Kelimesi", value="Sarj", key="kat_input")
+        kat_kelime = st.text_input("Kategori Kelimesi", value="Babydoll", key="kat_input")
         if st.button("Kategorileri Getir", key="btn_kat"):
             try:
                 l_res = requests.post("https://api.trendruum.com/api/v1/integration/auth/login", 
@@ -648,11 +660,12 @@ elif sayfa == "Trendruum Entegrasyonu":
                     if liste:
                         df_kat = pd.DataFrame(liste)
                         st.dataframe(df_kat, use_container_width=True, hide_index=True)
-                        secilen_cat = st.selectbox("Aşağıdan Seçin", df_kat["ID (Kopyala)"] + " - " + df_kat["Kategori Adı"])
+                        secilen_cat = st.selectbox("Aşağıdan Doğru Kategoriyi Seçin", df_kat["ID (Kopyala)"] + " - " + df_kat["Kategori Adı"])
                         if secilen_cat:
-                            ayarlar["trendruum_category"] = secilen_cat.split(" - ")[0]
+                            yeni_cat_id = secilen_cat.split(" - ")[0]
+                            ayarlar["trendruum_category"] = yeni_cat_id
                             ayar_yaz(ayarlar)
-                            st.success("Category ID kaydedildi.")
+                            st.success(f"✅ Yeni Kategori ID ({yeni_cat_id}) başarıyla kaydedildi! Şimdi ürün gönderebilirsiniz.")
                     else:
                         st.warning("Hiç kategori bulunamadı.")
                 else:
@@ -721,7 +734,7 @@ elif sayfa == "Trendruum Entegrasyonu":
 
         if st.button("📤 Trendruum'a Toplu Ürün Gönder", type="primary", key="create_tr_bulk"):
             if not t_api_key or not t_supplier_secret:
-                st.error("Lütfen API Key and Secret bilgilerini girin.")
+                st.error("Lütfen API Key ve Secret bilgilerini girin.")
             elif not t_category_id or not t_brand_id:
                 st.error("Lütfen Category ID ve Brand ID alanlarını doldurun.")
             else:
@@ -765,10 +778,8 @@ elif sayfa == "Trendruum Entegrasyonu":
                             for idx, row in df_db.iterrows():
                                 orijinal_kod = str(row["barkod"]).strip()
                                 
-                                # Trendruum standartlarına uygun barkod kontrolü (Sadece rakam ve en az 8 haneli olmalı)
                                 temiz_barkod = "".join(filter(str.isdigit, orijinal_kod))
                                 if len(temiz_barkod) < 8:
-                                    # Eğer barkod harf içeriyorsa veya çok kısaysa, model ID'yi baz alarak 12 haneli benzersiz sayısal barkod üretelim
                                     temiz_barkod = f"869{abs(hash(orijinal_kod)) % 1000000000:09d}"
 
                                 gorsel_url = str(row["gorsel"]).strip()
@@ -781,7 +792,7 @@ elif sayfa == "Trendruum Entegrasyonu":
                                     "brand_id": t_brand_id.strip(),
                                     "children_products": [
                                         {
-                                            "barcode": temiz_barkod,  # Temizlenmiş sayısal standart barkod
+                                            "barcode": temiz_barkod,
                                             "stock_code": orijinal_kod,
                                             "price": float(row["satis_fiyati"]),
                                             "stock": int(row["stok"]),
@@ -885,7 +896,7 @@ else:
 
     if "mesajlar" not in st.session_state:
         st.session_state.mesajlar = [
-            {"rol": "asistan", "icerik": "Merhaba! Ben ŞahAI. Otomatik barkod temizleme ve standartlaştırma eklendi."}
+            {"rol": "asistan", "icerik": "Merhaba! Ben ŞahAI. Kategori eşleme rehberliği güncellendi."}
         ]
 
     for mesaj in st.session_state.mesajlar:
