@@ -584,11 +584,11 @@ elif sayfa == "Tedarikçiler & XML":
                     st.rerun()
 
 # ---------------------------------------------------------------
-# 3. SAYFA: TRENDRUUM ENTEGRASYONU (ÖZEL KATEGORİ EŞLEME YÖNETİMİ)
+# 3. SAYFA: TRENDRUUM ENTEGRASYONU (ANA KATEGORİ BAZLI EŞLEME)
 # ---------------------------------------------------------------
 elif sayfa == "Trendruum Entegrasyonu":
-    st.title("Trendruum Entegrasyonu ve Kategori Eşleme")
-    st.markdown("Trendruum API anahtarlarınız ve kategori eşleme paneli.")
+    st.title("Trendruum Entegrasyonu ve Ana Kategori Eşleme")
+    st.markdown("Trendruum API anahtarlarınız ve ana kategori eşleme paneli.")
 
     t_api_key = st.text_input("Trendruum API Key (Client ID)", type="password", value=ayarlar.get("trendruum_key", "A2f857dc-4829-4be0-b8f0-e75f23ef15c2"))
     t_supplier_secret = st.text_input("Trendruum API Secret (Client Secret)", type="password", value=ayarlar.get("trendruum_secret", "AItjHiLTDCdF47NmxT9fvvppo3UGGpxLAa7eV0ZS"))
@@ -605,38 +605,41 @@ elif sayfa == "Trendruum Entegrasyonu":
 
     st.markdown("---")
     
-    # KATEGORİ BULUCU VE EŞLEME TABLOSU
-    st.subheader("📂 Trendruum Kategori Eşleme Yöneticisi")
-    st.info("💡 XML'den gelen ana kategorileri Trendruum'daki doğru kategori ID'leri ile eşleştirin. Eşleşmeyen kategoriler için varsayılan ID kullanılır.")
+    # ANA KATEGORİ EŞLEME YÖNETİCİSİ
+    st.subheader("📂 Trendruum Ana Kategori Eşleme Yöneticisi")
+    st.info("💡 Sadece ana sektörler (EV & YAŞAM, ELEKTRONİK, SÜPERMARKET vb.) listelenir. Böylece tek tek uğraşmazsınız.")
 
-    default_cat_id = st.text_input("Varsayılan Trendruum Kategori ID (Eşleşmeyenler İçin)", value=ayarlar.get("trendruum_category", "689f312ebc7c381f4a07f47f"))
+    default_cat_id = st.text_input("Varsayılan Trendruum Kategori ID (Genel)", value=ayarlar.get("trendruum_category", "689f312ebc7c381f4a07f47f"))
     if default_cat_id != ayarlar.get("trendruum_category"):
         ayarlar["trendruum_category"] = default_cat_id
         ayar_yaz(ayarlar)
 
-    # Veritabanındaki mevcut benzersiz kategorileri alalım
+    # Veritabanındaki kategorilerden sadece ANA kategorileri çekelim (örn: '>>>' öncesi)
     conn = baglanti_kur()
     try:
         df_katlar = pd.read_sql("SELECT DISTINCT kategori FROM urunler WHERE kategori IS NOT NULL AND kategori != ''", conn)
-        mevcut_kategoriler = df_katlar["kategori"].tolist() if not df_katlar.empty else []
+        ham_kategoriler = df_katlar["kategori"].tolist() if not df_katlar.empty else []
+        
+        # Sadece ana kategori adlarını alalım (Örn: "EV & YAŞAM >>> ... " -> "EV & YAŞAM")
+        ana_kategoriler = sorted(list(set([k.split(">>>")[0].strip() for k in ham_kategoriler if k])))
     except Exception:
-        mevcut_kategoriler = []
+        ana_kategoriler = []
     conn.close()
 
-    if mevcut_kategoriler:
-        st.markdown("##### 🔗 XML Kategorilerini Trendruum ID'leri ile Eşleştirin")
+    if ana_kategoriler:
+        st.markdown("##### 🔗 Ana Kategorileri Trendruum ID'leri ile Eşleştirin")
         eslesmeler = ayarlar.get("kategori_eslesme", {})
         
         yeni_eslesmeler = {}
-        for kat in mevcut_kategoriler:
-            mevcut_id = eslesmeler.get(kat, default_cat_id)
-            girilen_id = st.text_input(f"XML Kategori: **{kat}** -> Trendruum Category ID", value=mevcut_id, key=f"map_{kat}")
-            yeni_eslesmeler[kat] = girilen_id.strip()
+        for ana_kat in ana_kategoriler:
+            mevcut_id = eslesmeler.get(ana_kat, default_cat_id)
+            girilen_id = st.text_input(f"Ana Kategori: **{ana_kat}** -> Trendruum Category ID", value=mevcut_id, key=f"map_{ana_kat}")
+            yeni_eslesmeler[ana_kat] = girilen_id.strip()
 
         if yeni_eslesmeler != eslesmeler:
             ayarlar["kategori_eslesme"] = yeni_eslesmeler
             ayar_yaz(ayarlar)
-            st.success("Kategori eşleşmeleri kaydedildi!")
+            st.success("Ana kategori eşleşmeleri kaydedildi!")
 
     st.markdown("---")
     c_sec1, c_sec2 = st.columns(2)
@@ -647,7 +650,7 @@ elif sayfa == "Trendruum Entegrasyonu":
 
         if st.button("📤 Trendruum'a Toplu Ürün Gönder", type="primary", key="create_tr_bulk"):
             if not t_api_key or not t_supplier_secret:
-                st.error("Lütfen API Key ve Secret bilgilerini girin.")
+                st.error("Lütfen API Key and Secret bilgilerini girin.")
             elif not t_brand_id:
                 st.error("Lütfen Brand ID alanını doldurun.")
             else:
@@ -701,9 +704,11 @@ elif sayfa == "Trendruum Entegrasyonu":
                                 gorsel_url = str(row["gorsel"]).strip()
                                 images_arr = [gorsel_url] if gorsel_url else ["https://via.placeholder.com/600"]
                                 
-                                # Ürünün kendi kategorisine özel ID'yi alıyoruz
-                                urun_kat = str(row.get("kategori", "")).strip()
-                                hedef_cat_id = kategori_haritasi.get(urun_kat, varsayilan_cid)
+                                # Ürünün ana kategorisini alıyoruz (örn: "EV & YAŞAM")
+                                tam_kat = str(row.get("kategori", "")).strip()
+                                ana_kat = tam_kat.split(">>>")[0].strip() if tam_kat else ""
+                                
+                                hedef_cat_id = kategori_haritasi.get(ana_kat, varsayilan_cid)
 
                                 tum_urunler.append({
                                     "name": str(row["urun_adi"]),
@@ -816,7 +821,7 @@ else:
 
     if "mesajlar" not in st.session_state:
         st.session_state.mesajlar = [
-            {"rol": "asistan", "icerik": "Merhaba! Ben ŞahAI. Kategori eşleme paneli aktif edildi."}
+            {"rol": "asistan", "icerik": "Merhaba! Ben ŞahAI. Kategori eşleme sistemi ana kategori bazlı olacak şekilde sadeleştirildi."}
         ]
 
     for mesaj in st.session_state.mesajlar:
