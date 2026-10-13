@@ -210,8 +210,8 @@ VARSAYILAN_AYARLAR = {
     },
     "trendruum_key": "A2f857dc-4829-4be0-b8f0-e75f23ef15c2",
     "trendruum_secret": "AItjHiLTDCdF47NmxT9fvvppo3UGGpxLAa7eV0ZS",
-    "trendruum_category": "",
-    "trendruum_brand": "",
+    "trendruum_category": "689f312ebc7c381f4a07f47f",
+    "trendruum_brand": "689f57d8bef381990805c0c0",
     "idefix_satici_id": "27837",
     "idefix_token": "929c122e-87bd-4aba-a293-0c731bf4e5ff",
     "idefix_secret": "8c510c89-9d4c-4d36-b411-9024c0b7f42d"
@@ -563,7 +563,7 @@ elif sayfa == "Tedarikçiler & XML":
                     st.rerun()
 
 # ---------------------------------------------------------------
-# 3. SAYFA: TRENDRUUM ENTEGRASYONU & GELİŞMİŞ KEŞİF TABLOSU
+# 3. SAYFA: TRENDRUUM ENTEGRASYONU & DETAYLI 422 HATA AYIKLAMA
 # ---------------------------------------------------------------
 elif sayfa == "Trendruum Entegrasyonu":
     st.title("Trendruum Entegrasyonu ve Kolay ID Seçimi")
@@ -572,8 +572,8 @@ elif sayfa == "Trendruum Entegrasyonu":
     t_api_key = st.text_input("Trendruum API Key (Client ID)", type="password", value=ayarlar.get("trendruum_key", "A2f857dc-4829-4be0-b8f0-e75f23ef15c2"))
     t_supplier_secret = st.text_input("Trendruum API Secret (Client Secret)", type="password", value=ayarlar.get("trendruum_secret", "AItjHiLTDCdF47NmxT9fvvppo3UGGpxLAa7eV0ZS"))
     
-    t_category_id = st.text_input("Trendruum Category ID (24 haneli Object ID)", value=ayarlar.get("trendruum_category", ""))
-    t_brand_id = st.text_input("Trendruum Brand ID (24 haneli Object ID)", value=ayarlar.get("trendruum_brand", ""))
+    t_category_id = st.text_input("Trendruum Category ID (24 haneli Object ID)", value=ayarlar.get("trendruum_category", "689f312ebc7c381f4a07f47f"))
+    t_brand_id = st.text_input("Trendruum Brand ID (24 haneli Object ID)", value=ayarlar.get("trendruum_brand", "689f57d8bef381990805c0c0"))
 
     if (t_api_key != ayarlar.get("trendruum_key") or 
         t_supplier_secret != ayarlar.get("trendruum_secret") or
@@ -587,7 +587,7 @@ elif sayfa == "Trendruum Entegrasyonu":
 
     st.markdown("---")
     
-    # GELİŞMİŞ KATEGORİ VE MARKA BULUCU (TABLO + OTOMATİK SEÇİM)
+    # KATEGORİ VE MARKA BULUCU
     st.subheader("🔍 Kategori ve Marka Arama Aracı")
     col_kesif1, col_kesif2 = st.columns(2)
 
@@ -606,12 +606,10 @@ elif sayfa == "Trendruum Entegrasyonu":
                     data = c_res.json().get("data", [])
                     
                     if not data:
-                        # Kelimeiz tüm kategorileri çekmeyi dene
                         c_res_all = requests.get("https://api.trendruum.com/api/v1/integration/categories", 
                                                  headers={"Authorization": f"Bearer {token}"}, timeout=20)
                         data = c_res_all.json().get("data", [])
 
-                    # Gelen veriyi derle
                     liste = []
                     def duz_oku(items):
                         for item in items:
@@ -628,13 +626,13 @@ elif sayfa == "Trendruum Entegrasyonu":
                     if liste:
                         df_kat = pd.DataFrame(liste)
                         st.dataframe(df_kat, use_container_width=True, hide_index=True)
-                        secilen_cat = st.selectbox("Aşağıdan Seçin (ID yukarıya kaydolur)", df_kat["ID (Kopyala)"] + " - " + df_kat["Kategori Adı"])
+                        secilen_cat = st.selectbox("Aşağıdan Seçin", df_kat["ID (Kopyala)"] + " - " + df_kat["Kategori Adı"])
                         if secilen_cat:
                             ayarlar["trendruum_category"] = secilen_cat.split(" - ")[0]
                             ayar_yaz(ayarlar)
-                            st.success(f"Category ID kaydedildi: {secilen_cat.split(' - ')[0]}")
+                            st.success(f"Category ID kaydedildi.")
                     else:
-                        st.warning("Hiç kategori bulunamadı, farklı bir kelime yazmayı deneyin.")
+                        st.warning("Hiç kategori bulunamadı.")
                 else:
                     st.error("Giriş yapılamadı.")
             except Exception as e:
@@ -665,13 +663,13 @@ elif sayfa == "Trendruum Entegrasyonu":
                     if liste:
                         df_mar = pd.DataFrame(liste)
                         st.dataframe(df_mar, use_container_width=True, hide_index=True)
-                        secilen_brand = st.selectbox("Aşağıdan Seçin (ID yukarıya kaydolur)", df_mar["ID (Kopyala)"] + " - " + df_mar["Marka Adı"])
+                        secilen_brand = st.selectbox("Aşağıdan Seçin", df_mar["ID (Kopyala)"] + " - " + df_mar["Marka Adı"])
                         if secilen_brand:
                             ayarlar["trendruum_brand"] = secilen_brand.split(" - ")[0]
                             ayar_yaz(ayarlar)
-                            st.success(f"Brand ID kaydedildi: {secilen_brand.split(' - ')[0]}")
+                            st.success(f"Brand ID kaydedildi.")
                     else:
-                        st.warning("Bu isimde marka bulunamadı. Genel markaları aratabilirsiniz.")
+                        st.warning("Marka bulunamadı.")
                 else:
                     st.error("Giriş yapılamadı.")
             except Exception as e:
@@ -686,7 +684,7 @@ elif sayfa == "Trendruum Entegrasyonu":
             if not t_api_key or not t_supplier_secret:
                 st.error("Lütfen API Key ve Secret bilgilerini girin.")
             elif not t_category_id or not t_brand_id:
-                st.error("Lütfen yukarıdaki bulma aracından Kategori ve Marka seçimi yapın.")
+                st.error("Lütfen Category ID ve Brand ID alanlarını doldurun.")
             else:
                 conn = baglanti_kur()
                 df_db = pd.read_sql("SELECT * FROM urunler", conn)
@@ -710,7 +708,11 @@ elif sayfa == "Trendruum Entegrasyonu":
                             }
                             
                             products_list = []
-                            for _, row in df_db.head(5).iterrows():
+                            for _, row in df_db.head(2).iterrows(): # İlk 2 ürünle test edelim
+                                # Dokümana göre her varyantta images dizisi zorunludur
+                                gorsel_url = str(row["gorsel"])
+                                images_arr = [{"url": gorsel_url}] if gorsel_url else [{"url": "https://via.placeholder.com/600"}]
+                                
                                 products_list.append({
                                     "name": str(row["urun_adi"]),
                                     "model_code": str(row["barkod"]),
@@ -721,7 +723,7 @@ elif sayfa == "Trendruum Entegrasyonu":
                                             "barcode": str(row["barkod"]),
                                             "price": float(row["satis_fiyati"]),
                                             "stock": int(row["stok"]),
-                                            "images": [{"url": str(row["gorsel"])}] if row["gorsel"] else []
+                                            "images": images_arr
                                         }
                                     ]
                                 })
@@ -730,10 +732,13 @@ elif sayfa == "Trendruum Entegrasyonu":
                             response = requests.post(target_url, json=payload, headers=headers, timeout=30)
                             res_body = response.text if response.text else "[Boş Yanıt]"
 
-                            log_text = f"""=== BULK PRODUCTS RESPONSE ===
+                            log_text = f"""=== GÖNDERİLEN PAYLOAD (İSTEK) ===
+{json.dumps(payload, ensure_ascii=False, indent=2)}
+
+=== BULK PRODUCTS RESPONSE ===
 STATUS CODE: {response.status_code}
 RESPONSE BODY:
-{res_body[:2000]}
+{res_body[:3000]}
 """
                             st.session_state["tr_debug_log"] = log_text
                             st.rerun()
@@ -795,7 +800,7 @@ else:
 
     if "mesajlar" not in st.session_state:
         st.session_state.mesajlar = [
-            {"rol": "asistan", "icerik": "Merhaba! Ben ŞahAI. Kategori ve marka arama aracıyla sonuçları tablo olarak seçebilirsiniz."}
+            {"rol": "asistan", "icerik": "Merhaba! Ben ŞahAI. 422 hata detayını görmek için güncellemeyi yaptık."}
         ]
 
     for mesaj in st.session_state.mesajlar:
@@ -808,7 +813,7 @@ else:
         with st.chat_message("kullanici"):
             st.markdown(kullanici_girdisi)
 
-        cevap = "ŞahEntegre sisteminiz tam gaz çalışıyor! Kategori ve marka ID'lerini arama butonlarına basarak tablodan seçebilirsiniz."
+        cevap = "ŞahEntegre sisteminiz tam gaz çalışıyor!"
         st.session_state.mesajlar.append({"rol": "asistan", "icerik": cevap})
         with st.chat_message("asistan"):
             st.markdown(cevap)
