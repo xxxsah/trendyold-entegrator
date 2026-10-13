@@ -189,7 +189,6 @@ def normalle(tedarikci, df, harita, marj, sabit_ek):
     
     kat_kolon = harita.get("kategori", "(yok)")
     if kat_kolon == "(yok)" or kat_kolon not in df.columns:
-        # Otomatik Kategori Kolonu Tahmini
         kat_kolon = tahmin(df.columns, ["kategori", "category", "cat", "tur", "grup", "maincategory"])
 
     kategori_seri = df[kat_kolon].astype(str) if kat_kolon != "(yok)" and kat_kolon in df.columns else pd.Series(["Genel"] * len(df))
@@ -214,7 +213,8 @@ AYAR_DOSYA = Path(__file__).parent / "ayarlar.json"
 OZEL_SABITLER = [
     "trendruum_key", "trendruum_secret", 
     "trendruum_category", "trendruum_brand",
-    "idefix_satici_id", "idefix_token", "idefix_secret"
+    "idefix_satici_id", "idefix_token", "idefix_secret",
+    "kategori_eslesme"
 ]
 
 VARSAYILAN_AYARLAR = {
@@ -230,7 +230,8 @@ VARSAYILAN_AYARLAR = {
     "trendruum_brand": "689f57d8bef381990805c0c0",
     "idefix_satici_id": "27837",
     "idefix_token": "929c122e-87bd-4aba-a293-0c731bf4e5ff",
-    "idefix_secret": "8c510c89-9d4c-4d36-b411-9024c0b7f42d"
+    "idefix_secret": "8c510c89-9d4c-4d36-b411-9024c0b7f42d",
+    "kategori_eslesme": {}
 }
 
 def ayar_oku():
@@ -583,152 +584,59 @@ elif sayfa == "Tedarikçiler & XML":
                     st.rerun()
 
 # ---------------------------------------------------------------
-# 3. SAYFA: TRENDRUUM ENTEGRASYONU
+# 3. SAYFA: TRENDRUUM ENTEGRASYONU (ÖZEL KATEGORİ EŞLEME YÖNETİMİ)
 # ---------------------------------------------------------------
 elif sayfa == "Trendruum Entegrasyonu":
-    st.title("Trendruum Entegrasyonu ve Kolay ID Seçimi")
-    st.markdown("Trendruum API anahtarlarınız ve kategori/marka seçim paneli.")
+    st.title("Trendruum Entegrasyonu ve Kategori Eşleme")
+    st.markdown("Trendruum API anahtarlarınız ve kategori eşleme paneli.")
 
     t_api_key = st.text_input("Trendruum API Key (Client ID)", type="password", value=ayarlar.get("trendruum_key", "A2f857dc-4829-4be0-b8f0-e75f23ef15c2"))
     t_supplier_secret = st.text_input("Trendruum API Secret (Client Secret)", type="password", value=ayarlar.get("trendruum_secret", "AItjHiLTDCdF47NmxT9fvvppo3UGGpxLAa7eV0ZS"))
     
-    t_category_id = st.text_input("Trendruum Category ID (24 haneli Object ID)", value=ayarlar.get("trendruum_category", "689f312ebc7c381f4a07f47f"))
     t_brand_id = st.text_input("Trendruum Brand ID (24 haneli Object ID)", value=ayarlar.get("trendruum_brand", "689f57d8bef381990805c0c0"))
 
     if (t_api_key != ayarlar.get("trendruum_key") or 
         t_supplier_secret != ayarlar.get("trendruum_secret") or
-        t_category_id != ayarlar.get("trendruum_category") or
         t_brand_id != ayarlar.get("trendruum_brand")):
         ayarlar["trendruum_key"] = t_api_key
         ayarlar["trendruum_secret"] = t_supplier_secret
-        ayarlar["trendruum_category"] = t_category_id
         ayarlar["trendruum_brand"] = t_brand_id
         ayar_yaz(ayarlar)
 
     st.markdown("---")
     
-    # KATEGORİ VE MARKA BULUCU
-    st.subheader("🔍 Kategori ve Marka Arama Aracı")
-    col_kesif1, col_kesif2 = st.columns(2)
+    # KATEGORİ BULUCU VE EŞLEME TABLOSU
+    st.subheader("📂 Trendruum Kategori Eşleme Yöneticisi")
+    st.info("💡 XML'den gelen ana kategorileri Trendruum'daki doğru kategori ID'leri ile eşleştirin. Eşleşmeyen kategoriler için varsayılan ID kullanılır.")
 
-    with col_kesif1:
-        st.markdown("##### 📂 Kategori Bul")
-        kat_kelime = st.text_input("Kategori Kelimesi", value="Babydoll", key="kat_input")
-        if st.button("Kategorileri Getir", key="btn_kat"):
-            try:
-                l_res = requests.post("https://api.trendruum.com/api/v1/integration/auth/login", 
-                                      json={"client_id": t_api_key, "client_secret": t_supplier_secret}, timeout=15)
-                l_json = {}
-                try:
-                    l_json = l_res.json() if l_res.text else {}
-                except Exception:
-                    pass
-                
-                token = ""
-                if isinstance(l_json, dict):
-                    token = l_json.get("data", {}).get("token") or l_json.get("token") or ""
-                
-                if token:
-                    c_res = requests.get(f"https://api.trendruum.com/api/v1/integration/categories?name={kat_kelime}", 
-                                         headers={"Authorization": f"Bearer {token}"}, timeout=20)
-                    c_json = {}
-                    try:
-                        c_json = c_res.json() if c_res.text else {}
-                    except Exception:
-                        pass
-                    
-                    data = c_json.get("data", []) if isinstance(c_json, dict) else []
-                    
-                    if not data:
-                        c_res_all = requests.get("https://api.trendruum.com/api/v1/integration/categories", 
-                                                 headers={"Authorization": f"Bearer {token}"}, timeout=20)
-                        c_all_json = {}
-                        try:
-                            c_all_json = c_res_all.json() if c_res_all.text else {}
-                        except Exception:
-                            pass
-                        data = c_all_json.get("data", []) if isinstance(c_all_json, dict) else []
+    default_cat_id = st.text_input("Varsayılan Trendruum Kategori ID (Eşleşmeyenler İçin)", value=ayarlar.get("trendruum_category", "689f312ebc7c381f4a07f47f"))
+    if default_cat_id != ayarlar.get("trendruum_category"):
+        ayarlar["trendruum_category"] = default_cat_id
+        ayar_yaz(ayarlar)
 
-                    liste = []
-                    def duz_oku(items):
-                        for item in items:
-                            if isinstance(item, dict):
-                                _id = item.get("_id") or item.get("id")
-                                _name = item.get("name") or item.get("title")
-                                if _id and _name:
-                                    liste.append({"ID (Kopyala)": _id, "Kategori Adı": _name})
-                                if "children" in item and isinstance(item["children"], list):
-                                    duz_oku(item["children"])
+    # Veritabanındaki mevcut benzersiz kategorileri alalım
+    conn = baglanti_kur()
+    try:
+        df_katlar = pd.read_sql("SELECT DISTINCT kategori FROM urunler WHERE kategori IS NOT NULL AND kategori != ''", conn)
+        mevcut_kategoriler = df_katlar["kategori"].tolist() if not df_katlar.empty else []
+    except Exception:
+        mevcut_kategoriler = []
+    conn.close()
 
-                    if isinstance(data, list):
-                        duz_oku(data)
+    if mevcut_kategoriler:
+        st.markdown("##### 🔗 XML Kategorilerini Trendruum ID'leri ile Eşleştirin")
+        eslesmeler = ayarlar.get("kategori_eslesme", {})
+        
+        yeni_eslesmeler = {}
+        for kat in mevcut_kategoriler:
+            mevcut_id = eslesmeler.get(kat, default_cat_id)
+            girilen_id = st.text_input(f"XML Kategori: **{kat}** -> Trendruum Category ID", value=mevcut_id, key=f"map_{kat}")
+            yeni_eslesmeler[kat] = girilen_id.strip()
 
-                    if liste:
-                        df_kat = pd.DataFrame(liste)
-                        st.dataframe(df_kat, use_container_width=True, hide_index=True)
-                        secilen_cat = st.selectbox("Aşağıdan Seçin", df_kat["ID (Kopyala)"] + " - " + df_kat["Kategori Adı"])
-                        if secilen_cat:
-                            ayarlar["trendruum_category"] = secilen_cat.split(" - ")[0]
-                            ayar_yaz(ayarlar)
-                            st.success("Category ID kaydedildi.")
-                    else:
-                        st.warning("Hiç kategori bulunamadı.")
-                else:
-                    st.error("Giriş yapılamadı.")
-            except Exception as e:
-                st.error(f"Hata: {e}")
-
-    with col_kesif2:
-        st.markdown("##### 🏷️ Marka Bul")
-        mar_kelime = st.text_input("Marka Kelimesi", value="Irmak", key="mar_input")
-        if st.button("Markaları Getir", key="btn_mar"):
-            try:
-                l_res = requests.post("https://api.trendruum.com/api/v1/integration/auth/login", 
-                                      json={"client_id": t_api_key, "client_secret": t_supplier_secret}, timeout=15)
-                l_json = {}
-                try:
-                    l_json = l_res.json() if l_res.text else {}
-                except Exception:
-                    pass
-                
-                token = ""
-                if isinstance(l_json, dict):
-                    token = l_json.get("data", {}).get("token") or l_json.get("token") or ""
-                
-                if token:
-                    b_res = requests.get(f"https://api.trendruum.com/api/v1/integration/brands?search={mar_kelime}", 
-                                         headers={"Authorization": f"Bearer {token}"}, timeout=20)
-                    b_json = {}
-                    try:
-                        b_json = b_res.json() if b_res.text else {}
-                    except Exception:
-                        pass
-                    
-                    data = b_json.get("data", []) if isinstance(b_json, dict) else []
-
-                    liste = []
-                    if isinstance(data, list):
-                        for item in data:
-                            if isinstance(item, dict):
-                                _id = item.get("_id") or item.get("id")
-                                _name = item.get("name") or item.get("title")
-                                if _id and _name:
-                                    liste.append({"ID (Kopyala)": _id, "Marka Adı": _name})
-
-                    if liste:
-                        df_mar = pd.DataFrame(liste)
-                        st.dataframe(df_mar, use_container_width=True, hide_index=True)
-                        secilen_brand = st.selectbox("Aşağıdan Seçin", df_mar["ID (Kopyala)"] + " - " + df_mar["Marka Adı"])
-                        if secilen_brand:
-                            ayarlar["trendruum_brand"] = secilen_brand.split(" - ")[0]
-                            ayar_yaz(ayarlar)
-                            st.success("Brand ID kaydedildi.")
-                    else:
-                        st.warning("Marka bulunamadı.")
-                else:
-                    st.error("Giriş yapılamadı.")
-            except Exception as e:
-                st.error(f"Hata: {e}")
+        if yeni_eslesmeler != eslesmeler:
+            ayarlar["kategori_eslesme"] = yeni_eslesmeler
+            ayar_yaz(ayarlar)
+            st.success("Kategori eşleşmeleri kaydedildi!")
 
     st.markdown("---")
     c_sec1, c_sec2 = st.columns(2)
@@ -740,8 +648,8 @@ elif sayfa == "Trendruum Entegrasyonu":
         if st.button("📤 Trendruum'a Toplu Ürün Gönder", type="primary", key="create_tr_bulk"):
             if not t_api_key or not t_supplier_secret:
                 st.error("Lütfen API Key ve Secret bilgilerini girin.")
-            elif not t_category_id or not t_brand_id:
-                st.error("Lütfen Category ID ve Brand ID alanlarını doldurun.")
+            elif not t_brand_id:
+                st.error("Lütfen Brand ID alanını doldurun.")
             else:
                 conn = baglanti_kur()
                 df_db = pd.read_sql("SELECT * FROM urunler", conn)
@@ -779,6 +687,9 @@ elif sayfa == "Trendruum Entegrasyonu":
                                 "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
                             }
                             
+                            kategori_haritasi = ayarlar.get("kategori_eslesme", {})
+                            varsayilan_cid = ayarlar.get("trendruum_category", "689f312ebc7c381f4a07f47f")
+
                             tum_urunler = []
                             for idx, row in df_db.iterrows():
                                 orijinal_kod = str(row["barkod"]).strip()
@@ -790,10 +701,14 @@ elif sayfa == "Trendruum Entegrasyonu":
                                 gorsel_url = str(row["gorsel"]).strip()
                                 images_arr = [gorsel_url] if gorsel_url else ["https://via.placeholder.com/600"]
                                 
+                                # Ürünün kendi kategorisine özel ID'yi alıyoruz
+                                urun_kat = str(row.get("kategori", "")).strip()
+                                hedef_cat_id = kategori_haritasi.get(urun_kat, varsayilan_cid)
+
                                 tum_urunler.append({
                                     "name": str(row["urun_adi"]),
                                     "model_code": orijinal_kod,
-                                    "category_id": t_category_id.strip(),
+                                    "category_id": hedef_cat_id,
                                     "brand_id": t_brand_id.strip(),
                                     "children_products": [
                                         {
@@ -901,7 +816,7 @@ else:
 
     if "mesajlar" not in st.session_state:
         st.session_state.mesajlar = [
-            {"rol": "asistan", "icerik": "Merhaba! Ben ŞahAI. Kategori alanı düzeltildi."}
+            {"rol": "asistan", "icerik": "Merhaba! Ben ŞahAI. Kategori eşleme paneli aktif edildi."}
         ]
 
     for mesaj in st.session_state.mesajlar:
