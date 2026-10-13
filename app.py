@@ -563,7 +563,7 @@ elif sayfa == "Tedarikçiler & XML":
                     st.rerun()
 
 # ---------------------------------------------------------------
-# 3. SAYFA: TRENDRUUM ENTEGRASYONU (GÜVENLİ HATA YÖNETİMİ)
+# 3. SAYFA: TRENDRUUM ENTEGRASYONU (KESİNTİSİZ & HATA KORUMALI)
 # ---------------------------------------------------------------
 elif sayfa == "Trendruum Entegrasyonu":
     st.title("Trendruum Entegrasyonu ve Kolay ID Seçimi")
@@ -598,30 +598,47 @@ elif sayfa == "Trendruum Entegrasyonu":
             try:
                 l_res = requests.post("https://api.trendruum.com/api/v1/integration/auth/login", 
                                       json={"client_id": t_api_key, "client_secret": t_supplier_secret}, timeout=15)
-                l_json = l_res.json() if l_res.text else {}
-                token = l_json.get("data", {}).get("token") or l_json.get("token")
+                l_json = {}
+                try:
+                    l_json = l_res.json()
+                except Exception:
+                    pass
+                
+                token = ""
+                if isinstance(l_json, dict):
+                    token = l_json.get("data", {}).get("token") or l_json.get("token") or ""
                 
                 if token:
                     c_res = requests.get(f"https://api.trendruum.com/api/v1/integration/categories?name={kat_kelime}", 
                                          headers={"Authorization": f"Bearer {token}"}, timeout=20)
-                    c_json = c_res.json() if c_res.text else {}
-                    data = c_json.get("data", [])
+                    c_json = {}
+                    try:
+                        c_json = c_res.json()
+                    except Exception:
+                        pass
+                    
+                    data = c_json.get("data", []) if isinstance(c_json, dict) else []
                     
                     if not data:
                         c_res_all = requests.get("https://api.trendruum.com/api/v1/integration/categories", 
                                                  headers={"Authorization": f"Bearer {token}"}, timeout=20)
-                        c_all_json = c_res_all.json() if c_res_all.text else {}
-                        data = c_all_json.get("data", [])
+                        c_all_json = {}
+                        try:
+                            c_all_json = c_res_all.json()
+                        except Exception:
+                            pass
+                        data = c_all_json.get("data", []) if isinstance(c_all_json, dict) else []
 
                     liste = []
                     def duz_oku(items):
                         for item in items:
-                            _id = item.get("_id") or item.get("id")
-                            _name = item.get("name") or item.get("title")
-                            if _id and _name:
-                                liste.append({"ID (Kopyala)": _id, "Kategori Adı": _name})
-                            if "children" in item and item["children"]:
-                                duz_oku(item["children"])
+                            if isinstance(item, dict):
+                                _id = item.get("_id") or item.get("id")
+                                _name = item.get("name") or item.get("title")
+                                if _id and _name:
+                                    liste.append({"ID (Kopyala)": _id, "Kategori Adı": _name})
+                                if "children" in item and isinstance(item["children"], list):
+                                    duz_oku(item["children"])
 
                     if isinstance(data, list):
                         duz_oku(data)
@@ -633,7 +650,7 @@ elif sayfa == "Trendruum Entegrasyonu":
                         if secilen_cat:
                             ayarlar["trendruum_category"] = secilen_cat.split(" - ")[0]
                             ayar_yaz(ayarlar)
-                            st.success(f"Category ID kaydedildi.")
+                            st.success("Category ID kaydedildi.")
                     else:
                         st.warning("Hiç kategori bulunamadı.")
                 else:
@@ -648,22 +665,35 @@ elif sayfa == "Trendruum Entegrasyonu":
             try:
                 l_res = requests.post("https://api.trendruum.com/api/v1/integration/auth/login", 
                                       json={"client_id": t_api_key, "client_secret": t_supplier_secret}, timeout=15)
-                l_json = l_res.json() if l_res.text else {}
-                token = l_json.get("data", {}).get("token") or l_json.get("token")
+                l_json = {}
+                try:
+                    l_json = l_res.json()
+                except Exception:
+                    pass
+                
+                token = ""
+                if isinstance(l_json, dict):
+                    token = l_json.get("data", {}).get("token") or l_json.get("token") or ""
                 
                 if token:
                     b_res = requests.get(f"https://api.trendruum.com/api/v1/integration/brands?search={mar_kelime}", 
                                          headers={"Authorization": f"Bearer {token}"}, timeout=20)
-                    b_json = b_res.json() if b_res.text else {}
-                    data = b_json.get("data", [])
+                    b_json = {}
+                    try:
+                        b_json = b_res.json()
+                    except Exception:
+                        pass
+                    
+                    data = b_json.get("data", []) if isinstance(b_json, dict) else []
 
                     liste = []
                     if isinstance(data, list):
                         for item in data:
-                            _id = item.get("_id") or item.get("id")
-                            _name = item.get("name") or item.get("title")
-                            if _id and _name:
-                                liste.append({"ID (Kopyala)": _id, "Marka Adı": _name})
+                            if isinstance(item, dict):
+                                _id = item.get("_id") or item.get("id")
+                                _name = item.get("name") or item.get("title")
+                                if _id and _name:
+                                    liste.append({"ID (Kopyala)": _id, "Marka Adı": _name})
 
                     if liste:
                         df_mar = pd.DataFrame(liste)
@@ -672,7 +702,7 @@ elif sayfa == "Trendruum Entegrasyonu":
                         if secilen_brand:
                             ayarlar["trendruum_brand"] = secilen_brand.split(" - ")[0]
                             ayar_yaz(ayarlar)
-                            st.success(f"Brand ID kaydedildi.")
+                            st.success("Brand ID kaydedildi.")
                     else:
                         st.warning("Marka bulunamadı.")
                 else:
@@ -687,7 +717,7 @@ elif sayfa == "Trendruum Entegrasyonu":
         st.subheader("2. Toplu Ürün Gönder (/products/bulk)")
         if st.button("📤 Trendruum'a Toplu Ürün Gönder", type="primary", key="create_tr_bulk"):
             if not t_api_key or not t_supplier_secret:
-                st.error("Lütfen API Key and Secret bilgilerini girin.")
+                st.error("Lütfen API Key ve Secret bilgilerini girin.")
             elif not t_category_id or not t_brand_id:
                 st.error("Lütfen Category ID ve Brand ID alanlarını doldurun.")
             else:
@@ -700,9 +730,17 @@ elif sayfa == "Trendruum Entegrasyonu":
                     try:
                         with st.spinner("Oturum açılıyor ve TÜM ürünler gönderiliyor..."):
                             login_url = "https://api.trendruum.com/api/v1/integration/auth/login"
-                            login_res = requests.post(login_url, json={"client_id": t_api_key, "client_secret": t_supplier_secret}, timeout=30)
-                            login_json = login_res.json() if login_res.text else {}
-                            token = login_json.get("data", {}).get("token") or login_json.get("token")
+                            login_res = requests.post(login_url, json={"client_id": t_api_key.strip(), "client_secret": t_supplier_secret.strip()}, timeout=30)
+                            
+                            login_json = {}
+                            try:
+                                login_json = login_res.json()
+                            except Exception:
+                                pass
+
+                            token = ""
+                            if isinstance(login_json, dict):
+                                token = login_json.get("data", {}).get("token") or login_json.get("token") or ""
 
                         if login_res.status_code == 200 and token:
                             target_url = "https://api.trendruum.com/api/v1/integration/products/bulk"
@@ -752,7 +790,7 @@ RESPONSE BODY:
                             st.session_state["tr_debug_log"] = log_text
                             st.rerun()
                         else:
-                            st.error(f"Login başarısız oldu. Yanıt: {login_res.text}")
+                            st.error(f"Giriş Yapılamadı (HTTP {login_res.status_code}). Yanıt: {login_res.text}")
 
                     except Exception as e:
                         st.error(f"Hata oluştu: {e}")
@@ -809,7 +847,7 @@ else:
 
     if "mesajlar" not in st.session_state:
         st.session_state.mesajlar = [
-            {"rol": "asistan", "icerik": "Merhaba! Ben ŞahAI. API yanıt güvenliği güncellendi."}
+            {"rol": "asistan", "icerik": "Merhaba! Ben ŞahAI. API login ve veri kontrolü tam korumalı hale getirildi."}
         ]
 
     for mesaj in st.session_state.mesajlar:
