@@ -2,6 +2,7 @@ import base64
 import gzip
 import json
 import sqlite3
+import time
 import urllib.request
 import xml.etree.ElementTree as ET
 from collections import Counter
@@ -563,7 +564,7 @@ elif sayfa == "Tedarikçiler & XML":
                     st.rerun()
 
 # ---------------------------------------------------------------
-# 3. SAYFA: TRENDRUUM ENTEGRASYONU (ULTRA GÜVENLİ PAKET GÖNDERİMİ)
+# 3. SAYFA: TRENDRUUM ENTEGRASYONU (CANLI İLERLEME ÇUBUKLU & LİMİTSİZ)
 # ---------------------------------------------------------------
 elif sayfa == "Trendruum Entegrasyonu":
     st.title("Trendruum Entegrasyonu ve Kolay ID Seçimi")
@@ -715,6 +716,8 @@ elif sayfa == "Trendruum Entegrasyonu":
     
     with c_sec1:
         st.subheader("2. Toplu Ürün Gönder (/products/bulk)")
+        gonderim_miktari = st.selectbox("Kaç Ürün Gönderilsin?", ["İlk 500 Ürün (Önerilen/Hızlı)", "İlk 1000 Ürün", "Tüm Veritabanı"], index=0)
+
         if st.button("📤 Trendruum'a Toplu Ürün Gönder", type="primary", key="create_tr_bulk"):
             if not t_api_key or not t_supplier_secret:
                 st.error("Lütfen API Key ve Secret bilgilerini girin.")
@@ -724,23 +727,28 @@ elif sayfa == "Trendruum Entegrasyonu":
                 conn = baglanti_kur()
                 df_db = pd.read_sql("SELECT * FROM urunler", conn)
                 conn.close()
+
+                if "500" in gonderim_miktari:
+                    df_db = df_db.head(500)
+                elif "1000" in gonderim_miktari:
+                    df_db = df_db.head(1000)
+
                 if df_db.empty:
                     st.warning("Veritabanında ürün bulunamadı.")
                 else:
                     try:
-                        with st.spinner("Oturum açılıyor ve ürünler 100'erli paketler halinde gönderiliyor..."):
-                            login_url = "https://api.trendruum.com/api/v1/integration/auth/login"
-                            login_res = requests.post(login_url, json={"client_id": t_api_key.strip(), "client_secret": t_supplier_secret.strip()}, timeout=30)
-                            
-                            login_json = {}
-                            try:
-                                login_json = login_res.json() if login_res.text else {}
-                            except Exception:
-                                pass
+                        login_url = "https://api.trendruum.com/api/v1/integration/auth/login"
+                        login_res = requests.post(login_url, json={"client_id": t_api_key.strip(), "client_secret": t_supplier_secret.strip()}, timeout=30)
+                        
+                        login_json = {}
+                        try:
+                            login_json = login_res.json() if login_res.text else {}
+                        except Exception:
+                            pass
 
-                            token = ""
-                            if isinstance(login_json, dict):
-                                token = login_json.get("data", {}).get("token") or login_json.get("token") or ""
+                        token = ""
+                        if isinstance(login_json, dict):
+                            token = login_json.get("data", {}).get("token") or login_json.get("token") or ""
 
                         if login_res.status_code == 200 and token:
                             target_url = "https://api.trendruum.com/api/v1/integration/products/bulk"
@@ -773,39 +781,37 @@ elif sayfa == "Trendruum Entegrasyonu":
                                     ]
                                 })
                             
-                            # 100'erli paketler halinde güvenli gönderim
                             paket_boyutu = 100
-                            basarili_paket = 0
-                            son_yanit = ""
-                            son_kod = 200
                             toplam_paket = (len(tum_urunler) + paket_boyutu - 1) // paket_boyutu
+                            basarili_paket = 0
+                            
+                            prog_bar = st.progress(0)
+                            status_text = st.empty()
+                            log_box = st.empty()
+                            
+                            detay_loglar = []
 
-                            for i in range(0, len(tum_urunler), paket_boyutu):
+                            for idx, i in enumerate(range(0, len(tum_urunler), paket_boyutu)):
                                 paket = tum_urunler[i:i + paket_boyutu]
+                                current_p = idx + 1
+                                status_text.info(f"⏳ **Paket {current_p} / {toplam_paket} gönderiliyor...** ({len(paket)} Ürün)")
+                                
                                 payload = {"products": paket}
                                 try:
-                                    response = requests.post(target_url, json=payload, headers=headers, timeout=60)
-                                    son_kod = response.status_code
-                                    son_yanit = response.text if response.text else "[Boş Yanıt]"
+                                    response = requests.post(target_url, json=payload, headers=headers, timeout=30)
                                     if response.status_code in [200, 202]:
                                         basarili_paket += 1
+                                        detay_loglar.append(f"✅ Paket {current_p}: Başarılı (HTTP {response.status_code})")
+                                    else:
+                                        detay_loglar.append(f"❌ Paket {current_p}: Hata (HTTP {response.status_code}) - {response.text[:150]}")
                                 except Exception as inner_e:
-                                    son_yanit = f"İstek Hatası: {inner_e}"
+                                    detay_loglar.append(f"⚠️ Paket {current_p}: Bağlantı Hatası - {inner_e}")
+                                
+                                prog_bar.progress(current_p / toplam_paket)
+                                log_box.code("\n".join(detay_loglar))
+                                time.sleep(0.1)
 
-                            parsed_res = son_yanit
-                            try:
-                                parsed_res = json.dumps(json.loads(son_yanit), ensure_ascii=False, indent=2)
-                            except Exception:
-                                pass
-
-                            log_text = f"""=== TOPLU GÖNDERİM RAPORU ({len(tum_urunler)} Ürün, {paket_boyutu}'erli paketler) ===
-BAŞARIYLA GÖNDERİLEN PAKET SAYISI: {basarili_paket} / {toplam_paket}
-SON SUNUCU DURUM KODU: {son_kod}
-SON SUNUCU YANITI:
-{parsed_res}
-"""
-                            st.session_state["tr_debug_log"] = log_text
-                            st.rerun()
+                            status_text.success(f"🎉 **Gönderim Tamamlandı!** {basarili_paket} / {toplam_paket} paket Trendruum kuyruğuna alındı.")
                         else:
                             st.error(f"Giriş Yapılamadı (HTTP {login_res.status_code}). Yanıt: {login_res.text}")
 
@@ -816,11 +822,6 @@ SON SUNUCU YANITI:
         st.subheader("3. Stok ve Fiyat Güncelleme")
         if st.button("🔄 Trendruum Stok/Fiyat Güncelle", key="sync_tr"):
             st.info("Logları aşağıdan kontrol edebilirsiniz.")
-
-    if "tr_debug_log" in st.session_state:
-        st.markdown("---")
-        st.subheader("🔍 Trendruum API İstek ve Yanıt Detayları")
-        st.text_area("Log Detayı", st.session_state["tr_debug_log"], height=350)
 
 # ---------------------------------------------------------------
 # 4. SAYFA: HEPSİBURADA ENTEGRASYONU
@@ -864,7 +865,7 @@ else:
 
     if "mesajlar" not in st.session_state:
         st.session_state.mesajlar = [
-            {"rol": "asistan", "icerik": "Merhaba! Ben ŞahAI. API yanıt koruması güçlendirildi."}
+            {"rol": "asistan", "icerik": "Merhaba! Ben ŞahAI. Canlı gönderim çubuğu aktif edildi."}
         ]
 
     for mesaj in st.session_state.mesajlar:
