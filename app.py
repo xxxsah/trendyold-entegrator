@@ -563,7 +563,7 @@ elif sayfa == "Tedarikçiler & XML":
                     st.rerun()
 
 # ---------------------------------------------------------------
-# 3. SAYFA: TRENDRUUM ENTEGRASYONU & DÜZELTİLMİŞ RESİM FORMATI
+# 3. SAYFA: TRENDRUUM ENTEGRASYONU (TÜM ÜRÜNLERİ GÖNDERME)
 # ---------------------------------------------------------------
 elif sayfa == "Trendruum Entegrasyonu":
     st.title("Trendruum Entegrasyonu ve Kolay ID Seçimi")
@@ -693,7 +693,7 @@ elif sayfa == "Trendruum Entegrasyonu":
                     st.warning("Veritabanında ürün bulunamadı.")
                 else:
                     try:
-                        with st.spinner("Oturum açılıyor ve ürünler gönderiliyor..."):
+                        with st.spinner("Oturum açılıyor ve TÜM ürünler gönderiliyor..."):
                             login_url = "https://api.trendruum.com/api/v1/integration/auth/login"
                             login_res = requests.post(login_url, json={"client_id": t_api_key, "client_secret": t_supplier_secret}, timeout=30)
                             login_json = login_res.json()
@@ -708,11 +708,10 @@ elif sayfa == "Trendruum Entegrasyonu":
                             }
                             
                             products_list = []
-                            for _, row in df_db.head(1).iterrows():
+                            # Tüm veritabanındaki ürünleri kapsayan döngü
+                            for _, row in df_db.iterrows():
                                 barkod = str(row["barkod"]).strip()
                                 gorsel_url = str(row["gorsel"]).strip()
-                                
-                                # Trendruum toplu yüklemede images dizisini düz metin URL listesi olarak bekler
                                 images_arr = [gorsel_url] if gorsel_url else ["https://via.placeholder.com/600"]
                                 
                                 products_list.append({
@@ -733,7 +732,7 @@ elif sayfa == "Trendruum Entegrasyonu":
                                 })
                             
                             payload = {"products": products_list}
-                            response = requests.post(target_url, json=payload, headers=headers, timeout=30)
+                            response = requests.post(target_url, json=payload, headers=headers, timeout=60)
                             res_body = response.text if response.text else "[Boş Yanıt]"
 
                             try:
@@ -741,10 +740,7 @@ elif sayfa == "Trendruum Entegrasyonu":
                             except Exception:
                                 parsed_res = res_body
 
-                            log_text = f"""=== GÖNDERİLEN PAYLOAD (İSTEK) ===
-{json.dumps(payload, ensure_ascii=False, indent=2)}
-
-=== BULK PRODUCTS RESPONSE (SUNUCU YANITI) ===
+                            log_text = f"""=== TÜM ÜRÜNLER İÇİN BULK PRODUCTS RESPONSE ===
 STATUS CODE: {response.status_code}
 RESPONSE BODY:
 {parsed_res}
@@ -809,7 +805,7 @@ else:
 
     if "mesajlar" not in st.session_state:
         st.session_state.mesajlar = [
-            {"rol": "asistan", "icerik": "Merhaba! Ben ŞahAI. Görsel alanı Trendruum'un toplu yükleme (`/products/bulk`) şemasına göre düz metin URL listesi olarak güncellendi."}
+            {"rol": "asistan", "icerik": "Merhaba! Ben ŞahAI. Tüm ürünlerinizi Trendruum'a toplu gönderebilirsiniz."}
         ]
 
     for mesaj in st.session_state.mesajlar:
@@ -818,7 +814,7 @@ else:
 
     kullanici_girdisi = st.chat_input("ŞahAI'ye bir şeyler sorun...")
     if kullanici_girdisi:
-        st.session_state.mesajlar.append({"rol": "kullanici", "icerik": kullnici_girdisi})
+        st.session_state.mesajlar.append({"rol": "kullanici", "icerik": kullanici_girdisi})
         with st.chat_message("kullanici"):
             st.markdown(kullanici_girdisi)
 
