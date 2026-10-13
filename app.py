@@ -16,7 +16,7 @@ import streamlit as st
 st.set_page_config(page_title="ŞahEntegre", page_icon="👑", layout="wide")
 
 # ---------------------------------------------------------------
-# VERİTABANI (SQLITE) YÖNETİMİ
+# VERİTABANI (SQLITE) YÖNETİMİ VE GÜNCELLEME
 # ---------------------------------------------------------------
 DB_DOSYA = Path(__file__).parent / "metentegre.db"
 
@@ -40,6 +40,11 @@ def veritabani_olustur():
             kategori TEXT
         )
     """)
+    # Eğer tablo daha önceden var ve kategori sütunu eksikse ekleyelim
+    try:
+        cursor.execute("ALTER TABLE urunler ADD COLUMN kategori TEXT")
+    except Exception:
+        pass
     conn.commit()
     conn.close()
 
@@ -575,7 +580,7 @@ elif sayfa == "Tedarikçiler & XML":
                     st.rerun()
 
 # ---------------------------------------------------------------
-# 3. SAYFA: TRENDRUUM ENTEGRASYONU (DİNAMİK KATEGORİ DESTEKLİ)
+# 3. SAYFA: TRENDRUUM ENTEGRASYONU
 # ---------------------------------------------------------------
 elif sayfa == "Trendruum Entegrasyonu":
     st.title("Trendruum Entegrasyonu ve Kolay ID Seçimi")
@@ -584,7 +589,6 @@ elif sayfa == "Trendruum Entegrasyonu":
     t_api_key = st.text_input("Trendruum API Key (Client ID)", type="password", value=ayarlar.get("trendruum_key", "A2f857dc-4829-4be0-b8f0-e75f23ef15c2"))
     t_supplier_secret = st.text_input("Trendruum API Secret (Client Secret)", type="password", value=ayarlar.get("trendruum_secret", "AItjHiLTDCdF47NmxT9fvvppo3UGGpxLAa7eV0ZS"))
     
-    st.caption("👇 **Aşağıdaki Kategori ID'si arama motorundan seçtiğiniz doğru kategorinin ID'sidir:**")
     t_category_id = st.text_input("Trendruum Category ID (24 haneli Object ID)", value=ayarlar.get("trendruum_category", "689f312ebc7c381f4a07f47f"))
     t_brand_id = st.text_input("Trendruum Brand ID (24 haneli Object ID)", value=ayarlar.get("trendruum_brand", "689f57d8bef381990805c0c0"))
 
@@ -602,7 +606,6 @@ elif sayfa == "Trendruum Entegrasyonu":
     
     # KATEGORİ VE MARKA BULUCU
     st.subheader("🔍 Kategori ve Marka Arama Aracı")
-    st.info("💡 **İpucu:** Babydoll/Fantazi Giyim gibi ürünleri göndermeden önce Kategori Arama kutusuna örn: **Babydoll** veya **Giyim** yazıp 'Kategorileri Getir'e basın. Seçtiğiniz kategori otomatik kaydedilir.")
     col_kesif1, col_kesif2 = st.columns(2)
 
     with col_kesif1:
@@ -660,12 +663,11 @@ elif sayfa == "Trendruum Entegrasyonu":
                     if liste:
                         df_kat = pd.DataFrame(liste)
                         st.dataframe(df_kat, use_container_width=True, hide_index=True)
-                        secilen_cat = st.selectbox("Aşağıdan Doğru Kategoriyi Seçin", df_kat["ID (Kopyala)"] + " - " + df_kat["Kategori Adı"])
+                        secilen_cat = st.selectbox("Aşağıdan Seçin", df_kat["ID (Kopyala)"] + " - " + df_kat["Kategori Adı"])
                         if secilen_cat:
-                            yeni_cat_id = secilen_cat.split(" - ")[0]
-                            ayarlar["trendruum_category"] = yeni_cat_id
+                            ayarlar["trendruum_category"] = secilen_cat.split(" - ")[0]
                             ayar_yaz(ayarlar)
-                            st.success(f"✅ Yeni Kategori ID ({yeni_cat_id}) başarıyla kaydedildi! Şimdi ürün gönderebilirsiniz.")
+                            st.success("Category ID kaydedildi.")
                     else:
                         st.warning("Hiç kategori bulunamadı.")
                 else:
@@ -896,7 +898,7 @@ else:
 
     if "mesajlar" not in st.session_state:
         st.session_state.mesajlar = [
-            {"rol": "asistan", "icerik": "Merhaba! Ben ŞahAI. Kategori eşleme rehberliği güncellendi."}
+            {"rol": "asistan", "icerik": "Merhaba! Ben ŞahAI. Veritabanı tablo güncelleme koruması eklendi."}
         ]
 
     for mesaj in st.session_state.mesajlar:
