@@ -1,6 +1,7 @@
 import base64
 import gzip
 import json
+import random
 import sqlite3
 import time
 import urllib.request
@@ -564,7 +565,7 @@ elif sayfa == "Tedarikçiler & XML":
                     st.rerun()
 
 # ---------------------------------------------------------------
-# 3. SAYFA: TRENDRUUM ENTEGRASYONU (HATA AYIKLAMA GÖRSELLEŞTİRME)
+# 3. SAYFA: TRENDRUUM ENTEGRASYONU (OTOMATİK BARKOD DÖNÜŞTÜRÜCÜ)
 # ---------------------------------------------------------------
 elif sayfa == "Trendruum Entegrasyonu":
     st.title("Trendruum Entegrasyonu ve Kolay ID Seçimi")
@@ -720,7 +721,7 @@ elif sayfa == "Trendruum Entegrasyonu":
 
         if st.button("📤 Trendruum'a Toplu Ürün Gönder", type="primary", key="create_tr_bulk"):
             if not t_api_key or not t_supplier_secret:
-                st.error("Lütfen API Key ve Secret bilgilerini girin.")
+                st.error("Lütfen API Key and Secret bilgilerini girin.")
             elif not t_category_id or not t_brand_id:
                 st.error("Lütfen Category ID ve Brand ID alanlarını doldurun.")
             else:
@@ -761,20 +762,27 @@ elif sayfa == "Trendruum Entegrasyonu":
                             }
                             
                             tum_urunler = []
-                            for _, row in df_db.iterrows():
-                                barkod = str(row["barkod"]).strip()
+                            for idx, row in df_db.iterrows():
+                                orijinal_kod = str(row["barkod"]).strip()
+                                
+                                # Trendruum standartlarına uygun barkod kontrolü (Sadece rakam ve en az 8 haneli olmalı)
+                                temiz_barkod = "".join(filter(str.isdigit, orijinal_kod))
+                                if len(temiz_barkod) < 8:
+                                    # Eğer barkod harf içeriyorsa veya çok kısaysa, model ID'yi baz alarak 12 haneli benzersiz sayısal barkod üretelim
+                                    temiz_barkod = f"869{abs(hash(orijinal_kod)) % 1000000000:09d}"
+
                                 gorsel_url = str(row["gorsel"]).strip()
                                 images_arr = [gorsel_url] if gorsel_url else ["https://via.placeholder.com/600"]
                                 
                                 tum_urunler.append({
                                     "name": str(row["urun_adi"]),
-                                    "model_code": barkod,
+                                    "model_code": orijinal_kod,
                                     "category_id": t_category_id.strip(),
                                     "brand_id": t_brand_id.strip(),
                                     "children_products": [
                                         {
-                                            "barcode": barkod,
-                                            "stock_code": barkod,
+                                            "barcode": temiz_barkod,  # Temizlenmiş sayısal standart barkod
+                                            "stock_code": orijinal_kod,
                                             "price": float(row["satis_fiyati"]),
                                             "stock": int(row["stok"]),
                                             "tax": 20,
@@ -783,7 +791,7 @@ elif sayfa == "Trendruum Entegrasyonu":
                                     ]
                                 })
                             
-                            paket_boyutu = 50  # Hata detayını net görmek için paket boyutunu küçük tutuyoruz
+                            paket_boyutu = 50
                             toplam_paket = (len(tum_urunler) + paket_boyutu - 1) // paket_boyutu
                             basarili_paket = 0
                             
@@ -803,9 +811,13 @@ elif sayfa == "Trendruum Entegrasyonu":
                                     response = requests.post(target_url, json=payload, headers=headers, timeout=30)
                                     if response.status_code in [200, 202]:
                                         basarili_paket += 1
-                                        detay_loglar.append(f"✅ Paket {current_p}: Başarılı (HTTP {response.status_code})")
+                                        try:
+                                            resp_json = response.json()
+                                            resp_str = json.dumps(resp_json, ensure_ascii=False, indent=2)
+                                        except Exception:
+                                            resp_str = response.text
+                                        detay_loglar.append(f"✅ Paket {current_p}: Başarılı (HTTP {response.status_code})\n{resp_str}")
                                     else:
-                                        # 422 hatasının detayını ekrana tam basalım
                                         try:
                                             err_json = response.json()
                                             err_str = json.dumps(err_json, ensure_ascii=False, indent=2)
@@ -873,7 +885,7 @@ else:
 
     if "mesajlar" not in st.session_state:
         st.session_state.mesajlar = [
-            {"rol": "asistan", "icerik": "Merhaba! Ben ŞahAI. 422 hata detayları log ekranına eklendi."}
+            {"rol": "asistan", "icerik": "Merhaba! Ben ŞahAI. Otomatik barkod temizleme ve standartlaştırma eklendi."}
         ]
 
     for mesaj in st.session_state.mesajlar:
@@ -882,7 +894,7 @@ else:
 
     kullanici_girdisi = st.chat_input("ŞahAI'ye bir şeyler sorun...")
     if kullanici_girdisi:
-        st.session_state.mesajlar.append({"rol": "kullanici", "icerik": kullnici_girdisi})
+        st.session_state.mesajlar.append({"rol": "kullanici", "icerik": kullanici_girdisi})
         with st.chat_message("kullanici"):
             st.markdown(kullanici_girdisi)
 
