@@ -560,7 +560,7 @@ elif sayfa == "Tedarikçiler & XML":
                     st.rerun()
 
 # ---------------------------------------------------------------
-# 3. SAYFA: TRENDRUUM ENTEGRASYONU (DOĞRU API URL İLE GÜNCELLENDİ)
+# 3. SAYFA: TRENDRUUM ENTEGRASYONU (GARANTİLİ YANIT GÖSTERİMİ)
 # ---------------------------------------------------------------
 elif sayfa == "Trendruum Entegrasyonu":
     st.title("Trendruum Entegrasyonu ve Ürün Yükleme")
@@ -591,7 +591,6 @@ elif sayfa == "Trendruum Entegrasyonu":
                 else:
                     try:
                         with st.spinner("Trendruum API'ye bağlanılıyor..."):
-                            # RESMİ DOKÜMANTASYONA GÖRE DOĞRU ENDPOINT URL
                             target_url = "https://api.trendruum.com/api/v1/integration/products"
                             headers = {
                                 "Authorization": f"Bearer {t_api_key}",
@@ -609,8 +608,13 @@ elif sayfa == "Trendruum Entegrasyonu":
                                     "images": [{"url": str(row["gorsel"])}] if row["gorsel"] else []
                                 })
                             payload = {"items": sample_items}
+                            
+                            # İstek atılıyor
                             response = requests.post(target_url, json=payload, headers=headers, timeout=30)
                             
+                            # Yanıtın boş dönme ihtimaline karşı metin kontrolü
+                            res_body = response.text if response.text else "[Sunucu boş yanıt döndürdü (Boş Body)]"
+
                             log_text = f"""=== TRENDRUUM REQUEST (DOĞRU URL) ===
 URL: {target_url}
 METHOD: POST
@@ -621,12 +625,12 @@ BODY: {json.dumps(payload, ensure_ascii=False, indent=2)}
 STATUS CODE: {response.status_code}
 RESPONSE HEADERS: {json.dumps(dict(response.headers), indent=2)}
 RESPONSE BODY:
-{response.text[:1500]}
+{res_body[:2000]}
 """
                             st.session_state["tr_debug_log"] = log_text
                             st.rerun()
                     except Exception as e:
-                        st.error(f"Hata oluştu: {e}")
+                        st.error(f"Bağlantı hatası oluştu: {e}")
 
     with c_sec2:
         st.subheader("2. Stok ve Fiyat Güncelleme")
@@ -711,6 +715,7 @@ elif sayfa == "İdefix Entegrasyonu":
                                 })
                             payload = {"products": sample_items}
                             response = requests.post(target_url, json=payload, headers=headers, timeout=30)
+                            res_body = response.text if response.text else "[Sunucu boş yanıt döndürdü]"
                             
                             log_text = f"""=== İDEFİX REQUEST (GÖNDERİLEN İSTEK) ===
 URL: {target_url}
@@ -722,7 +727,7 @@ BODY: {json.dumps(payload, ensure_ascii=False, indent=2)}
 STATUS CODE: {response.status_code}
 RESPONSE HEADERS: {json.dumps(dict(response.headers), indent=2)}
 RESPONSE BODY:
-{response.text[:1500]}
+{res_body[:2000]}
 """
                             st.session_state["idefix_debug_log"] = log_text
                             st.rerun()
@@ -774,7 +779,7 @@ else:
             s_u = df_s["t"].iloc[0] if not df_s.empty else 0
             cevap += f"Stokta aktif olan ürün sayınız: **{s_u:,}**."
         elif "hata" in girdi_lc or "404" in girdi_lc:
-            cevap += "Trendruum API temel URL'si dokümantasyona uygun olarak `https://api.trendruum.com/api/v1/integration/products` şeklinde güncellendi. Artık 404 hatası almadan doğrudan istek atabileceksiniz."
+            cevap += "Trendruum API yanıt kontrolü güçlendirildi. Artık sunucudan dönen Status Code ve Response Body mesajları log ekranında net bir şekilde görünecektir."
         else:
             cevap += f"'{kullanici_girdisi}' talebinizi anlıyorum. ŞahEntegre altyapısı tam gaz çalışıyor!"
         conn.close()
