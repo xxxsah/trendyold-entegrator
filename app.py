@@ -44,6 +44,7 @@ VARSAYILAN = {
     "kategori_eslesme": {},
     "kritik_esik": 0,        # 0 = kapalı; stok <= eşik ise 0 yapılır
     "oto_senkron": True,
+    "tr_oto_guncelle": False,
 }
 
 
@@ -321,6 +322,11 @@ def tumunu_senkronla():
         except Exception as e:
             log_yaz(ad, "HATA", e)
             sonuclar.append((ad, False, str(e)))
+    if ayarlar.get("tr_oto_guncelle") and any(x[1] for x in sonuclar):
+        try:
+            trendruum_oto_guncelle(ayarlar)
+        except Exception as e:
+            log_yaz("Trendruum", "HATA", e)
     return sonuclar
 
 
@@ -421,7 +427,7 @@ def trendruum_gonder(liste, token, ilerleme=None, paket=50):
                 art_arda = 0
                 loglar.append(f"✅ Paket {no}: {len(grup)} ürün gönderildi")
                 break
-            if r.status_code == 422:
+            if r.status_code in (422, 500):
                 try:
                     j = r.json()
                     metin = " ".join(map(str, (j.get("errors") or {}).get("errors", []))) or r.text
@@ -450,6 +456,67 @@ def trendruum_gonder(liste, token, ilerleme=None, paket=50):
     if var_olan:
         loglar.append(f"ℹ️ Toplam {len(var_olan)} ürün mağazada zaten kayıtlıydı (yeniden oluşturulmadı).")
     return basarili, toplam, loglar
+
+
+def trendruum_guncelle(df, token, ilerleme=None):
+    """Mevcut ürünlerin stok+fiyatını günceller (POST /products/bulk-update, en fazla 1000)."""
+    headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+    items = [{"barcode": sabit_barkod(r["barkod"]), "price": float(r["satis_fiyati"]),
+              "stock": int(r["stok"])} for _, r in df.iterrows() if r["satis_fiyati"] > 0]
+    toplam = max(1, (len(items) + 999) // 1000)
+    guncel, hata, ornek, loglar = 0, 0, [], []
+    for i in range(0, len(items), 1000):
+        no = i // 1000 + 1
+        grup = items[i:i + 1000]
+        r = None
+        for deneme in range(4):
+            try:
+                r = requests.post(f"{TR_BASE}/products/bulk-update", json={"products": grup},
+                                  headers=headers, timeout=120)
+            except Exception as e:
+                loglar.append(f"⚠️ Paket {no} bağlantı hatası: {e}")
+                r = None
+                time.sleep(2)
+                continue
+            if r.status_code == 429 or r.status_code >= 500:
+                time.sleep(2 * (deneme + 1))
+                continue
+            break
+        if r is None:
+            hata += len(grup)
+        elif r.status_code == 200:
+            try:
+                d = r.json().get("data") or {}
+            except Exception:
+                d = {}
+            guncel += int(d.get("updated_count", 0))
+            hata += int(d.get("failed_count", 0))
+            ornek += [str(e)[:200] for e in (d.get("errors") or [])[:3]]
+            loglar.append(f"✅ Paket {no}: {d.get('updated_count', 0)} güncellendi, {d.get('failed_count', 0)} hata")
+        else:
+            hata += len(grup)
+            loglar.append(f"❌ Paket {no}: HTTP {r.status_code} {r.text[:500]}")
+        if ilerleme:
+            ilerleme(no / toplam)
+    return guncel, hata, ornek[:5], loglar
+
+
+def trendruum_siparisler(token, durum="new", limit=50):
+    r = requests.get(f"{TR_BASE}/orders", params={"status": durum, "page": 1, "limit": limit},
+                     headers={"Authorization": f"Bearer {token}"}, timeout=30)
+    r.raise_for_status()
+    return r.json()
+
+
+def trendruum_oto_guncelle(ayarlar):
+    key, secret = kimlik(ayarlar, "trendruum_key"), kimlik(ayarlar, "trendruum_secret")
+    if not (key and secret):
+        return
+    with closing(baglan()) as c:
+        df = pd.read_sql("SELECT barkod, stok, satis_fiyati FROM urunler", c)
+    token = trendruum_token(key, secret)
+    g, h, _, _ = trendruum_guncelle(df, token)
+    log_yaz("Trendruum", "OK", f"{g} ürün güncellendi, {h} hata/bulunamadı")
 
 
 # ---------------------------------------------------------------
@@ -563,7 +630,7 @@ def gizli_input(etiket_, ad, parola=True):
 
 
 st.sidebar.title("👑 ŞahEntegre")
-st.sidebar.caption("Sürüm: v3 (barkod çakışma düzeltmesi)")
+st.sidebar.caption("Sürüm: v4 (stok/fiyat + sipariş)")
 sayfa = st.sidebar.radio("Menü", [
     "Anasayfa", "Ürünler", "Tedarikçiler & XML", "Trendruum", "Trendyol",
     "Hepsiburada", "İdefix", "Senkron Günlüğü", "🤖 ŞahAI",
@@ -771,20 +838,44 @@ elif sayfa == "Trendruum":
                     st.error(f"Hata: {e}")
 
     st.subheader("🔄 Stok / Fiyat Güncelle")
-    st.caption("Dikkat: bu düğme ürün oluşturma uç noktasını kullanır; mağazada zaten kayıtlı ürünler "
-               "güncellenmez, atlanır. Gerçek stok/fiyat güncellemesi için Trendruum'un güncelleme "
-               "uç noktası dokümanı gerekli.")
-    if st.button("Stok/Fiyatı Gönder"):
-        try:
-            df = urunleri_oku()
-            df = df[df["stok"] >= 0]
-            token = trendruum_token(key, secret)
-            liste, _ = trendruum_urun_listesi(df, ayarlar, brand, cat)
-            bar = st.progress(0)
-            ok, top, _ = trendruum_gonder(liste, token, lambda p, l: bar.progress(p))
-            st.success(f"{ok}/{top} paket gönderildi.")
-        except Exception as e:
-            st.error(f"Hata: {e}")
+    st.caption("Mağazadaki mevcut ürünlerin stok ve fiyatını toplu günceller. "
+               "Mağazada olmayan ürünler 'hata/bulunamadı' sayılır.")
+    oto_tr = st.toggle("Tedarikçi senkronundan sonra otomatik gönder", value=ayarlar.get("tr_oto_guncelle", False))
+    if oto_tr != ayarlar.get("tr_oto_guncelle", False):
+        ayarlar["tr_oto_guncelle"] = oto_tr
+        ayar_yaz(ayarlar)
+    if st.button("Stok/Fiyatı Şimdi Gönder"):
+        if not (key and secret):
+            st.error("API Key ve Secret gerekli.")
+        else:
+            try:
+                token = trendruum_token(key, secret)
+                bar = st.progress(0)
+                g, h, ornek, loglar = trendruum_guncelle(urunleri_oku(), token, lambda p: bar.progress(p))
+                st.success(f"{g} ürün güncellendi, {h} hatalı/bulunamadı.")
+                if ornek:
+                    st.code("\n".join(ornek))
+                st.code("\n".join(loglar[-10:]))
+            except Exception as e:
+                st.error(f"Hata: {e}")
+
+    st.subheader("🧾 Siparişler")
+    durum = st.selectbox("Durum", ["new", "in_progress", "shipped", "delivered", "completed", "cancelled", "returned", "all"])
+    if st.button("Siparişleri Getir"):
+        if not (key and secret):
+            st.error("API Key ve Secret gerekli.")
+        else:
+            try:
+                j = trendruum_siparisler(trendruum_token(key, secret), durum)
+                veri = j.get("data", j)
+                if isinstance(veri, dict):
+                    veri = next((v for v in veri.values() if isinstance(v, list)), [])
+                if veri:
+                    st.dataframe(pd.json_normalize(veri), use_container_width=True)
+                else:
+                    st.info("Bu durumda sipariş yok.")
+            except Exception as e:
+                st.error(f"Hata: {e}")
 
 # ---------------------------------------------------------------
 # TRENDYOL
