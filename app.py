@@ -4,6 +4,7 @@ import hashlib
 import hmac
 import json
 import os
+import re
 import sqlite3
 import threading
 import time
@@ -401,27 +402,53 @@ def trendruum_urun_listesi(df, ayarlar, brand_id, varsayilan_cat):
 def trendruum_gonder(liste, token, ilerleme=None, paket=50):
     headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
     toplam = max(1, (len(liste) + paket - 1) // paket)
-    loglar, basarili = [], 0
+    loglar, basarili, art_arda, var_olan = [], 0, 0, []
     for i in range(0, len(liste), paket):
         no = i // paket + 1
-        for deneme in range(3):  # geçici hatalarda yeniden dene
-            try:
-                r = requests.post(f"{TR_BASE}/products/bulk", json={"products": liste[i:i + paket]},
-                                  headers=headers, timeout=60)
-                if r.status_code in (200, 202):
-                    basarili += 1
-                    loglar.append(f"✅ Paket {no}: HTTP {r.status_code}")
-                    break
-                if r.status_code == 429 or r.status_code >= 500:
-                    time.sleep(2 * (deneme + 1))
-                    continue
-                loglar.append(f"❌ Paket {no}: HTTP {r.status_code} {r.text[:300]}")
+        grup = liste[i:i + paket]
+        for deneme in range(8):
+            if not grup:
                 break
+            try:
+                r = requests.post(f"{TR_BASE}/products/bulk", json={"products": grup},
+                                  headers=headers, timeout=60)
             except Exception as e:
                 loglar.append(f"⚠️ Paket {no} bağlantı hatası: {e}")
                 time.sleep(2)
+                continue
+            if r.status_code in (200, 202):
+                basarili += 1
+                art_arda = 0
+                loglar.append(f"✅ Paket {no}: {len(grup)} ürün gönderildi")
+                break
+            if r.status_code == 422:
+                try:
+                    j = r.json()
+                    metin = " ".join(map(str, (j.get("errors") or {}).get("errors", []))) or r.text
+                except Exception:
+                    metin = r.text
+                cakisan = set(re.findall(r"(\d{6,})\W{0,4}barkodu", metin))
+                var = [u for u in grup if u["children_products"][0]["barcode"] in cakisan]
+                if var:
+                    var_olan += [u["model_code"] for u in var]
+                    grup = [u for u in grup if u not in var]
+                    loglar.append(f"ℹ️ Paket {no}: {len(var)} ürün mağazada zaten kayıtlı, atlandı")
+                    continue
+            if r.status_code == 429 or r.status_code >= 500:
+                time.sleep(2 * (deneme + 1))
+                continue
+            loglar.append(f"❌ Paket {no}: HTTP {r.status_code} {r.text[:1500]}")
+            art_arda += 1
+            break
         if ilerleme:
             ilerleme(no / toplam, loglar)
+        if art_arda >= 3:
+            loglar.append("⛔ Üst üste 3 paket reddedildi, gönderim durduruldu.")
+            if ilerleme:
+                ilerleme(1.0, loglar)
+            break
+    if var_olan:
+        loglar.append(f"ℹ️ Toplam {len(var_olan)} ürün mağazada zaten kayıtlıydı (yeniden oluşturulmadı).")
     return basarili, toplam, loglar
 
 
@@ -466,15 +493,23 @@ def trendyol_stok_fiyat(seller, key, secret, df):
 # ---------------------------------------------------------------
 # ŞİFRE KORUMASI
 # ---------------------------------------------------------------
-def sifre_al():
-    return os.environ.get("APP_PASSWORD") or (st.secrets.get("APP_PASSWORD") if hasattr(st, "secrets") and _has_secrets() else None)
-
-
-def _has_secrets():
+def _secret_var(ad):
     try:
-        return "APP_PASSWORD" in st.secrets
+        return ad.upper() in st.secrets
     except Exception:
         return False
+
+
+def sifre_al():
+    s = os.environ.get("APP_PASSWORD")
+    if s:
+        return s
+    try:
+        if "APP_PASSWORD" in st.secrets:
+            return str(st.secrets["APP_PASSWORD"])
+    except Exception:
+        pass
+    return None
 
 
 sifre = sifre_al()
@@ -527,14 +562,8 @@ def gizli_input(etiket_, ad, parola=True):
     return v.strip()
 
 
-def _secret_var(ad):
-    try:
-        return ad.upper() in st.secrets
-    except Exception:
-        return False
-
-
 st.sidebar.title("👑 ŞahEntegre")
+st.sidebar.caption("Sürüm: v3 (barkod çakışma düzeltmesi)")
 sayfa = st.sidebar.radio("Menü", [
     "Anasayfa", "Ürünler", "Tedarikçiler & XML", "Trendruum", "Trendyol",
     "Hepsiburada", "İdefix", "Senkron Günlüğü", "🤖 ŞahAI",
@@ -742,8 +771,9 @@ elif sayfa == "Trendruum":
                     st.error(f"Hata: {e}")
 
     st.subheader("🔄 Stok / Fiyat Güncelle")
-    st.caption("Trendruum'un ayrı bir stok/fiyat endpoint'i dokümanınızda varsa bana verin; "
-               "şimdilik aynı bulk uç noktası ile (barkod sabit olduğu için kopya oluşmaz) güncellenir.")
+    st.caption("Dikkat: bu düğme ürün oluşturma uç noktasını kullanır; mağazada zaten kayıtlı ürünler "
+               "güncellenmez, atlanır. Gerçek stok/fiyat güncellemesi için Trendruum'un güncelleme "
+               "uç noktası dokümanı gerekli.")
     if st.button("Stok/Fiyatı Gönder"):
         try:
             df = urunleri_oku()
@@ -813,7 +843,10 @@ elif sayfa == "Senkron Günlüğü":
     st.title("Senkronizasyon Günlüğü")
     with closing(baglan()) as c:
         lg = pd.read_sql("SELECT zaman, tedarikci, durum, mesaj FROM senkron_log ORDER BY id DESC LIMIT 200", c)
-    st.dataframe(lg, use_container_width=True, hide_index=True) if not lg.empty else st.info("Kayıt yok.")
+    if lg.empty:
+        st.info("Kayıt yok.")
+    else:
+        st.dataframe(lg, use_container_width=True, hide_index=True)
 
 # ---------------------------------------------------------------
 # ŞahAI (basit, veriye dayalı)
