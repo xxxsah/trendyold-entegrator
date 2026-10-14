@@ -3,10 +3,12 @@ import gzip
 import json
 import random
 import sqlite3
+import threading
 import time
 import urllib.request
 import xml.etree.ElementTree as ET
 from collections import Counter
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import pandas as pd
@@ -206,6 +208,61 @@ def normalle(tedarikci, df, harita, marj, sabit_ek):
 
 
 # ---------------------------------------------------------------
+# ARKA PLAN OTOMATİK SENKRONİZASYON FONKSİYONU (GÜNDE 4 KEZ)
+# ---------------------------------------------------------------
+def arka_plan_senkronizasyon_islem():
+    try:
+        ayarlar_verisi = ayar_oku()
+        tedarikciler = {k: v for k, v in ayarlar_verisi.items() if k not in OZEL_SABITLER}
+        if not tedarikciler:
+            return
+
+        tum_veriler = []
+        for ad, bilgi in tedarikciler.items():
+            try:
+                ham_veri = indir(bilgi["link"])
+                df_hammadde = xml_oku(ham_veri)
+                marj = bilgi.get("marj", 30.0)
+                sabit_ek = bilgi.get("sabit_ek", 0.0)
+                islenmis = normalle(ad, df_hammadde, bilgi.get("harita", {}), marj, sabit_ek)
+                tum_veriler.append(islenmis)
+            except Exception:
+                pass
+
+        if tum_veriler:
+            birlesti = pd.concat(tum_veriler, ignore_index=True)
+            conn = baglanti_kur()
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM urunler")
+            
+            for _, row in birlesti.iterrows():
+                kat = row.get("Kategori", "Genel")
+                cursor.execute("""
+                    INSERT INTO urunler (tedarikci, barkod, urun_adi, stok, alis_fiyati, satis_fiyati, gorsel, kategori)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """, (row["Tedarikçi"], row["Barkod/SKU"], row["Ürün Adı"], row["Stok"], row["Alış Fiyatı"], row["Satış Fiyatı"], row["Görsel"], kat))
+            
+            conn.commit()
+            conn.close()
+    except Exception:
+        pass
+
+
+def arka_plan_dongusu():
+    # Her 6 saatte bir çalışır (Günde 4 kez: 24 / 4 = 6 saat)
+    while True:
+        time.sleep(6 * 3600)
+        arka_plan_senkronizasyon_islem()
+
+
+# Arka plan iş parçacığını bir kez başlatmak için kontrol
+if "arkaplan_baslatildi" not in st.session_state:
+    st.session_state.arkaplan_baslatildi = True
+    t = threading.Thread(target=arka_plan_dongusu, daemon=True)
+    t.start()
+
+
+# ---------------------------------------------------------------
 # KALICI AYARLAR
 # ---------------------------------------------------------------
 AYAR_DOSYA = Path(__file__).parent / "ayarlar.json"
@@ -214,7 +271,7 @@ OZEL_SABITLER = [
     "trendruum_key", "trendruum_secret", 
     "trendruum_category", "trendruum_brand",
     "idefix_satici_id", "idefix_token", "idefix_secret",
-    "kategori_eslesme"
+    "kategori_eslesme", "oto_senkronizasyon"
 ]
 
 VARSAYILAN_AYARLAR = {
@@ -231,7 +288,8 @@ VARSAYILAN_AYARLAR = {
     "idefix_satici_id": "27837",
     "idefix_token": "929c122e-87bd-4aba-a293-0c731bf4e5ff",
     "idefix_secret": "8c510c89-9d4c-4d36-b411-9024c0b7f42d",
-    "kategori_eslesme": {}
+    "kategori_eslesme": {},
+    "oto_senkronizasyon": True
 }
 
 def ayar_oku():
@@ -503,7 +561,11 @@ elif sayfa == "Tedarikçiler & XML":
     tedarikciler = {k: v for k, v in ayarlar.items() if k not in OZEL_SABITLER}
     if tedarikciler:
         st.markdown("---")
-        if st.button("🔄 Tüm XML'leri Çek ve Veritabanını Güncelle", type="primary"):
+        
+        # Otomatik Senkronizasyon Durum Bilgisi
+        st.success("🤖 **Otomatik Güncelleme Aktif:** Sistem günde 4 kez (her 6 saatte bir) arka planda XML'leri kontrol edip veritabanınızı otomatik günceller.")
+        
+        if st.button("🔄 Tüm XML'leri Çek ve Veritabanını Güncelle (Manuel)", type="primary"):
             tum_veriler = []
             with st.spinner("XML'ler indiriliyor ve veritabanı güncelleniyor..."):
                 for ad, bilgi in tedarikciler.items():
@@ -584,7 +646,7 @@ elif sayfa == "Tedarikçiler & XML":
                     st.rerun()
 
 # ---------------------------------------------------------------
-# 3. SAYFA: TRENDRUUM ENTEGRASYONU (ANA KATEGORİ BAZLI EŞLEME)
+# 3. SAYFA: TRENDRUUM ENTEGRASYONU
 # ---------------------------------------------------------------
 elif sayfa == "Trendruum Entegrasyonu":
     st.title("Trendruum Entegrasyonu ve Ana Kategori Eşleme")
@@ -605,22 +667,18 @@ elif sayfa == "Trendruum Entegrasyonu":
 
     st.markdown("---")
     
-    # ANA KATEGORİ EŞLEME YÖNETİCİSİ
     st.subheader("📂 Trendruum Ana Kategori Eşleme Yöneticisi")
-    st.info("💡 Sadece ana sektörler (EV & YAŞAM, ELEKTRONİK, SÜPERMARKET vb.) listelenir. Böylece tek tek uğraşmazsınız.")
+    st.info("💡 Sadece ana sektörler listelenir. Böylece tek tek uğraşmazsınız.")
 
     default_cat_id = st.text_input("Varsayılan Trendruum Kategori ID (Genel)", value=ayarlar.get("trendruum_category", "689f312ebc7c381f4a07f47f"))
     if default_cat_id != ayarlar.get("trendruum_category"):
         ayarlar["trendruum_category"] = default_cat_id
         ayar_yaz(ayarlar)
 
-    # Veritabanındaki kategorilerden sadece ANA kategorileri çekelim (örn: '>>>' öncesi)
     conn = baglanti_kur()
     try:
         df_katlar = pd.read_sql("SELECT DISTINCT kategori FROM urunler WHERE kategori IS NOT NULL AND kategori != ''", conn)
         ham_kategoriler = df_katlar["kategori"].tolist() if not df_katlar.empty else []
-        
-        # Sadece ana kategori adlarını alalım (Örn: "EV & YAŞAM >>> ... " -> "EV & YAŞAM")
         ana_kategoriler = sorted(list(set([k.split(">>>")[0].strip() for k in ham_kategoriler if k])))
     except Exception:
         ana_kategoriler = []
@@ -704,10 +762,8 @@ elif sayfa == "Trendruum Entegrasyonu":
                                 gorsel_url = str(row["gorsel"]).strip()
                                 images_arr = [gorsel_url] if gorsel_url else ["https://via.placeholder.com/600"]
                                 
-                                # Ürünün ana kategorisini alıyoruz (örn: "EV & YAŞAM")
                                 tam_kat = str(row.get("kategori", "")).strip()
                                 ana_kat = tam_kat.split(">>>")[0].strip() if tam_kat else ""
-                                
                                 hedef_cat_id = kategori_haritasi.get(ana_kat, varsayilan_cid)
 
                                 tum_urunler.append({
@@ -821,7 +877,7 @@ else:
 
     if "mesajlar" not in st.session_state:
         st.session_state.mesajlar = [
-            {"rol": "asistan", "icerik": "Merhaba! Ben ŞahAI. Kategori eşleme sistemi ana kategori bazlı olacak şekilde sadeleştirildi."}
+            {"rol": "asistan", "icerik": "Merhaba! Ben ŞahAI. Günde 4 kez otomatik arka plan senkronizasyonu sisteme eklendi."}
         ]
 
     for mesaj in st.session_state.mesajlar:
