@@ -91,8 +91,8 @@ def ayar_yaz(ayarlar):
 
 def kimlik(ayarlar, ad):
     env = os.environ.get(ad.upper())
-    if env:
-        return env.strip()
+    if env and str(env).strip():
+        return str(env).strip()
     try:
         if ad.upper() in st.secrets and str(st.secrets[ad.upper()]).strip():
             return str(st.secrets[ad.upper()]).strip()
@@ -750,7 +750,7 @@ def _pazara_gonder(ayarlar, pid, df, ilerleme=None):
     if pid == "n11":
         ok, log = n11_stok_fiyat(kimlik(ayarlar, "n11_key"), kimlik(ayarlar, "n11_secret"), df)
         return ok, 0, "\n".join(log)
-    raise RuntimeError("Bu pazar yeri için API bağlantısı yok.")
+    raise RuntimeError(f"Bu pazar yeri ({pid}) için henüz API gönderim entegrasyonu tanımlı değil.")
 
 def pazara_gonder(ayarlar, pid, df, ilerleme=None):
     ad_ = {"trendruum": "Trendruum", "trendyol": "Trendyol", "n11": "N11"}.get(pid, pid)
@@ -1046,7 +1046,7 @@ PAZAR = {
 CAP = {
     "trendruum": {"sync", "kritik", "barkod", "toplu", "durum"},
     "trendyol": {"sync", "kritik", "barkod"},
-    "n11": {"sync", "kritik", "barkod"},
+    "n11": {"sync", "kritik", "barkod", "toplu", "durum"},
 }
 ANA_MENU = [
     ("Anasayfa", "🏠 Anasayfa", "#dbeafe"),
@@ -1130,7 +1130,7 @@ def ac_kapa(pid):
     st.session_state["acik_pazar"] = None if st.session_state.get("acik_pazar") == pid else pid
 
 st.sidebar.title("👑 ŞahEntegre")
-st.sidebar.caption("Sürüm: v24 (Dev Genişletilmiş Tam Kararlı)")
+st.sidebar.caption("Sürüm: v25 (Kusursuz Bağlantı Düzeltmeli)")
 for kid, etiket_m, _ in ANA_MENU:
     st.sidebar.button(etiket_m, key=f"nav_{kid}", use_container_width=True,
                       type="primary" if st.session_state["sayfa"] == kid else "secondary",
@@ -1391,7 +1391,7 @@ def pazar_islemler(pid):
     ad = p["ad"]
     cap = CAP.get(pid, set())
     bagli = pazar_bagli(ayarlar, pid)
-    yok_mesaj = f"Bu işlem {ad} için henüz bağlı değil."
+    yok_mesaj = f"Bu işlem {ad} için henüz bağlı değil veya API entegrasyonu tanımlı değil."
 
     st.title(f"{p['ikon']} {ad} Tüm İşlemler")
     st.caption(f"{ad} mağazanızdaki ürünler, eşleşme durumları ve yönetim paneli.")
@@ -1450,7 +1450,16 @@ def pazar_islemler(pid):
                         st.error(f"Hata: {e}")
             elif islem == "toplu":
                 if "toplu" in cap and bagli:
-                    trendruum_toplu_panel()
+                    if pid == "trendruum":
+                        trendruum_toplu_panel()
+                    elif pid == "n11":
+                        if st.button("📤 N11'e Tüm Stok/Fiyatları Gönder", type="primary"):
+                            try:
+                                g, h, msg = pazara_gonder(ayarlar, "n11", urunleri_oku())
+                                st.success(f"{g} ürün N11 görev kuyruğuna iletildi.")
+                                st.code(msg)
+                            except Exception as e:
+                                st.error(f"Hata: {e}")
                 else:
                     st.info(yok_mesaj)
             elif islem == "kargo":
@@ -1486,7 +1495,7 @@ def pazar_islemler(pid):
     if not bagli:
         st.warning(f"⚠️ {ad} mağazası henüz bağlanmadı. Lütfen sol menüden ilgili pazar yerinin 'Genel Ayarları' bölümüne giderek API anahtarlarınızı girin.")
 
-    if pid in ("trendruum", "trendyol") and bagli:
+    if pid in ("trendruum", "trendyol", "n11") and bagli:
         with st.expander("🧾 Siparişler"):
             siparis_paneli(pid)
 
@@ -1496,225 +1505,4 @@ def pazar_ayar(pid):
     for etk, anahtar, parola in p["alanlar"]:
         gizli_input(etk, anahtar, parola)
     if pid in ("trendruum", "trendyol", "n11"):
-        if st.button("🔌 Bağlantı Testi", key=f"bt_{pid}"):
-            ok_, msg_ = baglanti_testi(ayarlar, pid)
-            (st.success if ok_ else st.error)(msg_)
-    st.markdown("### 💰 Fiyat Kuralları")
-    pa = ayarlar.setdefault("pazar_ayarlari", {}).setdefault(pid, {})
-    kar = st.number_input("Kâr marjı (%)", 0.0, 500.0, float(pa.get("kar_marji", 0.0)), 1.0, key=f"kar_{pid}")
-    kargo = st.number_input("Sabit kargo fiyatı (TL)", 0.0, 5000.0, float(pa.get("sabit_kargo", 0.0)), 5.0, key=f"kargo_{pid}")
-    artis = st.number_input("Ek fiyat artışı (%)", 0.0, 100.0, float(pa.get("fiyat_artis", 0.0)), 0.5, key=f"artis_{pid}")
-    if (kar, kargo, artis) != (float(pa.get("kar_marji", 0.0)), float(pa.get("sabit_kargo", 0.0)), float(pa.get("fiyat_artis", 0.0))):
-        pa["kar_marji"], pa["sabit_kargo"], pa["fiyat_artis"] = kar, kargo, artis
-        ayar_yaz(ayarlar)
-        st.success("Fiyat kuralları kaydedildi.")
-    if pid == "trendruum":
-        st.markdown("---")
-        trendruum_marka_kategori()
-
-def pazar_ai(pid):
-    p = PAZAR[pid]
-    st.title(f"🤖 {p['ad']} AI Soru Cevap")
-    anahtar = gizli_input("Claude API Anahtarı (ANTHROPIC_API_KEY)", "anthropic_api_key")
-    soru = st.text_area("Müşteri sorusu", key=f"ai_soru_{pid}")
-    if st.button("✨ Cevap Öner", type="primary", key=f"ai_btn_{pid}"):
-        if not anahtar:
-            st.error("Claude API anahtarı gerekli.")
-        elif not soru.strip():
-            st.warning("Soru yazın.")
-        else:
-            try:
-                st.session_state[f"ai_cevap_{pid}"] = ai_cevap(soru.strip(), "", anahtar)
-            except Exception as e:
-                st.error(f"Hata: {e}")
-    cevap = st.session_state.get(f"ai_cevap_{pid}")
-    if cevap:
-        st.code(cevap, language=None)
-
-def pazar_siparis(pid):
-    p = PAZAR[pid]
-    ad = p["ad"]
-    st.markdown(f'<div style="background:{p["renk"]};color:#fff;border-radius:12px;padding:14px 16px;'
-                f'font-size:20px;font-weight:800;">{p["ikon"]} {ad} Siparişleri</div>', unsafe_allow_html=True)
-    if pid not in CAP or not pazar_bagli(ayarlar, pid):
-        st.warning("Bu pazar yeri için API bağlantısı yapılmadı veya bilgiler eksik.")
-        return
-    if st.button("🔄 Siparişleri Yeniden Çek", type="primary", key=f"sp_cek_{pid}"):
-        try:
-            with st.spinner("Siparişler çekiliyor..."):
-                st.session_state[f"sip_{pid}"] = siparis_cek(ayarlar, pid)
-        except Exception as e:
-            st.error(f"Çekilemedi: {e}")
-    liste = st.session_state.get(f"sip_{pid}")
-    if liste is None:
-        st.info("Siparişleri çekmek için düğmeye basın.")
-        return
-    for i, o in enumerate(liste, 1):
-        with st.container(border=True):
-            st.markdown(f"**{i}) 📦 {o['no']}** · {o['tarih']} · **{DURUM_ETIKET.get(o['durum'], o['durum'])}**")
-            st.markdown(f"**Alıcı:** {o['alici']}  \n**Adres:** {o['adres']}")
-            for u in o["urunler"]:
-                st.markdown(f"> **{u['ad']}** (SKU: `{u['sku']}` · Adet: **{u['adet']}**)")
-            if o["tutar"]:
-                st.markdown(f"### {o['tutar']} ₺")
-            if st.button("📦 Gönderime Hazırla", key=f"{pid}_{o['id']}_h"):
-                try:
-                    kod, yanit = siparis_eylem(ayarlar, o, "hazirla")
-                    (st.success if kod in (200, 201, 202, 204) else st.error)(f"HTTP {kod}: {yanit}")
-                except Exception as e:
-                    st.error(f"Hata: {e}")
-
-if sayfa == "Anasayfa":
-    st.title("👑 Mağaza ve Pazar Yeri Özeti")
-    df = urunleri_oku()
-    
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Toplam Ürün", f"{len(df):,}")
-    c2.metric("Stokta Olanlar", f"{(df['stok'] > 0).sum():,}" if not df.empty else "0")
-    c3.metric("Kritik Stok", f"{df['stok'].between(1, 2).sum():,}" if not df.empty else "0")
-    c4.metric("Tedarikçi", len(ayarlar["tedarikciler"]))
-
-    st.markdown("### 🛒 Pazar Yeri Durumları")
-    pazar_listesi = list(PAZAR.items())
-    for i in range(0, len(pazar_listesi), 2):
-        cols = st.columns(2)
-        for j in range(2):
-            if i + j < len(pazar_listesi):
-                pid_, p_ = pazar_listesi[i + j]
-                with cols[j]:
-                    bagli = pazar_bagli(ayarlar, pid_)
-                    durum_metin = "🟢 Bağlı ve Aktif" if bagli else "🔴 API Bilgisi Bekliyor"
-                    st.markdown(f"""
-                        <div style="background:{p_['pastel']};border-radius:14px;padding:14px;border-left:6px solid {p_['renk']};margin-bottom:10px;box-shadow:0 2px 6px rgba(0,0,0,0.06);">
-                            <h4 style="margin:0;color:#1e293b;font-size:16px;">{p_['ikon']} {p_['ad']}</h4>
-                            <p style="margin:6px 0 0 0;font-weight:600;color:#475569;font-size:13px;">{durum_metin}</p>
-                        </div>
-                    """, unsafe_allow_html=True)
-                    if st.button("Yönet / İşlemler", key=f"kutu_git_{pid_}", use_container_width=True):
-                        git_pazar(pid_, "islemler")
-                        st.rerun()
-
-elif sayfa == "Destek":
-    st.title("🛟 Destek Taleplerim")
-    with st.expander("➕ Yeni Talep"):
-        konu = st.text_input("Konu", key="d_konu")
-        msj = st.text_area("Mesaj", key="d_msj")
-        if st.button("Kaydet", key="d_kaydet", type="primary"):
-            if konu.strip():
-                with closing(baglan()) as c:
-                    c.execute("INSERT INTO destek (tarih, konu, mesaj, durum) VALUES (?,?,?,?)",
-                              (datetime.now().strftime("%Y-%m-%d %H:%M"), konu.strip(), msj.strip(), "Açık"))
-                    c.commit()
-                st.rerun()
-    with closing(baglan()) as c:
-        satirlar = c.execute("SELECT id, tarih, konu, mesaj, durum FROM destek ORDER BY id DESC").fetchall()
-    for rid, tarih, konu, mesaj, durum in satirlar:
-        with st.container(border=True):
-            st.markdown(f"**#{rid} · {konu}** ({tarih})")
-            if mesaj:
-                st.write(mesaj)
-
-elif sayfa == "Bildirim":
-    st.title("🔔 Bildirimler")
-    with closing(baglan()) as c:
-        satirlar = c.execute("SELECT zaman, tedarikci, durum, mesaj FROM senkron_log ORDER BY id DESC LIMIT 50").fetchall()
-    for zaman, ted, durum, mesaj in satirlar:
-        (st.success if durum == "OK" else st.error)(f"{zaman} · {ted}: {mesaj}")
-
-elif sayfa == "Duyuru":
-    st.title("📣 Duyurular")
-    with closing(baglan()) as c:
-        satirlar = c.execute("SELECT id, tarih, baslik, icerik FROM duyurular ORDER BY id DESC").fetchall()
-    for rid, tarih, baslik, icerik in satirlar:
-        with st.container(border=True):
-            st.markdown(f"**📣 {baslik}** ({tarih})")
-            if icerik:
-                st.write(icerik)
-
-elif sayfa == "Urunler":
-    st.title("📦 Sistemdeki Ürünler")
-    df = urunleri_oku()
-    if df.empty:
-        st.info("Henüz ürün yok. Tedarikçi XML'i senkronize edin.")
-    else:
-        toplam_u = len(df)
-        stoktaki_u = (df['stok'] > 0).sum()
-        
-        st.markdown(f"""
-            <div style="background:#1e293b;padding:10px 14px;border-radius:10px;border:1px solid #334155;margin-bottom:14px;color:#f8fafc;text-align:center;">
-                <span>📊 Toplam Ürün: <b>{toplam_u:,}</b> | Stokta Olan: <b>{stoktaki_u:,}</b></span>
-            </div>
-        """, unsafe_allow_html=True)
-        
-        col_b1, col_b2 = st.columns(2)
-        with col_b1:
-            if st.button("🔄 Ürünleri Güncelle", use_container_width=True, type="primary"):
-                with st.spinner("Güncelleniyor..."):
-                    tumunu_senkronla()
-                st.success("Tüm ürünler güncellendi!")
-                st.rerun()
-        with col_b2:
-            if st.button("💰 Fiyatları Kontrol Et", use_container_width=True):
-                st.info("Fiyat kuralları aktif ve güncel.")
-
-        st.markdown("---")
-        
-        arama = st.text_input("🔍 Ürün Adı veya Barkod ile Ara", key="urun_arama")
-        filt_df = df
-        if arama.strip():
-            q = arama.strip().lower()
-            filt_df = df[df["urun_adi"].str.lower().str.contains(q) | df["barkod"].str.lower().str.contains(q)]
-
-        st.caption("Ürün Kartları Listesi")
-        for idx, row in filt_df.head(100).iterrows():
-            with st.container(border=True):
-                c_img, c_det = st.columns([1, 3])
-                with c_img:
-                    g_url = str(row["gorsel"]).strip()
-                    if g_url.startswith("http"):
-                        st.markdown(f'<div style="display:flex;justify-content:center;"><img src="{g_url}" style="max-height:85px;border-radius:6px;object-fit:contain;"></div>', unsafe_allow_html=True)
-                    else:
-                        st.markdown("🖼️ *(Görsel yok)*")
-                with c_det:
-                    st.markdown(f"<div style='font-size:14px;font-weight:700;color:#1e3a8a;margin-bottom:2px;'>{row['urun_adi']}</div>", unsafe_allow_html=True)
-                    st.markdown(f"<div style='font-size:12px;color:#475569;'>Barkod: <b>`{row['barkod']}`</b> | Tedarikçi: <b>{row['tedarikci']}</b></div>", unsafe_allow_html=True)
-                    st.markdown(f"<div style='font-size:12px;color:#475569;'>Kategori: {row['kategori']} | Stok: <b>{row['stok']}</b> | Fiyat: <b style='color:#047857;'>{row['satis_fiyati']:.2f} ₺</b></div>", unsafe_allow_html=True)
-
-elif sayfa == "Kritik":
-    st.title("🔄 Oto Kritik Stok")
-    esik = st.number_input("Kritik stok eşiği", 1, 50, int(ayarlar.get("kritik_esik") or 2), key="kr_esik")
-    with closing(baglan()) as c:
-        df_k = pd.read_sql("SELECT gorsel, barkod, urun_adi, stok, satis_fiyati FROM urunler WHERE stok > 0 AND stok <= ?",
-                           c, params=(int(esik),))
-    st.metric("Eşik altındaki ürün", f"{len(df_k):,}")
-    if not df_k.empty:
-        for idx, row in df_k.iterrows():
-            with st.container(border=True):
-                c_img, c_det = st.columns([1, 3])
-                with c_img:
-                    if str(row["gorsel"]).startswith("http"):
-                        st.markdown(f'<div style="display:flex;justify-content:center;"><img src="{row["gorsel"]}" style="max-height:80px;border-radius:6px;object-fit:contain;"></div>', unsafe_allow_html=True)
-                with c_det:
-                    st.markdown(f"<div style='font-size:14px;font-weight:700;color:#1e3a8a;'>{row['urun_adi']}</div>", unsafe_allow_html=True)
-                    st.markdown(f"<div style='font-size:12px;color:#475569;'>Barkod: `{row['barkod']}` | Stok: <b>{row['stok']}</b> | Fiyat: <b>{row['satis_fiyati']:.2f} ₺</b></div>", unsafe_allow_html=True)
-
-elif sayfa == "Ayarlar":
-    st.title("⚙️ Ayarlar")
-    t1, t2, t3 = st.tabs(["Tedarikçiler & XML", "Genel", "Senkron Günlüğü"])
-    with t1:
-        tedarikci_sayfasi()
-    with t2:
-        genel_ayarlar()
-    with t3:
-        gunluk_sayfasi()
-
-elif ":" in sayfa:
-    pid_, alt_ = sayfa.split(":", 1)
-    if pid_ in PAZAR:
-        {"siparis": pazar_siparis, "islemler": pazar_islemler, "ayar": pazar_ayar, "ai": pazar_ai}.get(alt_, pazar_islemler)(pid_)
-    else:
-        git("Anasayfa")
-        st.rerun()
-else:
-    git("Anasayfa")
-    st.rerun()
+        if st.button("🔌 Bağlantı Testi",
