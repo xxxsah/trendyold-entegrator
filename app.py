@@ -328,7 +328,6 @@ def trendruum_token(key, secret):
     return token
 
 def trendruum_urun_listesi(df, ayarlar, brand_id, varsayilan_cat):
-    harita = ayarlar.get("kategori_eslesme", {})
     liste, atlanan = [], 0
     for _, row in df.iterrows():
         gorsel = str(row["gorsel"]).strip()
@@ -336,12 +335,11 @@ def trendruum_urun_listesi(df, ayarlar, brand_id, varsayilan_cat):
             atlanan += 1
             continue
         kod = str(row["barkod"]).strip()
-        ana = str(row.get("kategori", "")).split(">>>")[0].strip()
         liste.append({
             "name": str(row["urun_adi"]),
             "model_code": kod,
-            "category_id": harita.get(ana) or varsayilan_cat,
-            "brand_id": str(brand_id),
+            "category_id": str(varsayilan_cat).strip(),
+            "brand_id": str(brand_id).strip(),
             "children_products": [{
                 "barcode": sabit_barkod(kod),
                 "stock_code": kod,
@@ -556,9 +554,9 @@ elif "Tüm İşlemler" in sayfa:
                 tr_key = kimlik(ayarlar, "trendruum_key") or p_ayar_veri.get("api_key")
                 tr_secret = kimlik(ayarlar, "trendruum_secret") or p_ayar_veri.get("servis_anahtari")
                 tr_brand = p_ayar_veri.get("magaza_marka") or kimlik(ayarlar, "trendruum_brand")
-                cat = kimlik(ayarlar, "trendruum_category") or "0"
+                cat_id = p_ayar_veri.get("kategori_id") or kimlik(ayarlar, "trendruum_category")
 
-                if tr_key and tr_secret and tr_brand:
+                if tr_key and tr_secret and tr_brand and cat_id:
                     try:
                         token = trendruum_token(tr_key, tr_secret)
                         df = urunleri_oku()
@@ -566,14 +564,14 @@ elif "Tüm İşlemler" in sayfa:
                         if artiss > 0:
                             df["satis_fiyati"] = df["satis_fiyati"] * (1 + artiss / 100)
                         
-                        liste, atlanan = trendruum_urun_listesi(df, ayarlar, tr_brand, cat)
+                        liste, atlanan = trendruum_urun_listesi(df, ayarlar, tr_brand, cat_id)
                         bar, kutu = st.progress(0), st.empty()
                         ok, top, loglar = trendruum_gonder(liste, token, lambda p, l: (bar.progress(p), kutu.code("\n".join(l[-10:]))))
                         st.success(f"Trendruum Toplu Gönderim Tamamlandı: {ok}/{top} paket başarılı.")
                     except Exception as e:
                         st.error(f"Hata: {e}")
                 else:
-                    st.error("Lütfen Genel Ayarlar kısmından API Key (Client ID) ve Servis Anahtarı (API Secret) bilgilerini ayrı ayrı doldurun.")
+                    st.error("Lütfen Genel Ayarlar kısmından API Key, API Secret, Mağaza Marka ve 24 haneli Kategori ObjectId değerini eksiksiz doldurun.")
             else:
                 st.warning(f"{pazar} toplu ürün gönderimi aktif modüldür.")
     with col_i2:
@@ -623,14 +621,15 @@ elif "Genel Ayarlar" in sayfa:
     ayarlar.setdefault("pazar_ayarlari", {})
     p_ayar = ayarlar["pazar_ayarlari"].setdefault(pazar, {
         "magaza_id": "", "api_key": "", "servis_anahtari": "", "magaza_marka": "",
-        "sabit_kargo": 0.0, "satis_orani": 30.0, "fiyat_artis": 0.0
+        "kategori_id": "", "sabit_kargo": 0.0, "satis_orani": 30.0, "fiyat_artis": 0.0
     })
 
     st.markdown("### 🔑 Mağaza ve Servis Bilgileri")
     mid = st.text_input("Mağaza ID / Seller ID", value=p_ayar.get("magaza_id", ""))
     apikey = st.text_input("API Key (Client ID)", value=p_ayar.get("api_key", kimlik(ayarlar, f"{pazar.lower()}_key")))
     sanahtar = st.text_input("Servis Anahtarı / API Secret (Client Secret)", value=p_ayar.get("servis_anahtari", kimlik(ayarlar, f"{pazar.lower()}_secret")), type="password")
-    marka = st.text_input("Mağaza Marka Adı", value=p_ayar.get("magaza_marka", ""))
+    marka = st.text_input("Mağaza Marka ID / Adı", value=p_ayar.get("magaza_marka", ""))
+    cat_id = st.text_input("Varsayılan Kategori ID (24 haneli ObjectId)", value=p_ayar.get("kategori_id", kimlik(ayarlar, f"{pazar.lower()}_category")))
 
     st.markdown("### 💰 Kargo ve Kâr Oranı Kuralları")
     sabit_kargo = st.number_input("Sabit Kargo Fiyatı (TL)", 0.0, 1000.0, float(p_ayar.get("sabit_kargo", 0.0)))
@@ -643,6 +642,7 @@ elif "Genel Ayarlar" in sayfa:
             "api_key": apikey.strip(),
             "servis_anahtari": sanahtar.strip(),
             "magaza_marka": marka.strip(),
+            "kategori_id": cat_id.strip(),
             "sabit_kargo": sabit_kargo,
             "satis_orani": satis_orani,
             "fiyat_artis": fiyat_artis
@@ -652,6 +652,7 @@ elif "Genel Ayarlar" in sayfa:
             ayarlar["kimlik"]["trendruum_key"] = apikey.strip()
             ayarlar["kimlik"]["trendruum_secret"] = sanahtar.strip()
             ayarlar["kimlik"]["trendruum_brand"] = marka.strip()
+            ayarlar["kimlik"]["trendruum_category"] = cat_id.strip()
         
         ayar_yaz(ayarlar)
         st.success(f"{pazar} entegrasyon ayarları başarıyla kaydedildi!")
