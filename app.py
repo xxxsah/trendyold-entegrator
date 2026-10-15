@@ -2079,3 +2079,69 @@ elif ":" in sayfa:
 else:
     st.session_state["sayfa"] = "Anasayfa"
     st.rerun()
+import requests
+import time
+import xml.etree.ElementTree as ET
+from flask import Flask, jsonify, request
+
+app = Flask(__name__)
+
+# --- N11 ENTEGRASYON SINIFI ---
+class N11IntegrationSystem:
+    def __init__(self, app_key, app_secret):
+        self.app_key = app_key
+        self.app_secret = app_secret
+        self.base_url = "https://api.n11.com/ws/"
+        
+    def authenticate_payload(self, data_dict):
+        """API istekleri için kimlik doğrulama bilgilerini ekler."""
+        auth = {
+            "appKey": self.app_key,
+            "appSecret": self.app_secret
+        }
+        data_dict.update(auth)
+        return data_dict
+
+    def send_products_in_batches(self, product_list, batch_size=50):
+        """
+        Ürünleri küçük paketler halinde (batch) göndererek API kotasını 
+        ve sunucu limitlerini korur.
+        """
+        total_products = len(product_list)
+        print(f"Toplam {total_products} ürün n11'e aktarılıyor...")
+
+        for i in range(0, total_products, batch_size):
+            batch = product_list[i:i + batch_size]
+            try:
+                response = self._post_batch_to_n11(batch)
+                if response.get("status") == "success":
+                    print(f"[{i} - {i+len(batch)}] ürün başarıyla senkronize edildi.")
+                else:
+                    print(f"[{i} - {i+len(batch)}] aralığında hata: {response.get('message')}")
+                
+                # API kotasını ve sunucuyu yormamak için kısa bir bekleme
+                time.sleep(0.5)
+            except Exception as e:
+                print(f"Bağlantı veya İstisna Hatası: {str(e)}")
+
+    def _post_batch_to_n11(self, batch_data):
+        payload = self.authenticate_payload({"products": batch_data})
+        # Gerçek n11 API istek/servis bağlantısı burada yapılır
+        return {"status": "success", "message": "OK"}
+
+
+# --- WEB ROUTE / TETİKLEME NOKTASI ---
+@app.route('/sync-n11', methods=['POST'])
+def trigger_sync():
+    # Kendi n11 API anahtarını ve secret bilgisini buraya yazabilirsin
+    n11 = N11IntegrationSystem(app_key="SENIN_API_ANAHTARIN", app_secret="SENIN_API_SECRET_IN")
+    
+    # XML veya veritabanından aldığın ürün listesini buraya bağlayacaksın
+    # ornek_urunler = [...] 
+    # n11.send_products_in_batches(ornek_urunler)
+    
+    return jsonify({"status": "started", "message": "Senkronizasyon süreci başlatıldı."})
+
+
+if __name__ == '__main__':
+    app.run(debug=True, host='0.0.0.0', port=5000)
