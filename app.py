@@ -46,6 +46,7 @@ VARSAYILAN = {
     "oto_senkron": True,
     "tr_oto_guncelle": False,
     "ty_oto_guncelle": False,
+    "n11_oto_guncelle": False,
     "pazar_ayarlari": {},
 }
 
@@ -371,7 +372,8 @@ def tumunu_senkronla(oto=True):
             sonuclar.append((ad, False, str(e)))
     if oto and any(x[1] for x in sonuclar):
         for ad_, anahtar_, fonk_ in (("Trendruum", "tr_oto_guncelle", trendruum_oto_guncelle),
-                                      ("Trendyol", "ty_oto_guncelle", trendyol_oto_guncelle)):
+                                      ("Trendyol", "ty_oto_guncelle", trendyol_oto_guncelle),
+                                      ("N11", "n11_oto_guncelle", n11_oto_guncelle)):
             if ayarlar.get(anahtar_):
                 try:
                     fonk_(ayarlar)
@@ -691,6 +693,73 @@ def trendyol_stok_fiyat(seller, key, secret, df):
     return ok, log
 
 
+N11_BASE = "https://api.n11.com"
+
+
+def n11_header(key, secret):
+    return {"appKey": key, "appSecret": secret, "Content-Type": "application/json"}
+
+
+def n11_stok_fiyat(key, secret, df):
+    """POST /ms/product/tasks/price-stock-update (en fazla 1000 SKU). stockCode = barkod/SKU sütunumuz."""
+    skular = []
+    for _, r in df.iterrows():
+        if r["satis_fiyati"] > 0:
+            fiyat = round(float(r["satis_fiyati"]), 2)
+            skular.append({"stockCode": str(r["barkod"]), "listPrice": fiyat, "salePrice": fiyat,
+                           "quantity": int(r["stok"]), "currencyType": "TL"})
+    ok, log, ok_b, hata_b = 0, [], [], []
+    for i in range(0, len(skular), 1000):
+        grup = skular[i:i + 1000]
+        no = i // 1000 + 1
+        try:
+            r = requests.post(f"{N11_BASE}/ms/product/tasks/price-stock-update",
+                              json={"payload": {"integrator": "SahEntegre", "skus": grup}},
+                              headers=n11_header(key, secret), timeout=120)
+            j = r.json() if r.text else {}
+        except Exception as e:
+            hata_b += [x["stockCode"] for x in grup]
+            log.append(f"⚠️ Paket {no} bağlantı hatası: {e}")
+            continue
+        if r.status_code == 200 and str(j.get("status", "")).upper() != "REJECT":
+            ok += len(grup)
+            ok_b += [x["stockCode"] for x in grup]
+            log.append(f"✅ Paket {no}: görev kuyruğa alındı (id {j.get('id')}) {'; '.join(j.get('reasons') or [])}")
+        else:
+            hata_b += [x["stockCode"] for x in grup]
+            log.append(f"❌ Paket {no}: HTTP {r.status_code} {r.text[:400]}")
+    try:
+        pazar_isaretle("n11", ok_b, hata_b)
+    except Exception:
+        pass
+    return ok, log
+
+
+def n11_oto_guncelle(ayarlar):
+    k_, x_ = kimlik(ayarlar, "n11_key"), kimlik(ayarlar, "n11_secret")
+    if not (k_ and x_):
+        return
+    with closing(baglan()) as c:
+        df = pd.read_sql("SELECT barkod, stok, satis_fiyati FROM urunler", c)
+    ok, _ = n11_stok_fiyat(k_, x_, df)
+    log_yaz("N11", "OK", f"{ok} kalem görev kuyruğuna alındı")
+
+
+def n11_siparisler(key, secret, durum, sayfa_siniri=3):
+    """GET /rest/delivery/v1/shipmentPackages (status tek değer alır)."""
+    sonuc = []
+    for sayfa_ in range(sayfa_siniri):
+        r = requests.get(f"{N11_BASE}/rest/delivery/v1/shipmentPackages",
+                         params={"status": durum, "page": sayfa_, "size": 100, "orderByDirection": "DESC"},
+                         headers=n11_header(key, secret), timeout=60)
+        r.raise_for_status()
+        icerik = r.json().get("content") or []
+        sonuc += icerik
+        if len(icerik) < 100:
+            break
+    return sonuc
+
+
 def trendyol_oto_guncelle(ayarlar):
     s_, k_, x_ = (kimlik(ayarlar, "trendyol_seller_id"), kimlik(ayarlar, "trendyol_key"),
                   kimlik(ayarlar, "trendyol_secret"))
@@ -733,7 +802,8 @@ def fiyat_artis_uygula(ayarlar, pid, df):
 
 def pazar_bagli(ayarlar, pid):
     gerek = {"trendruum": ["trendruum_key", "trendruum_secret"],
-             "trendyol": ["trendyol_seller_id", "trendyol_key", "trendyol_secret"]}.get(pid)
+             "trendyol": ["trendyol_seller_id", "trendyol_key", "trendyol_secret"],
+             "n11": ["n11_key", "n11_secret"]}.get(pid)
     return bool(gerek) and all(kimlik(ayarlar, k) for k in gerek)
 
 
@@ -747,6 +817,9 @@ def pazara_gonder(ayarlar, pid, df, ilerleme=None):
     if pid == "trendyol":
         ok, log = trendyol_stok_fiyat(kimlik(ayarlar, "trendyol_seller_id"), kimlik(ayarlar, "trendyol_key"),
                                       kimlik(ayarlar, "trendyol_secret"), df)
+        return ok, 0, "\n".join(log)
+    if pid == "n11":
+        ok, log = n11_stok_fiyat(kimlik(ayarlar, "n11_key"), kimlik(ayarlar, "n11_secret"), df)
         return ok, 0, "\n".join(log)
     raise RuntimeError("Bu pazar yeri için API bağlantısı yok.")
 
@@ -791,9 +864,9 @@ DURUM_ETIKET = {"yeni": "🆕 Yeni", "hazir": "🚚 Gönderime Hazır", "kargoda
 
 def durum_kodu(pid, d):
     d = str(d or "").lower()
-    if pid == "trendyol":
+    if pid in ("trendyol", "n11"):
         harita = {"created": "yeni", "picking": "hazir", "invoiced": "hazir", "shipped": "kargoda",
-                  "delivered": "teslim", "cancelled": "iptal", "unsupplied": "iptal"}
+                  "delivered": "teslim", "cancelled": "iptal", "unsupplied": "iptal", "unpacked": "iptal"}
     else:
         harita = {"new": "yeni", "pending": "yeni", "in_progress": "hazir", "shipped": "kargoda",
                   "shipping": "kargoda", "delivered": "teslim", "completed": "teslim",
@@ -845,6 +918,25 @@ def siparis_normalle_tr(o):
     }
 
 
+def siparis_normalle_n11(p):
+    adr = p.get("shippingAddress") or {}
+    satirlar = p.get("lines") or []
+    gecmis = p.get("packageHistories") or []
+    ilk = gecmis[0].get("createdDate") if gecmis else p.get("lastModifiedDate")
+    return {
+        "pid": "n11", "id": str(p.get("id", "")), "no": str(p.get("orderNumber", "")),
+        "tarih": tr_tarih(ilk), "durum": durum_kodu("n11", p.get("shipmentPackageStatus")),
+        "alici": adr.get("fullName") or p.get("customerfullName") or "",
+        "adres": ", ".join(x for x in (adr.get("address"), adr.get("district"), adr.get("city")) if x),
+        "urunler": [{"ad": l.get("productName", ""), "sku": l.get("stockCode") or l.get("barcode") or "",
+                     "adet": l.get("quantity", 1)} for l in satirlar],
+        "tutar": p.get("totalAmount"), "teslim": tr_tarih(p.get("agreedDeliveryDate")),
+        "kargo": p.get("cargoProviderName", "") or "", "barkod": str(p.get("cargoTrackingNumber", "") or ""),
+        "link": p.get("cargoTrackingLink", "") or "",
+        "satirlar": [{"lineId": l.get("orderLineId")} for l in satirlar], "ham": p,
+    }
+
+
 def siparis_cek(ayarlar, pid):
     """Pazar yerinden siparişleri çekip ortak biçime çevirir."""
     if pid == "trendyol":
@@ -856,6 +948,15 @@ def siparis_cek(ayarlar, pid):
                 if p_.get("id") not in gorulen:
                     gorulen.add(p_.get("id"))
                     sonuc.append(siparis_normalle_ty(p_))
+        return sonuc
+    if pid == "n11":
+        k_, x_ = kimlik(ayarlar, "n11_key"), kimlik(ayarlar, "n11_secret")
+        gorulen, sonuc = set(), []
+        for durum in ("Created", "Picking", "Shipped"):
+            for p_ in n11_siparisler(k_, x_, durum):
+                if p_.get("id") not in gorulen:
+                    gorulen.add(p_.get("id"))
+                    sonuc.append(siparis_normalle_n11(p_))
         return sonuc
     if pid == "trendruum":
         token = trendruum_token(kimlik(ayarlar, "trendruum_key"), kimlik(ayarlar, "trendruum_secret"))
@@ -882,6 +983,11 @@ def siparis_eylem(ayarlar, o, eylem):
         r = requests.put(f"{TY_BASE}/order/sellers/{s_}/shipment-packages/{o['id']}", json=body,
                          headers=trendyol_header(s_, kimlik(ayarlar, "trendyol_key"),
                                                  kimlik(ayarlar, "trendyol_secret")), timeout=60)
+        return r.status_code, r.text[:600]
+    if pid == "n11" and eylem == "hazirla":
+        r = requests.put(f"{N11_BASE}/rest/order/v1/update",
+                         json={"lines": o["satirlar"], "status": "Picking"},
+                         headers=n11_header(kimlik(ayarlar, "n11_key"), kimlik(ayarlar, "n11_secret")), timeout=60)
         return r.status_code, r.text[:600]
     raise RuntimeError("Bu işlem bu pazar yeri için henüz bağlı değil.")
 
@@ -992,7 +1098,7 @@ PAZAR = {
     "cicek": {"ad": "ÇiçekSepeti", "renk": "#db2777", "ikon": "🌸", "pastel": "#e0e7ff",
               "alanlar": [("API Key", "cicek_key", True)]},
     "n11": {"ad": "N11", "renk": "#e0392b", "ikon": "🔴", "pastel": "#fee2e2",
-            "alanlar": [("API Key", "n11_key", True), ("API Secret", "n11_secret", True)]},
+            "alanlar": [("App Key (API Key)", "n11_key", True), ("App Secret", "n11_secret", True)]},
     "ptt": {"ad": "E-PTT AVM", "renk": "#ea8a0c", "ikon": "📮", "pastel": "#fef9c3",
             "alanlar": [("Kullanıcı Adı", "ptt_user", False), ("Şifre", "ptt_pass", True)]},
     "hb": {"ad": "HepsiBurada", "renk": "#f97316", "ikon": "🛍️", "pastel": "#ffedd5",
@@ -1012,6 +1118,7 @@ PAZAR = {
 CAP = {
     "trendruum": {"sync", "kritik", "barkod", "toplu", "durum"},
     "trendyol": {"sync", "kritik", "barkod"},
+    "n11": {"sync", "kritik", "barkod"},
 }
 ANA_MENU = [
     ("Anasayfa", "🏠 Anasayfa", "#dbeafe"),
@@ -1075,7 +1182,7 @@ def ac_kapa(pid):
 
 
 st.sidebar.title("👑 ŞahEntegre")
-st.sidebar.caption("Sürüm: v12")
+st.sidebar.caption("Sürüm: v13")
 for kid, etiket_m, _ in ANA_MENU:
     st.sidebar.button(etiket_m, key=f"nav_{kid}", use_container_width=True,
                       type="primary" if st.session_state["sayfa"] == kid else "secondary",
@@ -1392,6 +1499,8 @@ def pazar_islemler(pid):
     bagli = pazar_bagli(ayarlar, pid)
     yok_mesaj = (f"{ad} için API bağlantısı henüz yapılmadı. Bağlamak için {ad} entegrasyon (API) "
                  f"dokümanı gerekiyor; tahminle yazıp canlı mağazanıza yanlış veri göndermek istemem.")
+    if cap:
+        yok_mesaj = f"Bu işlem {ad} için henüz bağlı değil."
 
     st.title(f"{p['ikon']} {ad} Tüm İşlemler")
     st.caption(f"{ad} mağazanızdaki ürünler, eşleşme durumları ve tüm işlemler.")
@@ -1461,8 +1570,8 @@ def pazar_islemler(pid):
                     st.caption("Her senkronizasyonda otomatik uygulamak için 'Oto Kritik Stok' sayfasını kullanın.")
             elif islem == "toplu":
                 if "toplu" not in cap:
-                    st.info("Trendyol'da yeni ürün açmak kategori ve özellik eşleme gerektirir, ayrı kurulum ister."
-                            if pid == "trendyol" else yok_mesaj)
+                    st.info(f"{ad}'da yeni ürün açmak kategori ve özellik eşleme gerektirir, ayrı kurulum ister."
+                            if pid in ("trendyol", "n11") else yok_mesaj)
                 elif not bagli:
                     st.warning("Önce API bilgilerini girin.")
                 else:
@@ -1543,8 +1652,8 @@ def pazar_ayar(pid):
         yeni_f = fiyat_artis_uygula(ayarlar, pid, ornek).iloc[0]["satis_fiyati"]
         st.info(f"Örnek ürün: alış {ornek.iloc[0]['alis_fiyati']:.2f} TL, tedarikçi satış "
                 f"{ornek.iloc[0]['satis_fiyati']:.2f} TL → bu pazar yerine giden fiyat {yeni_f:.2f} TL")
-    if pid in ("trendruum", "trendyol"):
-        ok_key = "tr_oto_guncelle" if pid == "trendruum" else "ty_oto_guncelle"
+    if pid in ("trendruum", "trendyol", "n11"):
+        ok_key = {"trendruum": "tr_oto_guncelle", "trendyol": "ty_oto_guncelle", "n11": "n11_oto_guncelle"}[pid]
         oto = st.toggle("Tedarikçi senkronundan sonra stok/fiyatı otomatik gönder",
                         value=bool(ayarlar.get(ok_key, False)), key=f"oto_{pid}")
         if oto != bool(ayarlar.get(ok_key, False)):
