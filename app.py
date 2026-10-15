@@ -281,7 +281,7 @@ def tumunu_senkronla():
             log_yaz(ad, "HATA", e)
 
 # ---------------------------------------------------------------
-# TRENDRUUM API & HIZLI GÜNCELLEME MOTORU
+# TRENDRUUM API & HATASIZ PARÇALI GÜNCELLEME MOTORU
 # ---------------------------------------------------------------
 TR_BASE = "https://api.trendruum.com/api/v1/integration"
 
@@ -332,10 +332,11 @@ def trendruum_markalari_ara(token, arama_metni=""):
         pass
     return []
 
-def trendruum_hizli_senkron(df, token):
+def trendruum_guvenli_senkron(df, token, status_placeholder):
     headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
     
-    # 1. Aşama: /products/bulk-update ile tüm stok ve fiyatları 500'erli paketler halinde güncelleyelim (Asla donma yapmaz)
+    status_placeholder.info("⏳ 1. Aşama: Stok ve fiyatlar Trendruum'a güncelleniyor...")
+    
     guncelleme_listesi = []
     for _, row in df.iterrows():
         kod = str(row["barkod"]).strip()
@@ -347,18 +348,22 @@ def trendruum_hizli_senkron(df, token):
             })
     
     guncellenen_sayi = 0
-    paket_boyutu = 500
-    for i in range(0, len(guncelleme_listesi), paket_boyutu):
+    paket_boyutu = 200  # Küçük paketler halinde göndererek donmayı kesin olarak önlüyoruz
+    toplam_guncelleme = len(guncelleme_listesi)
+    
+    for i in range(0, toplam_guncelleme, paket_boyutu):
         grup = guncelleme_listesi[i:i + paket_boyutu]
         try:
-            r = requests.post(f"{TR_BASE}/products/bulk-update", json={"products": grup}, headers=headers, timeout=60)
+            r = requests.post(f"{TR_BASE}/products/bulk-update", json={"products": grup}, headers=headers, timeout=30)
             if r.status_code in (200, 202):
                 guncellenen_sayi += len(grup)
         except Exception:
             pass
-        time.sleep(0.1)
+        status_placeholder.info(f"🔄 Güncelleniyor... ({min(i + paket_boyutu, toplam_guncelleme)} / {toplam_guncelleme})")
+        time.sleep(0.05)
 
-    # 2. Aşama: Yeni ürünleri /products/bulk ile 50'şerli paketler halinde ekleyelim
+    status_placeholder.info("⏳ 2. Aşama: Yeni ürünler Trendruum'a ekleniyor...")
+    
     p_ayar = ayarlar.get("pazar_ayarlari", {}).get("Trendruum", {})
     b_id = p_ayar.get("marka_id", kimlik(ayarlar, "trendruum_brand"))
     c_id = p_ayar.get("kategori_id", kimlik(ayarlar, "trendruum_category"))
@@ -385,19 +390,19 @@ def trendruum_hizli_senkron(df, token):
         })
 
     eklenen_sayi = 0
-    ek_paket = 50
-    for i in range(0, len(ekleme_listesi), ek_paket):
+    ek_paket = 25
+    toplam_ekleme = len(ekleme_listesi)
+    
+    for i in range(0, toplam_ekleme, ek_paket):
         grup = ekleme_listesi[i:i + ek_paket]
         try:
-            r = requests.post(f"{TR_BASE}/products/bulk", json={"products": grup}, headers=headers, timeout=60)
+            r = requests.post(f"{TR_BASE}/products/bulk", json={"products": grup}, headers=headers, timeout=30)
             if r.status_code in (200, 202):
                 eklenen_sayi += len(grup)
-            elif r.status_code == 422:
-                # Zaten var olan ürünlerde çakışmayı geç
-                pass
         except Exception:
             pass
-        time.sleep(0.1)
+        status_placeholder.info(f"🔄 Ekleniyor... ({min(i + ek_paket, toplam_ekleme)} / {toplam_ekleme})")
+        time.sleep(0.05)
 
     return guncellenen_sayi, eklenen_sayi
 
@@ -683,8 +688,8 @@ elif "Tüm İşlemler" in sayfa:
                         grup_sifir = [{"barcode": sabit_barkod(str(b)), "price": float(f), "stock": 0} for b, f in zip(df_sifir["barkod"], df_sifir["satis_fiyati"]) if str(b).strip()]
                         if grup_sifir:
                             headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
-                            for i in range(0, len(grup_sifir), 500):
-                                requests.post(f"{TR_BASE}/products/bulk-update", json={"products": grup_sifir[i:i+500]}, headers=headers, timeout=60)
+                            for i in range(0, len(grup_sifir), 200):
+                                requests.post(f"{TR_BASE}/products/bulk-update", json={"products": grup_sifir[i:i+200]}, headers=headers, timeout=30)
                     except Exception:
                         pass
 
@@ -706,18 +711,18 @@ elif "Tüm İşlemler" in sayfa:
                 cat_id = p_ayar_veri.get("kategori_id") or kimlik(ayarlar, "trendruum_category")
 
                 if tr_key and tr_secret and tr_brand and cat_id and len(tr_brand) == 24 and len(cat_id) == 24:
-                    with st.spinner("14.000+ ürün Trendruum paneline hızlıca işleniyor, lütfen bekleyin..."):
-                        try:
-                            token = trendruum_token(tr_key, tr_secret)
-                            df = urunleri_oku()
-                            artiss = float(p_ayar_veri.get("fiyat_artis", 0.0))
-                            if artiss > 0:
-                                df["satis_fiyati"] = df["satis_fiyati"] * (1 + artiss / 100)
-                            
-                            guncellenen, eklenen = trendruum_hizli_senkron(df, token)
-                            st.success(f"İşlem Başarılı! {guncellenen} ürünün stok ve fiyatı güncellendi, {eklenen} yeni ürün eklendi.")
-                        except Exception as e:
-                            st.error(f"Hata oluştu: {e}")
+                    durum_kutu = st.empty()
+                    try:
+                        token = trendruum_token(tr_key, tr_secret)
+                        df = urunleri_oku()
+                        artiss = float(p_ayar_veri.get("fiyat_artis", 0.0))
+                        if artiss > 0:
+                            df["satis_fiyati"] = df["satis_fiyati"] * (1 + artiss / 100)
+                        
+                        guncellenen, eklenen = trendruum_guvenli_senkron(df, token, durum_kutu)
+                        durum_kutu.success(f"🎉 İşlem Başarılı! {guncellenen} ürünün stok ve fiyatı güncellendi, {eklenen} yeni ürün eklendi.")
+                    except Exception as e:
+                        durum_kutu.error(f"❌ Hata oluştu: {e}")
                 else:
                     st.error("Lütfen Genel Ayarlar kısmından 24 haneli Kategori ID ve Marka ObjectId değerlerini eksiksiz girin.")
             else:
@@ -858,7 +863,7 @@ elif "Genel Ayarlar" in sayfa:
 
     if st.button("🗑️ Entegrasyon Bilgilerimi Sil"):
         ayarlar["pazar_ayarlari"][pazar] = {}
-        ayar_yaz(ayarlar)
+        ayar_yayar(ayarlar)
         st.warning(f"{pazar} ayarları temizlendi.")
 
 elif "AI Soru Cvp" in sayfa:
