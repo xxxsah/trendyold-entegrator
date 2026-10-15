@@ -24,7 +24,7 @@ st.set_page_config(page_title="ŞahEntegre", page_icon="👑", layout="wide")
 BASE = Path(__file__).parent
 DB_DOSYA = BASE / "metentegre.db"
 AYAR_DOSYA = BASE / "ayarlar.json"
-SENKRON_ARALIK = 6 * 3600  # Günde 4 kez otomatik
+SENKRON_ARALIK = 6 * 3600
 KILIT = threading.Lock()
 
 KIMLIK_ALANLARI = [
@@ -34,9 +34,6 @@ KIMLIK_ALANLARI = [
     "idefix_satici_id", "idefix_token", "idefix_secret",
 ]
 
-# ---------------------------------------------------------------
-# AYARLAR VE GÜVENLİK (Cloud / Secrets / JSON Tam Altyapı)
-# ---------------------------------------------------------------
 VARSAYILAN = {
     "tedarikciler": {},
     "kimlik": {},
@@ -99,9 +96,6 @@ def kimlik(ayarlar, ad):
         pass
     return ayarlar.get("kimlik", {}).get(ad, "")
 
-# ---------------------------------------------------------------
-# VERİTABANI
-# ---------------------------------------------------------------
 def baglan():
     conn = sqlite3.connect(DB_DOSYA, timeout=30)
     conn.execute("PRAGMA journal_mode=WAL")
@@ -133,9 +127,6 @@ def log_yaz(tedarikci, durum, mesaj=""):
         )
         c.commit()
 
-# ---------------------------------------------------------------
-# XML OKUMA VE NORMALİZASYON
-# ---------------------------------------------------------------
 def etiket(tag):
     return tag.split("}", 1)[-1]
 
@@ -313,7 +304,7 @@ def arka_plan_baslat():
 arka_plan_baslat()
 
 # ---------------------------------------------------------------
-# TRENDRUUM API ENTEGRASYONU (Çakışan Barkod Ayıklama Mantığı)
+# TRENDRUUM API ENTEGRASYONU
 # ---------------------------------------------------------------
 TR_BASE = "https://api.trendruum.com/api/v1/integration"
 
@@ -400,22 +391,21 @@ def trendruum_gonder(liste, token, ilerleme=None, paket=50):
         no = i // paket + 1
         grup = liste[i:i + paket]
         
-        for deneme in range(5):
+        for deneme in range(3):
             if not grup:
                 break
             try:
                 r = requests.post(f"{TR_BASE}/products/bulk", json={"products": grup}, headers=headers, timeout=60)
             except Exception as e:
                 loglar.append(f"⚠️ Paket {no} bağlantı hatası: {e}")
-                time.sleep(2)
+                time.sleep(1)
                 continue
                 
             if r.status_code in (200, 202):
                 basarili += 1
-                loglar.append(f"✅ Paket {no}: {len(grup)} ürün başarıyla gönderildi")
+                loglar.append(f"✅ Paket {no}: {len(grup)} ürün gönderildi")
                 break
             elif r.status_code == 422:
-                # Çakışan barkodları otomatik ayıkla ve tekrar dene
                 try:
                     j = r.json()
                     metin = " ".join(map(str, (j.get("errors") or {}).get("errors", []))) or r.text
@@ -428,17 +418,18 @@ def trendruum_gonder(liste, token, ilerleme=None, paket=50):
                     if var:
                         var_olan += [u["model_code"] for u in var]
                         grup = [u for u in grup if u not in var]
-                        loglar.append(f"ℹ️ Paket {no}: {len(var)} çakışan ürün mağazada kayıtlı, ayıklandı. Kalanlar gönderiliyor...")
+                        loglar.append(f"ℹ️ Paket {no}: {len(var)} çakışan ürün ayıklandı.")
                         continue
             
-            loglar.append(f"❌ Paket {no}: HTTP {r.status_code} - {r.text[:300]}")
+            loglar.append(f"❌ Paket {no}: HTTP {r.status_code} - {r.text[:200]}")
             break
 
+        time.sleep(0.3)  # Sunucu aşımını önlemek için kısa bekleme
         if ilerleme:
             ilerleme(no / toplam, loglar)
             
     if var_olan:
-        loglar.append(f"ℹ️ Toplam {len(var_olan)} ürün zaten mağazanızda kayıtlıydı.")
+        loglar.append(f"ℹ️ Toplam {len(var_olan)} ürün zaten mağazanızdaydı.")
     return basarili, toplam, loglar
 
 def trendruum_siparisler(token, durum="new", limit=50):
@@ -448,7 +439,7 @@ def trendruum_siparisler(token, durum="new", limit=50):
     return r.json()
 
 # ---------------------------------------------------------------
-# GİRİŞ KORUMASI (ŞİFRE EKRANI)
+# GİRİŞ KORUMASI
 # ---------------------------------------------------------------
 def _secret_var(ad):
     try:
@@ -711,7 +702,7 @@ elif "Tüm İşlemler" in sayfa:
                     except Exception as e:
                         st.error(f"Hata: {e}")
                 else:
-                    st.error("Lütfen Genel Ayarlar kısmından 24 haneli Kategori ID ve 24 haneli Marka ObjectId değerlerini sorgulayıp kaydedin.")
+                    st.error("Lütfen Genel Ayarlar kısmından 24 haneli Kategori ID ve Marka ObjectId değerlerini eksiksiz girin.")
             else:
                 st.warning(f"{pazar} toplu ürün gönderimi aktif modüldür.")
     with col_i2:
@@ -770,7 +761,7 @@ elif "Genel Ayarlar" in sayfa:
     sanahtar = st.text_input("Servis Anahtarı / API Secret (Client Secret)", value=p_ayar.get("servis_anahtari", kimlik(ayarlar, f"{pazar.lower()}_secret")), type="password")
 
     if pazar == "Trendruum":
-        st.markdown("### 🏷️ Trendruum Marka Seçimi (24 haneli Brand ObjectId)")
+        st.markdown("### 🏷️ Trendruum Marka Seçimi")
         m_arama = st.text_input("Marka Adı Girin", value=p_ayar.get("magaza_marka", "Irmak"))
         marka_id_mevcut = p_ayar.get("marka_id", kimlik(ayarlar, "trendruum_brand"))
         
@@ -794,7 +785,7 @@ elif "Genel Ayarlar" in sayfa:
         else:
             marka_id = st.text_input("Marka ObjectId (24 Haneli)", value=marka_id_mevcut)
 
-        st.markdown("### 📂 Trendruum Kategori Seçimi (24 haneli Category ObjectId)")
+        st.markdown("### 📂 Trendruum Kategori Seçimi")
         cat_id_mevcut = p_ayar.get("kategori_id", kimlik(ayarlar, "trendruum_category"))
         if st.button("🔄 Trendruum Kategorilerini Canlı Çek"):
             try:
