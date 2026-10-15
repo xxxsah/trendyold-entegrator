@@ -24,7 +24,7 @@ st.set_page_config(page_title="ŞahEntegre", page_icon="👑", layout="wide")
 BASE = Path(__file__).parent
 DB_DOSYA = BASE / "metentegre.db"
 AYAR_DOSYA = BASE / "ayarlar.json"
-SENKRON_ARALIK = 6 * 3600  # Günde 4 kez
+SENKRON_ARALIK = 6 * 3600
 KILIT = threading.Lock()
 
 KIMLIK_ALANLARI = [
@@ -34,9 +34,6 @@ KIMLIK_ALANLARI = [
     "idefix_satici_id", "idefix_token", "idefix_secret",
 ]
 
-# ---------------------------------------------------------------
-# AYARLAR VE GÜVENLİK
-# ---------------------------------------------------------------
 VARSAYILAN = {
     "tedarikciler": {},
     "kimlik": {},
@@ -99,9 +96,6 @@ def kimlik(ayarlar, ad):
         pass
     return ayarlar.get("kimlik", {}).get(ad, "")
 
-# ---------------------------------------------------------------
-# VERİTABANI
-# ---------------------------------------------------------------
 def baglan():
     conn = sqlite3.connect(DB_DOSYA, timeout=30)
     conn.execute("PRAGMA journal_mode=WAL")
@@ -133,9 +127,6 @@ def log_yaz(tedarikci, durum, mesaj=""):
         )
         c.commit()
 
-# ---------------------------------------------------------------
-# XML OKUMA VE NORMALİZASYON
-# ---------------------------------------------------------------
 def etiket(tag):
     return tag.split("}", 1)[-1]
 
@@ -389,71 +380,13 @@ def trendruum_siparisler(token, durum="new", limit=50):
     return r.json()
 
 # ---------------------------------------------------------------
-# ŞİFRE KORUMASI
-# ---------------------------------------------------------------
-def _secret_var(ad):
-    try:
-        return ad.upper() in st.secrets
-    except Exception:
-        return False
-
-def sifre_al():
-    s = os.environ.get("APP_PASSWORD")
-    if s:
-        return s
-    try:
-        if "APP_PASSWORD" in st.secrets:
-            return str(st.secrets["APP_PASSWORD"])
-    except Exception:
-        pass
-    return None
-
-sifre = sifre_al()
-if sifre and not st.session_state.get("giris_ok"):
-    st.markdown("<h1 style='text-align:center'>👑 ŞahEntegre</h1>"
-                "<p style='text-align:center'>Yönetim Paneli Girişi</p>", unsafe_allow_html=True)
-    _, orta, _ = st.columns([1, 1.2, 1])
-    with orta:
-        deneme = st.session_state.get("deneme", 0)
-        kilit_bitis = st.session_state.get("kilit_bitis", 0)
-        if time.time() < kilit_bitis:
-            st.error(f"Çok fazla hatalı deneme. {int(kilit_bitis - time.time())} sn bekleyin.")
-        else:
-            girilen = st.text_input("🔑 Yönetici Şifresi", type="password")
-            if st.button("Giriş Yap", type="primary", use_container_width=True):
-                if hmac.compare_digest(girilen.encode(), str(sifre).encode()):
-                    st.session_state.giris_ok = True
-                    st.session_state.deneme = 0
-                    st.rerun()
-                else:
-                    st.session_state.deneme = deneme + 1
-                    if st.session_state.deneme >= 5:
-                        st.session_state.kilit_bitis = time.time() + 60
-                        st.session_state.deneme = 0
-                    st.error("❌ Hatalı şifre.")
-    st.stop()
-
-# ---------------------------------------------------------------
-# ARAYÜZ (Akordiyon Yan Menü ve Tam Donanımlı Sayfalar)
+# ARAYÜZ
 # ---------------------------------------------------------------
 if "ayarlar" not in st.session_state:
     st.session_state.ayarlar = ayar_oku()
 ayarlar = st.session_state.ayarlar
 ayarlar.setdefault("kimlik", {})
 ayarlar.setdefault("pazar_ayarlari", {})
-
-def kimlik_kaydet(ad, deger):
-    if deger != ayarlar["kimlik"].get(ad, ""):
-        ayarlar["kimlik"][ad] = deger
-        ayar_yaz(ayarlar)
-
-def gizli_input(etiket_, ad, parola=True):
-    if os.environ.get(ad.upper()) or _secret_var(ad):
-        st.caption(f"🔒 {etiket_}: ortam/secrets üzerinden tanımlı")
-        return kimlik(ayarlar, ad)
-    v = st.text_input(etiket_, value=ayarlar["kimlik"].get(ad, ""), type="password" if parola else "default")
-    kimlik_kaydet(ad, v.strip())
-    return v.strip()
 
 st.sidebar.title("👑 ŞahEntegre")
 
@@ -497,11 +430,6 @@ for pz in pazarlar:
 st.sidebar.markdown("---")
 if st.sidebar.button("📋 Senkron Günlüğü"): sayfa_sec("📋 Senkron Günlüğü")
 
-yedek = {k: v for k, v in ayarlar.items() if k != "kimlik"}
-st.sidebar.download_button("Ayar Yedeği (.json)",
-                           json.dumps(yedek, ensure_ascii=False, indent=2).encode("utf-8"),
-                           "sahentegre_ayarlar.json", "application/json", use_container_width=True)
-
 def urunleri_oku():
     with closing(baglan()) as c:
         return pd.read_sql("SELECT * FROM urunler", c)
@@ -509,7 +437,7 @@ def urunleri_oku():
 sayfa = st.session_state.secili_sayfa
 
 # ---------------------------------------------------------------
-# SAYFA YÖNETİMLERİ
+# SAYFA İÇERİKLERİ
 # ---------------------------------------------------------------
 if sayfa == "🏠 Anasayfa":
     st.title("👑 Mağaza ve Pazar Yeri Özeti")
@@ -597,10 +525,10 @@ elif sayfa == "🔗 Tedarikçiler & XML":
 elif "Tüm İşlemler" in sayfa:
     pazar = sayfa.split(":")[0].strip()
     st.title(f"🚀 {pazar} - Tüm İşlemler ve Sipariş Yönetimi")
-    st.markdown(f"**{pazar}** mağazanızdaki ürünler, eşleşme durumları ve tüm yönetim işlemleriniz[span_0](start_span)[span_0](end_span).")
+    st.markdown(f"**{pazar}** mağazanızdaki ürünler, eşleşme durumları ve tüm yönetim işlemleriniz.")
     
     if st.button("ℹ️ Önemli Bilgilendirme", type="secondary"):
-        st.info(f"{pazar} entegrasyonu için günde 1 kez Tam Senkronizasyon yapmak yeterlidir; sık çalıştırmak API kotanızı tüketebilir[span_1](start_span)[span_1](end_span).")
+        st.info(f"{pazar} entegrasyonu için günde 1 kez Tam Senkronizasyon yapmak yeterlidir; sık çalıştırmak API kotanızı tüketebilir.")
 
     st.markdown("### SENKRON")
     col_s1, col_s2, col_s3 = st.columns(3)
@@ -623,13 +551,9 @@ elif "Tüm İşlemler" in sayfa:
     with col_i1:
         if st.button("📤 Toplu Ürün Gönder"):
             p_ayar_veri = ayarlar.get("pazar_ayarlari", {}).get(pazar, {})
-            key = p_ayar_veri.get("servis_anahtari") or kimlik(ayarlar, f"{pazar.lower()}_key")
-            secret = p_ayar_veri.get("servis_anahtari") or kimlik(ayarlar, f"{pazar.lower()}_secret")
-            brand = p_ayar_veri.get("magaza_marka") or kimlik(ayarlar, f"{pazar.lower()}_brand")
-
+            
             if pazar == "Trendruum":
-                # Trendruum için özel alan eşitlemesi
-                tr_key = kimlik(ayarlar, "trendruum_key") or p_ayar_veri.get("servis_anahtari")
+                tr_key = kimlik(ayarlar, "trendruum_key") or p_ayar_veri.get("api_key")
                 tr_secret = kimlik(ayarlar, "trendruum_secret") or p_ayar_veri.get("servis_anahtari")
                 tr_brand = p_ayar_veri.get("magaza_marka") or kimlik(ayarlar, "trendruum_brand")
                 cat = kimlik(ayarlar, "trendruum_category") or "0"
@@ -638,7 +562,6 @@ elif "Tüm İşlemler" in sayfa:
                     try:
                         token = trendruum_token(tr_key, tr_secret)
                         df = urunleri_oku()
-                        # Fiyat artış oranı ve kâr oranını uygula
                         artiss = float(p_ayar_veri.get("fiyat_artis", 0.0))
                         if artiss > 0:
                             df["satis_fiyati"] = df["satis_fiyati"] * (1 + artiss / 100)
@@ -650,7 +573,7 @@ elif "Tüm İşlemler" in sayfa:
                     except Exception as e:
                         st.error(f"Hata: {e}")
                 else:
-                    st.error("Lütfen sol menüden ilgili pazar yerinin 'Genel Ayarlar' kısmından Mağaza Marka adı ve API anahtarlarını eksiksiz doldurun.")
+                    st.error("Lütfen Genel Ayarlar kısmından API Key (Client ID) ve Servis Anahtarı (API Secret) bilgilerini ayrı ayrı doldurun.")
             else:
                 st.warning(f"{pazar} toplu ürün gönderimi aktif modüldür.")
     with col_i2:
@@ -673,7 +596,7 @@ elif "Tüm İşlemler" in sayfa:
     with tab_tum:
         if pazar == "Trendruum":
             p_ayar_veri = ayarlar.get("pazar_ayarlari", {}).get("Trendruum", {})
-            key = kimlik(ayarlar, "trendruum_key") or p_ayar_veri.get("servis_anahtari")
+            key = kimlik(ayarlar, "trendruum_key") or p_ayar_veri.get("api_key")
             secret = kimlik(ayarlar, "trendruum_secret") or p_ayar_veri.get("servis_anahtari")
             if key and secret:
                 try:
@@ -699,13 +622,14 @@ elif "Genel Ayarlar" in sayfa:
     
     ayarlar.setdefault("pazar_ayarlari", {})
     p_ayar = ayarlar["pazar_ayarlari"].setdefault(pazar, {
-        "magaza_id": "", "servis_anahtari": "", "magaza_marka": "",
+        "magaza_id": "", "api_key": "", "servis_anahtari": "", "magaza_marka": "",
         "sabit_kargo": 0.0, "satis_orani": 30.0, "fiyat_artis": 0.0
     })
 
     st.markdown("### 🔑 Mağaza ve Servis Bilgileri")
     mid = st.text_input("Mağaza ID / Seller ID", value=p_ayar.get("magaza_id", ""))
-    sanahtar = st.text_input("Servis Anahtarı / API Secret", value=p_ayar.get("servis_anahtari", ""), type="password")
+    apikey = st.text_input("API Key (Client ID)", value=p_ayar.get("api_key", kimlik(ayarlar, f"{pazar.lower()}_key")))
+    sanahtar = st.text_input("Servis Anahtarı / API Secret (Client Secret)", value=p_ayar.get("servis_anahtari", kimlik(ayarlar, f"{pazar.lower()}_secret")), type="password")
     marka = st.text_input("Mağaza Marka Adı", value=p_ayar.get("magaza_marka", ""))
 
     st.markdown("### 💰 Kargo ve Kâr Oranı Kuralları")
@@ -716,20 +640,21 @@ elif "Genel Ayarlar" in sayfa:
     if st.button("💾 Entegrasyon Bilgilerini Kaydet ve Ekle", type="primary"):
         p_ayar.update({
             "magaza_id": mid.strip(),
+            "api_key": apikey.strip(),
             "servis_anahtari": sanahtar.strip(),
             "magaza_marka": marka.strip(),
             "sabit_kargo": sabit_kargo,
             "satis_orani": satis_orani,
             "fiyat_artis": fiyat_artis
         })
-        # Otomatik olarak ana kimlik alanlarına da senkronize et
+        
         if pazar == "Trendruum":
-            ayarlar["kimlik"]["trendruum_key"] = sanahtar.strip()
+            ayarlar["kimlik"]["trendruum_key"] = apikey.strip()
             ayarlar["kimlik"]["trendruum_secret"] = sanahtar.strip()
             ayarlar["kimlik"]["trendruum_brand"] = marka.strip()
         
         ayar_yaz(ayarlar)
-        st.success(f"{pazar} entegrasyon ayarları başarıyla kaydedildi ve uygulandı!")
+        st.success(f"{pazar} entegrasyon ayarları başarıyla kaydedildi!")
 
     if st.button("🗑️ Entegrasyon Bilgilerimi Sil"):
         ayarlar["pazar_ayarlari"][pazar] = {}
