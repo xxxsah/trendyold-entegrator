@@ -24,7 +24,7 @@ st.set_page_config(page_title="ŞahEntegre", page_icon="👑", layout="wide")
 BASE = Path(__file__).parent
 DB_DOSYA = BASE / "metentegre.db"
 AYAR_DOSYA = BASE / "ayarlar.json"
-SENKRON_ARALIK = 6 * 3600  # günde 4 kez
+SENKRON_ARALIK = 6 * 3600
 KILIT = threading.Lock()
 
 KIMLIK_ALANLARI = [
@@ -32,6 +32,7 @@ KIMLIK_ALANLARI = [
     "trendyol_seller_id", "trendyol_key", "trendyol_secret",
     "hb_merchant_id", "hb_user", "hb_pass",
     "idefix_satici_id", "idefix_token", "idefix_secret",
+    "n11_key", "n11_secret",
 ]
 
 VARSAYILAN = {
@@ -108,8 +109,8 @@ def db_olustur():
         c.execute("""
             CREATE TABLE IF NOT EXISTS urunler (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                tedarikci TEXT, barkod TEXT, urun_adi TEXT, stok INTEGER,
-                alis_fiyati REAL, satis_fiyati REAL, gorsel TEXT, kategori TEXT
+                gorsel TEXT, tedarikci TEXT, barkod TEXT, urun_adi TEXT, stok INTEGER,
+                alis_fiyati REAL, satis_fiyati REAL, kategori TEXT
             )""")
         c.execute("""
             CREATE TABLE IF NOT EXISTS senkron_log (
@@ -288,13 +289,13 @@ def normalle(tedarikci, df, harita, marj, sabit_ek, kritik_esik=0):
     kategori = df[kk].astype(str) if kk in df.columns else pd.Series(["Genel"] * len(df), index=df.index)
 
     out = pd.DataFrame({
+        "gorsel": ilk_gorsel(df, harita.get("gorsel", "(yok)")),
         "tedarikci": tedarikci,
         "barkod": kol("kod").astype(str).str.strip(),
         "urun_adi": kol("ad").astype(str).str.strip(),
         "stok": stok,
         "alis_fiyati": alis.round(2),
         "satis_fiyati": satis.round(2),
-        "gorsel": ilk_gorsel(df, harita.get("gorsel", "(yok)")),
         "kategori": kategori,
     })
     out = out[(out["barkod"] != "") & (out["urun_adi"] != "")]
@@ -310,10 +311,10 @@ def tedarikci_senkron(ad, bilgi, kritik_esik=0):
         c.execute("BEGIN")
         c.execute("DELETE FROM urunler WHERE tedarikci = ?", (ad,))
         c.executemany(
-            "INSERT INTO urunler (tedarikci,barkod,urun_adi,stok,alis_fiyati,satis_fiyati,gorsel,kategori) "
+            "INSERT INTO urunler (gorsel, tedarikci, barkod, urun_adi, stok, alis_fiyati, satis_fiyati, kategori) "
             "VALUES (?,?,?,?,?,?,?,?)",
-            df[["tedarikci", "barkod", "urun_adi", "stok", "alis_fiyati",
-                "satis_fiyati", "gorsel", "kategori"]].itertuples(index=False, name=None),
+            df[["gorsel", "tedarikci", "barkod", "urun_adi", "stok", "alis_fiyati",
+                "satis_fiyati", "kategori"]].itertuples(index=False, name=None),
         )
         c.commit()
     return len(df)
@@ -1092,7 +1093,7 @@ def ac_kapa(pid):
     st.session_state["acik_pazar"] = None if st.session_state.get("acik_pazar") == pid else pid
 
 st.sidebar.title("👑 ŞahEntegre")
-st.sidebar.caption("Sürüm: v15")
+st.sidebar.caption("Sürüm: v16")
 for kid, etiket_m, _ in ANA_MENU:
     st.sidebar.button(etiket_m, key=f"nav_{kid}", use_container_width=True,
                       type="primary" if st.session_state["sayfa"] == kid else "secondary",
@@ -1593,21 +1594,29 @@ elif sayfa == "Urunler":
     if df.empty:
         st.info("Henüz ürün yok.")
     else:
-        st.dataframe(df.drop(columns=["id"]).rename(columns={
+        # Görsel sütununu en başa alıyoruz ve tabloyu daha geniş gösteriyoruz
+        kolonlar = ["gorsel"] + [c for c in df.columns if c not in ("gorsel", "id")]
+        goster_df = df[kolonlar].rename(columns={
             "gorsel": "Görsel", "tedarikci": "Tedarikçi", "barkod": "Barkod", "urun_adi": "Ürün Adı",
-            "stok": "Stok", "alis_fiyati": "Alış", "satis_fiyati": "Satış", "kategori": "Kategori"}),
-            column_config={"Görsel": st.column_config.ImageColumn("Görsel", width="small")},
+            "stok": "Stok", "alis_fiyati": "Alış", "satis_fiyati": "Satış", "kategori": "Kategori"
+        })
+        st.dataframe(goster_df,
+            column_config={"Görsel": st.column_config.ImageColumn("Görsel", width="medium")},
             use_container_width=True, hide_index=True)
 
 elif sayfa == "Kritik":
     st.title("🔄 Oto Kritik Stok")
     esik = st.number_input("Kritik stok eşiği", 1, 50, int(ayarlar.get("kritik_esik") or 2), key="kr_esik")
     with closing(baglan()) as c:
-        df_k = pd.read_sql("SELECT barkod, urun_adi, stok, satis_fiyati FROM urunler WHERE stok > 0 AND stok <= ?",
+        df_k = pd.read_sql("SELECT gorsel, barkod, urun_adi, stok, satis_fiyati FROM urunler WHERE stok > 0 AND stok <= ?",
                            c, params=(int(esik),))
     st.metric("Eşik altındaki ürün", f"{len(df_k):,}")
     if not df_k.empty:
-        st.dataframe(df_k, use_container_width=True, hide_index=True)
+        kolonlar_k = ["gorsel", "barkod", "urun_adi", "stok", "satis_fiyati"]
+        goster_k = df_k[kolonlar_k].rename(columns={"gorsel": "Görsel", "barkod": "Barkod", "urun_adi": "Ürün Adı", "stok": "Stok", "satis_fiyati": "Satış"})
+        st.dataframe(goster_k,
+            column_config={"Görsel": st.column_config.ImageColumn("Görsel", width="medium")},
+            use_container_width=True, hide_index=True)
 
 elif sayfa == "Ayarlar":
     st.title("⚙️ Ayarlar")
