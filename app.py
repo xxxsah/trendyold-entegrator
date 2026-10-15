@@ -663,56 +663,63 @@ def n11_stok_fiyat(key, secret, df):
         pass
     return ok, log
 
-def n11_yeni_urun_gonder(key, secret, df, varsayilan_kategori=""):
-    skular = []
-    for _, r in df.iterrows():
-        if r["satis_fiyati"] > 0:
-            fiyat = round(float(r["satis_fiyati"]), 2)
-            skular.append({
-                "stockCode": str(r["barkod"]),
-                "title": str(r["urun_adi"])[:100],
-                "listPrice": fiyat,
-                "salePrice": fiyat,
-                "quantity": int(r["stok"]),
-                "categoryId": int(varsayilan_kategori) if str(varsayilan_kategori).isdigit() else 1,
-                "images": [{"url": str(r["gorsel"])}] if str(r["gorsel"]).startswith("http") else []
-            })
-    
+def def n11_yeni_urun_gonder(key, secret, df, varsayilan_kategori=""):
+    """N11 tarafında yeni ürün oluşturma API entegrasyonu."""
     ok, log, ok_b, hata_b = 0, [], [], []
-    for i in range(0, len(skular), 100):
-        grup = skular[i:i + 100]
-        no = i // 100 + 1
-        try:
-            r = requests.post(f"{N11_BASE}/ms/product/tasks/create",
-                              json={"payload": {"integrator": "SahEntegre", "products": grup}},
-                              headers=n11_header(key, secret), timeout=120)
+    
+    for _, r in df.iterrows():
+        if r["satis_fiyati"] <= 0:
+            continue
             
-            if r.status_code == 200 and r.text.strip():
+        barkod = str(r["barkod"])
+        fiyat = round(float(r["satis_fiyati"]), 2)
+        
+        urun_verisi = {
+            "product": {
+                "productCode": barkod,
+                "title": str(r["urun_adi"])[:100],
+                "description": str(r["urun_adi"]),
+                "category": {
+                    "id": int(varsayilan_kategori) if str(varsayilan_kategori).isdigit() else 1
+                },
+                "price": fiyat,
+                "quantity": int(r["stok"]),
+                "images": [{"url": str(r["gorsel"])}] if str(r["gorsel"]).startswith("http") else [],
+                "approvalStatus": 1
+            }
+        }
+        
+        try:
+            r_est = requests.post(f"{N11_BASE}/rest/product/v1/product",
+                                  json=urun_verisi,
+                                  headers=n11_header(key, secret), timeout=60)
+            
+            if r_est.status_code == 200 and r_est.text.strip():
                 try:
-                    j = r.json()
+                    j = r_est.json()
                 except Exception:
-                    j = {"status": "SUCCESS", "raw": r.text[:200]}
+                    j = {"status": "SUCCESS"}
                 
-                if str(j.get("status", "SUCCESS")).upper() != "REJECT":
-                    ok += len(grup)
-                    ok_b += [x["stockCode"] for x in grup]
-                    log.append(f"✅ N11 Yeni Ürün Paket {no}: başarıyla kuyruğa alındı.")
+                if str(j.get("status", "SUCCESS")).upper() != "FAILURE":
+                    ok += 1
+                    ok_b.append(barkod)
+                    log.append(f"✅ N11 Yeni Ürün ({barkod}): Başarıyla oluşturuldu.")
                 else:
-                    hata_b += [x["stockCode"] for x in grup]
-                    log.append(f"❌ N11 Reddedildi: {j.get('reasons', r.text[:200])}")
+                    hata_b.append(barkod)
+                    log.append(f"❌ N11 Reddedildi ({barkod}): {j.get('errorMessage', r_est.text[:200])}")
             else:
-                hata_b += [x["stockCode"] for x in grup]
-                log.append(f"❌ N11 HTTP {r.status_code}: Yanıt boş veya geçersiz ({r.text[:300]})")
+                hata_b.append(barkod)
+                log.append(f"❌ N11 HTTP {r_est.status_code} ({barkod}): {r_est.text[:300]}")
                 
         except Exception as e:
-            hata_b += [x["stockCode"] for x in grup]
-            log.append(f"⚠️ N11 Yeni Ürün Paket {no} bağlantı hatası: {e}")
-            continue
-    
+            hata_b.append(barkod)
+            log.append(f"⚠️ N11 Bağlantı Hatası ({barkod}): {e}")
+            
     try:
         pazar_isaretle("n11", ok_b, hata_b)
     except Exception:
         pass
+        
     return ok, log
 
 def n11_oto_guncelle(ayarlar):
