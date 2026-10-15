@@ -48,6 +48,21 @@ VARSAYILAN = {
 }
 
 
+def _ayar_tohumu():
+    """Dosya kaybolursa (Streamlit Cloud yeniden başlatma) ayarları secrets'tan geri getirir."""
+    ham = os.environ.get("AYARLAR_JSON")
+    if not ham:
+        try:
+            if "AYARLAR_JSON" in st.secrets:
+                ham = str(st.secrets["AYARLAR_JSON"])
+        except Exception:
+            pass
+    try:
+        return json.loads(ham) if ham else {}
+    except Exception:
+        return {}
+
+
 def ayar_oku():
     veri = {}
     try:
@@ -62,6 +77,10 @@ def ayar_oku():
         }
     for k, v in VARSAYILAN.items():
         veri.setdefault(k, json.loads(json.dumps(v)))
+    if not veri["tedarikciler"]:
+        for k, v in _ayar_tohumu().items():
+            if k != "kimlik" and not veri.get(k):
+                veri[k] = v
     # eski düz anahtarları kimlik altına al
     for k in KIMLIK_ALANLARI:
         if k in veri and isinstance(veri[k], str):
@@ -630,16 +649,68 @@ def gizli_input(etiket_, ad, parola=True):
 
 
 st.sidebar.title("👑 ŞahEntegre")
-st.sidebar.caption("Sürüm: v4 (stok/fiyat + sipariş)")
-sayfa = st.sidebar.radio("Menü", [
-    "Anasayfa", "Ürünler", "Tedarikçiler & XML", "Trendruum", "Trendyol",
-    "Hepsiburada", "İdefix", "Senkron Günlüğü", "🤖 ŞahAI",
-])
+st.sidebar.caption("Sürüm: v7 (tek dosya)")
+TEMA_CSS = """
+<style>
+[data-testid="stHeader"]{background:#1e2a4a;}
+[data-testid="stHeader"] button svg{fill:#fff;color:#fff;}
+[data-testid="stSidebar"]{background:#f4f7fb;}
+[data-testid="stSidebar"] div[role="radiogroup"]{gap:8px;}
+[data-testid="stSidebar"] div[role="radiogroup"] > label{
+  border-radius:10px;padding:12px 14px;margin:0;width:100%;
+  box-shadow:0 1px 3px rgba(0,0,0,.10);border:1px solid rgba(0,0,0,.04);}
+[data-testid="stSidebar"] div[role="radiogroup"] > label > div:first-child{display:none;}
+[data-testid="stSidebar"] div[role="radiogroup"] > label p{font-weight:600;color:#1e293b;font-size:15px;}
+[data-testid="stSidebar"] div[role="radiogroup"] > label:nth-child(1){background:#dbeafe;}
+[data-testid="stSidebar"] div[role="radiogroup"] > label:nth-child(2){background:#d1fae5;}
+[data-testid="stSidebar"] div[role="radiogroup"] > label:nth-child(3){background:#fef3c7;}
+[data-testid="stSidebar"] div[role="radiogroup"] > label:nth-child(4){background:#e0e7ff;}
+[data-testid="stSidebar"] div[role="radiogroup"] > label:nth-child(5){background:#ffedd5;}
+[data-testid="stSidebar"] div[role="radiogroup"] > label:nth-child(6){background:#fce7f3;}
+[data-testid="stSidebar"] div[role="radiogroup"] > label:nth-child(7){background:#dcfce7;}
+[data-testid="stSidebar"] div[role="radiogroup"] > label:nth-child(8){background:#e2e8f0;}
+[data-testid="stSidebar"] div[role="radiogroup"] > label:nth-child(9){background:#ede9fe;}
+[data-testid="stSidebar"] div[role="radiogroup"] > label:has(input:checked){
+  background:linear-gradient(90deg,#2563eb,#4f46e5) !important;}
+[data-testid="stSidebar"] div[role="radiogroup"] > label:has(input:checked) p{color:#fff !important;}
+h1,h2,h3{color:#1e3a8a;}
+[data-testid="stMetric"]{background:#fff;border-radius:14px;padding:14px 16px;
+  box-shadow:0 2px 8px rgba(30,64,175,.14);border-left:5px solid #2563eb;}
+.stButton>button{border-radius:10px;font-weight:600;}
+.stButton>button[kind="primary"]{background:linear-gradient(90deg,#2563eb,#4f46e5);border:0;color:#fff;}
+</style>
+"""
+st.markdown(TEMA_CSS, unsafe_allow_html=True)
+
+MENU_IKON = {
+    "Anasayfa": "🏠", "Ürünler": "📦", "Tedarikçiler & XML": "🔗", "Trendruum": "🛒",
+    "Trendyol": "🔴", "Hepsiburada": "🟠", "İdefix": "🟢", "Senkron Günlüğü": "📋",
+}
+sayfa = st.sidebar.radio(
+    "Menü",
+    ["Anasayfa", "Ürünler", "Tedarikçiler & XML", "Trendruum", "Trendyol",
+     "Hepsiburada", "İdefix", "Senkron Günlüğü", "🤖 ŞahAI"],
+    format_func=lambda x: f"{MENU_IKON.get(x, '')}  {x}".strip(),
+    label_visibility="collapsed",
+)
 st.sidebar.markdown("---")
 yedek = {k: v for k, v in ayarlar.items() if k != "kimlik"}  # gizli bilgiler yedeğe girmez
 st.sidebar.download_button("Ayar Yedeği (.json, gizlisiz)",
                            json.dumps(yedek, ensure_ascii=False, indent=2).encode("utf-8"),
                            "sahentegre_ayarlar.json", "application/json", use_container_width=True)
+with st.sidebar.expander("♻️ Ayarları Geri Yükle"):
+    yuklenen = st.file_uploader("Yedek dosyası (.json)", type="json", key="yedek_yukle")
+    if yuklenen is not None and st.button("Geri Yükle", key="yedek_btn"):
+        try:
+            veri_y = json.loads(yuklenen.getvalue().decode("utf-8"))
+            for k, v in veri_y.items():
+                if k != "kimlik":
+                    ayarlar[k] = v
+            ayarlar.setdefault("tedarikciler", {})
+            ayar_yaz(ayarlar)
+            st.rerun()
+        except Exception as e:
+            st.error(f"Yüklenemedi: {e}")
 
 
 def urunleri_oku():
@@ -659,24 +730,76 @@ if sayfa == "Anasayfa":
     c3.metric("Kritik (1-2 adet)", f"{df['stok'].between(1, 2).sum():,}" if not df.empty else "0")
     c4.metric("Tedarikçi", len(ayarlar["tedarikciler"]))
 
+    if not ayarlar["tedarikciler"]:
+        st.warning("Kayıtlı tedarikçi yok. 'Tedarikçiler & XML' sayfasından ekleyin ya da yan menüden yedeği geri yükleyin.")
     st.subheader("🛒 Pazar Yeri Siparişleri")
     ty_s, ty_k, ty_x = (kimlik(ayarlar, "trendyol_seller_id"), kimlik(ayarlar, "trendyol_key"),
                         kimlik(ayarlar, "trendyol_secret"))
-    if ty_s and ty_k and ty_x:
-        if st.button("🔴 Trendyol Yeni Siparişleri Çek"):
+    tr_k, tr_x = kimlik(ayarlar, "trendruum_key"), kimlik(ayarlar, "trendruum_secret")
+    if st.button("🔄 Siparişleri Yenile"):
+        yeni_ozet = {}
+        if ty_s and ty_k and ty_x:
             try:
-                sip = trendyol_siparisler(ty_s, ty_k, ty_x)
-                if sip:
-                    st.dataframe(pd.DataFrame([{
-                        "Sipariş No": s.get("orderNumber"), "Tutar": s.get("totalPrice"),
-                        "Müşteri": f"{s.get('customerFirstName', '')} {s.get('customerLastName', '')}",
-                        "Durum": s.get("status")} for s in sip]), use_container_width=True, hide_index=True)
-                else:
-                    st.info("Bekleyen sipariş yok.")
+                yeni_ozet["Trendyol"] = len(trendyol_siparisler(ty_s, ty_k, ty_x))
             except Exception as e:
-                st.error(f"Trendyol siparişleri alınamadı: {e}")
-    else:
-        st.caption("Trendyol, Trendruum, Hepsiburada ve İdefix için ilgili sayfadan kimlik bilgilerini girin.")
+                yeni_ozet["Trendyol"] = str(e)[:50]
+        if tr_k and tr_x:
+            try:
+                j = trendruum_siparisler(trendruum_token(tr_k, tr_x), "new")
+                veri = j.get("data", j)
+                if isinstance(veri, dict):
+                    veri = next((v for v in veri.values() if isinstance(v, list)), [])
+                yeni_ozet["Trendruum"] = len(veri)
+            except Exception as e:
+                yeni_ozet["Trendruum"] = str(e)[:50]
+        st.session_state["sip_ozet"] = yeni_ozet
+    ozet = st.session_state.get("sip_ozet", {})
+
+    def durum_html(ad, bagli):
+        if not bagli:
+            return '<div class="pz-yakin">Bağlantı bekleniyor</div>'
+        v = ozet.get(ad)
+        if v is None:
+            return '<div class="pz-yok">Yenile\'ye basın</div>'
+        if isinstance(v, str):
+            return f'<div class="pz-chip pz-kirmizi">⚠️ {v}</div>'
+        if v == 0:
+            return '<div class="pz-yok">Sipariş yok</div>'
+        return f'<div class="pz-chip pz-mavi">🚚 {v} Yeni Sipariş</div>'
+
+    yakin = '<div class="pz-yakin">Çok yakında</div>'
+    kartlar = [
+        ("HEPSİBURADA", "#f97316", "🛍️", yakin),
+        ("TRENDYOL", "#e5391c", "🧡", durum_html("Trendyol", bool(ty_s and ty_k and ty_x))),
+        ("ÇİÇEKSEPETİ", "#db2777", "🌸", yakin),
+        ("PTT AVM", "#ea8a0c", "📮", yakin),
+        ("N11", "#e0392b", "🔴", yakin),
+        ("PAZARAMA", "#0e86d4", "🏪", yakin),
+        ("İDEFİX", "#1a9a4a", "📚", yakin),
+        ("TRENDRUUM", "#7c3aed", "🛒", durum_html("Trendruum", bool(tr_k and tr_x))),
+    ]
+    kart_css = (
+        "<style>"
+        ".pz-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:12px;}"
+        ".pz{border:2px solid #1f2937;border-radius:10px;overflow:hidden;background:#fff;"
+        "box-shadow:0 2px 6px rgba(0,0,0,.22);min-height:105px;}"
+        ".pz-h{color:#fff;font-weight:800;padding:8px;font-size:13px;white-space:nowrap;"
+        "overflow:hidden;text-overflow:ellipsis;}"
+        ".pz-b{padding:8px;}"
+        ".pz-yok{color:#94a3b8;font-style:italic;font-size:13px;}"
+        ".pz-yakin{border:1px dashed #cbd5e1;border-radius:6px;padding:8px;text-align:center;"
+        "color:#334155;font-size:13px;font-weight:600;background:#f8fafc;}"
+        ".pz-chip{border-radius:6px;padding:6px 8px;font-size:13px;font-weight:700;}"
+        ".pz-mavi{background:#dbeafe;color:#1d4ed8;border:1px solid #93c5fd;}"
+        ".pz-kirmizi{background:#fee2e2;color:#b91c1c;border:1px solid #fca5a5;}"
+        "</style>"
+    )
+    html = "".join(
+        f'<div class="pz"><div class="pz-h" style="background:{renk}">{ikon} {ad}</div>'
+        f'<div class="pz-b">{govde}</div></div>'
+        for ad, renk, ikon, govde in kartlar
+    )
+    st.markdown(kart_css + f'<div class="pz-grid">{html}</div>', unsafe_allow_html=True)
 
     st.subheader("⚡ Hızlı İşlemler")
     esik = st.number_input("Kritik stok eşiği (bu değer ve altı 0 yapılır, 0 = kapalı)",
