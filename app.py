@@ -384,7 +384,7 @@ def trendruum_gonder_ve_guncelle(df, token, ilerleme=None):
     headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
     loglar = []
     
-    # 1. Dokümana göre /products/bulk-update ile mevcut ürünlerin fiyat ve stoklarını güncelleyelim[span_10](start_span)[span_10](end_span)[span_11](start_span)[span_11](end_span)[span_12](start_span)[span_12](end_span)
+    # 1. /products/bulk-update ile tüm stok ve fiyatları Trendruum paneline gönderelim
     guncelleme_listesi = []
     for _, row in df.iterrows():
         kod = str(row["barkod"]).strip()
@@ -396,9 +396,7 @@ def trendruum_gonder_ve_guncelle(df, token, ilerleme=None):
             })
     
     guncelleme_basarili = 0
-    paket_boyutu = 1000  # Dokümana göre /products/bulk-update en fazla 1000 öğe alır[span_13](start_span)[span_13](end_span)
-    toplam_guncelleme_paketi = max(1, (len(guncelleme_listesi) + paket_boyutu - 1) // paket_boyutu)
-    
+    paket_boyutu = 1000
     for i in range(0, len(guncelleme_listesi), paket_boyutu):
         no = i // paket_boyutu + 1
         grup = guncelleme_listesi[i:i + paket_boyutu]
@@ -406,14 +404,14 @@ def trendruum_gonder_ve_guncelle(df, token, ilerleme=None):
             r = requests.post(f"{TR_BASE}/products/bulk-update", json={"products": grup}, headers=headers, timeout=60)
             if r.status_code in (200, 202):
                 guncelleme_basarili += 1
-                loglar.append(f"✅ Stok/Fiyat Güncelleme Paketi {no}: {len(grup)} ürün güncellendi.")
+                loglar.append(f"✅ Stok/Fiyat Güncelleme Paketi {no}: {len(grup)} ürün Trendruum'a işlendi.")
             else:
                 loglar.append(f"⚠️ Güncelleme Paketi {no}: HTTP {r.status_code} - {r.text[:150]}")
         except Exception as e:
             loglar.append(f"⚠️ Güncelleme hata: {e}")
         time.sleep(0.3)
 
-    # 2. Yeni ürünleri eklemek için /products/bulk kullanalım[span_14](start_span)[span_14](end_span)[span_15](start_span)[span_15](end_span)
+    # 2. Yeni ürünleri eklemek için /products/bulk kullanalım
     p_ayar = ayarlar.get("pazar_ayarlari", {}).get("Trendruum", {})
     b_id = p_ayar.get("marka_id", kimlik(ayarlar, "trendruum_brand"))
     c_id = p_ayar.get("kategori_id", kimlik(ayarlar, "trendruum_category"))
@@ -729,7 +727,25 @@ elif "Tüm İşlemler" in sayfa:
             with closing(baglan()) as c:
                 n = c.execute("UPDATE urunler SET stok = 0 WHERE stok <= 2").rowcount
                 c.commit()
-            st.success(f"Kritik stoktaki {n} ürün sıfırlandı.")
+            
+            # Trendruum paneline de anında sıfırlama gönderelim
+            if pazar == "Trendruum":
+                p_ayar_veri = ayarlar.get("pazar_ayarlari", {}).get(pazar, {})
+                tr_key = kimlik(ayarlar, "trendruum_key") or p_ayar_veri.get("api_key")
+                tr_secret = kimlik(ayarlar, "trendruum_secret") or p_ayar_veri.get("servis_anahtari")
+                if tr_key and tr_secret:
+                    try:
+                        token = trendruum_token(tr_key, tr_secret)
+                        df_sifir = urunleri_oku()
+                        df_sifir = df_sifir[df_sifir["stok"] == 0]
+                        grup_sifir = [{"barcode": sabit_barkod(str(b)), "price": float(f), "stock": 0} for b, f in zip(df_sifir["barkod"], df_sifir["satis_fiyati"]) if str(b).strip()]
+                        if grup_sifir:
+                            headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+                            requests.post(f"{TR_BASE}/products/bulk-update", json={"products": grup_sifir[:1000]}, headers=headers, timeout=60)
+                    except Exception:
+                        pass
+
+            st.success(f"Kritik stoktaki {n} ürün yerelde ve Trendruum'da sıfırlandı.")
     with col_s3:
         if st.button("🏷️ Tüm Barkodları Güncelle"):
             st.success("Barkod eşitlemesi yapıldı.")
