@@ -807,7 +807,7 @@ def pazar_bagli(ayarlar, pid):
     return bool(gerek) and all(kimlik(ayarlar, k) for k in gerek)
 
 
-def pazara_gonder(ayarlar, pid, df, ilerleme=None):
+def _pazara_gonder(ayarlar, pid, df, ilerleme=None):
     """Seçili ürünlerin stok+fiyatını pazar yerine gönderir. (başarılı, hatalı, özet metin)"""
     df = fiyat_artis_uygula(ayarlar, pid, df)
     if pid == "trendruum":
@@ -822,6 +822,18 @@ def pazara_gonder(ayarlar, pid, df, ilerleme=None):
         ok, log = n11_stok_fiyat(kimlik(ayarlar, "n11_key"), kimlik(ayarlar, "n11_secret"), df)
         return ok, 0, "\n".join(log)
     raise RuntimeError("Bu pazar yeri için API bağlantısı yok.")
+
+
+def pazara_gonder(ayarlar, pid, df, ilerleme=None):
+    """_pazara_gonder'i çağırır ve sonucu günlüğe yazar (ekran yenilense bile hata görülebilsin)."""
+    ad_ = {"trendruum": "Trendruum", "trendyol": "Trendyol", "n11": "N11"}.get(pid, pid)
+    try:
+        g, h, msg = _pazara_gonder(ayarlar, pid, df, ilerleme)
+    except Exception as e:
+        log_yaz(ad_, "HATA", f"Gönderilemedi: {e}")
+        raise
+    log_yaz(ad_, "OK" if g > 0 else "HATA", f"{g} gönderildi, {h} hata. {msg}"[:500])
+    return g, h, msg
 
 
 def tr_tarih(v):
@@ -1182,7 +1194,7 @@ def ac_kapa(pid):
 
 
 st.sidebar.title("👑 ŞahEntegre")
-st.sidebar.caption("Sürüm: v13")
+st.sidebar.caption("Sürüm: v14")
 for kid, etiket_m, _ in ANA_MENU:
     st.sidebar.button(etiket_m, key=f"nav_{kid}", use_container_width=True,
                       type="primary" if st.session_state["sayfa"] == kid else "secondary",
@@ -1620,6 +1632,15 @@ def pazar_islemler(pid):
     m3.metric("Senkronize Edilememiş", f"{hata_n:,}" if cap else "—")
     m4.metric("Stokta Olanlar", f"{stokta:,}")
     st.metric("Stok Tutmayanlar", f"{tukenen:,}")
+
+    with st.expander("📜 Son İşlemler (hata ayıklama)"):
+        with closing(baglan()) as c:
+            son = c.execute("SELECT zaman, durum, mesaj FROM senkron_log WHERE tedarikci = ? "
+                            "ORDER BY id DESC LIMIT 8", (ad,)).fetchall()
+        if not son:
+            st.caption("Bu pazar yeri için henüz işlem kaydı yok.")
+        for zaman, durum, mesaj in son:
+            (st.success if durum == "OK" else st.error)(f"{zaman} · {mesaj}")
 
     if pid in ("trendruum", "trendyol") and bagli:
         with st.expander("🧾 Siparişler"):
