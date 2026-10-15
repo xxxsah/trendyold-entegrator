@@ -91,13 +91,14 @@ def ayar_yaz(ayarlar):
 def kimlik(ayarlar, ad):
     env = os.environ.get(ad.upper())
     if env:
-        return env
+        return env.strip()
     try:
-        if ad.upper() in st.secrets:
-            return str(st.secrets[ad.upper()])
+        if ad.upper() in st.secrets and str(st.secrets[ad.upper()]).strip():
+            return str(st.secrets[ad.upper()]).strip()
     except Exception:
         pass
-    return ayarlar.get("kimlik", {}).get(ad, "")
+    val = ayarlar.get("kimlik", {}).get(ad, "")
+    return str(val).strip() if val else ""
 
 def baglan():
     conn = sqlite3.connect(DB_DOSYA, timeout=30)
@@ -724,7 +725,9 @@ def pazar_bagli(ayarlar, pid):
     gerek = {"trendruum": ["trendruum_key", "trendruum_secret"],
              "trendyol": ["trendyol_seller_id", "trendyol_key", "trendyol_secret"],
              "n11": ["n11_key", "n11_secret"]}.get(pid)
-    return bool(gerek) and all(kimlik(ayarlar, k) for k in gerek)
+    if not gerek:
+        return False
+    return all(bool(kimlik(ayarlar, k)) for k in gerek)
 
 def _pazara_gonder(ayarlar, pid, df, ilerleme=None):
     df = fiyat_artis_uygula(ayarlar, pid, df)
@@ -1059,7 +1062,7 @@ def tema_css():
     k.append(".st-key-nav_Ayarlar button{background:#e2e8f0;}")
     temel = """
 [data-testid="stHeader"]{background:#1e2a4a;}
-[data-testid="stHeader"] button svg{fill:#fff;color:#fff;}
+[data-testid="stHeader"] button svg{fill:#ffffff !important;color:#ffffff !important;width:28px !important;height:28px !important;}
 [data-testid="stSidebar"]{background:#f4f7fb;}
 [data-testid="stSidebar"] .stButton button{justify-content:flex-start;text-align:left;border-radius:10px;
   padding:10px 12px;border:1px solid rgba(0,0,0,.05);box-shadow:0 1px 3px rgba(0,0,0,.10);min-height:44px;}
@@ -1071,11 +1074,30 @@ def tema_css():
 [data-testid="stSidebar"] .stButton button[kind="primary"] p,
 [data-testid="stSidebar"] .stButton button[data-testid="stBaseButton-primary"] p{color:#fff !important;}
 h1,h2,h3{color:#1e3a8a;}
-/* Metrik kutularının arka planını koyu temaya uyumlu ve yazıları okunur yapıyoruz */
+
+/* Metrik kutuları */
 [data-testid="stMetric"]{background:#1e293b !important;border-radius:14px;padding:14px 16px;
   box-shadow:0 2px 8px rgba(0,0,0,.3);border-left:5px solid #3b82f6;}
 [data-testid="stMetric"] label{color:#94a3b8 !important;}
 [data-testid="stMetric"] [data-testid="stMetricValue"]{color:#f8fafc !important;}
+
+/* Sol Menü Kapatma / Açma Butonunu (Ok/Çarpı) Koyu Temada Parlak Beyaz Yapma */
+button[data-testid="stSidebarCollapseButton"], 
+button[aria-label="Close sidebar"], 
+button[aria-label="Open sidebar"],
+[data-testid="stSidebar"] button[kind="header"] {
+    color: #ffffff !important;
+    background-color: #2563eb !important;
+    border-radius: 8px !important;
+    padding: 6px !important;
+}
+button[data-testid="stSidebarCollapseButton"] svg, 
+button[aria-label="Close sidebar"] svg, 
+button[aria-label="Open sidebar"] svg {
+    fill: #ffffff !important;
+    color: #ffffff !important;
+}
+
 .stButton>button{border-radius:10px;font-weight:600;}
 """
     return "<style>" + temel + "".join(k) + "</style>"
@@ -1096,7 +1118,7 @@ def ac_kapa(pid):
     st.session_state["acik_pazar"] = None if st.session_state.get("acik_pazar") == pid else pid
 
 st.sidebar.title("👑 ŞahEntegre")
-st.sidebar.caption("Sürüm: v18")
+st.sidebar.caption("Sürüm: v19")
 for kid, etiket_m, _ in ANA_MENU:
     st.sidebar.button(etiket_m, key=f"nav_{kid}", use_container_width=True,
                       type="primary" if st.session_state["sayfa"] == kid else "secondary",
@@ -1531,7 +1553,6 @@ if sayfa == "Anasayfa":
     st.title("👑 Mağaza ve Pazar Yeri Özeti")
     df = urunleri_oku()
     
-    # 4'lü Özet Metrik Kutuları (Mobil uyumlu ve şık 2x2 veya yan yana)
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("Toplam Ürün", f"{len(df):,}")
     c2.metric("Stokta Olanlar", f"{(df['stok'] > 0).sum():,}" if not df.empty else "0")
@@ -1539,7 +1560,6 @@ if sayfa == "Anasayfa":
     c4.metric("Tedarikçi", len(ayarlar["tedarikciler"]))
 
     st.markdown("### 🛒 Pazar Yeri Durumları")
-    # Pazar yerleri için 2'li dengeli şık grid yapısı
     pazar_listesi = list(PAZAR.items())
     for i in range(0, len(pazar_listesi), 2):
         cols = st.columns(2)
@@ -1630,53 +1650,23 @@ elif sayfa == "Urunler":
             q = arama.strip().lower()
             filt_df = df[df["urun_adi"].str.lower().str.contains(q) | df["barkod"].str.lower().str.contains(q)]
 
-        kolonlar = ["gorsel", "tedarikci", "barkod", "urun_adi", "stok", "satis_fiyati", "kategori"]
-        goster_df = filt_df[kolonlar].rename(columns={
-            "gorsel": "Görsel", "tedarikci": "Tedarikçi", "barkod": "Barkod", "urun_adi": "Ürün Adı",
-            "stok": "Stok", "satis_fiyati": "Satış Fiyatı (₺)", "kategori": "Kategori"
-        })
-        
-        st.dataframe(goster_df,
-            column_config={
-                "Görsel": st.column_config.ImageColumn("Görsel", width="large"),
-                "Satış Fiyatı (₺)": st.column_config.NumberColumn("Satış Fiyatı (₺)", format="%.2f ₺")
-            },
-            use_container_width=True, hide_index=True, height=600)
+        # Ürünleri şık, geniş kare kartlar / kutucuklar halinde dikey liste olarak gösterme
+        st.caption("Ürün Kartları Listesi")
+        for idx, row in filt_df.head(100).iterrows():
+            with st.container(border=True):
+                c_img, c_det = st.columns([1, 2])
+                with c_img:
+                    g_url = str(row["gorsel"]).strip()
+                    if g_url.startswith("http"):
+                        st.image(g_url, use_column_width=True)
+                    else:
+                        st.markdown("🖼️ *(Görsel yok)*")
+                with c_det:
+                    st.subheader(row["urun_adi"])
+                    st.write(f"**Barkod:** `{row['barkod']}`")
+                    st.write(f"**Tedarikçi:** {row['tedarikci']} | **Kategori:** {row['kategori']}")
+                    st.write(f"**Stok:** {row['stok']} adet | **Satış Fiyatı:** {row['satis_fiyati']:.2f} ₺")
 
 elif sayfa == "Kritik":
     st.title("🔄 Oto Kritik Stok")
-    esik = st.number_input("Kritik stok eşiği", 1, 50, int(ayarlar.get("kritik_esik") or 2), key="kr_esik")
-    with closing(baglan()) as c:
-        df_k = pd.read_sql("SELECT gorsel, barkod, urun_adi, stok, satis_fiyati FROM urunler WHERE stok > 0 AND stok <= ?",
-                           c, params=(int(esik),))
-    st.metric("Eşik altındaki ürün", f"{len(df_k):,}")
-    if not df_k.empty:
-        kolonlar_k = ["gorsel", "barkod", "urun_adi", "stok", "satis_fiyati"]
-        goster_k = df_k[kolonlar_k].rename(columns={"gorsel": "Görsel", "barkod": "Barkod", "urun_adi": "Ürün Adı", "stok": "Stok", "satis_fiyati": "Satış (₺)"})
-        st.dataframe(goster_k,
-            column_config={
-                "Görsel": st.column_config.ImageColumn("Görsel", width="large"),
-                "Satış (₺)": st.column_config.NumberColumn("Satış (₺)", format="%.2f ₺")
-            },
-            use_container_width=True, hide_index=True)
-
-elif sayfa == "Ayarlar":
-    st.title("⚙️ Ayarlar")
-    t1, t2, t3 = st.tabs(["Tedarikçiler & XML", "Genel", "Senkron Günlüğü"])
-    with t1:
-        tedarikci_sayfasi()
-    with t2:
-        genel_ayarlar()
-    with t3:
-        gunluk_sayfasi()
-
-elif ":" in sayfa:
-    pid_, alt_ = sayfa.split(":", 1)
-    if pid_ in PAZAR:
-        {"siparis": pazar_siparis, "islemler": pazar_islemler, "ayar": pazar_ayar, "ai": pazar_ai}.get(alt_, pazar_islemler)(pid_)
-    else:
-        git("Anasayfa")
-        st.rerun()
-else:
-    git("Anasayfa")
-    st.rerun()
+    esik = st.number_input("Kritik stok eşiği", 1, 50, int(ayarlar.get("kritik_es
