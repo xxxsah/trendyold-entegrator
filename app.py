@@ -1071,8 +1071,11 @@ def tema_css():
 [data-testid="stSidebar"] .stButton button[kind="primary"] p,
 [data-testid="stSidebar"] .stButton button[data-testid="stBaseButton-primary"] p{color:#fff !important;}
 h1,h2,h3{color:#1e3a8a;}
-[data-testid="stMetric"]{background:#fff;border-radius:14px;padding:14px 16px;
-  box-shadow:0 2px 8px rgba(30,64,175,.14);border-left:5px solid #2563eb;}
+/* Metrik kutularının arka planını koyu temaya uyumlu ve yazıları okunur yapıyoruz */
+[data-testid="stMetric"]{background:#1e293b !important;border-radius:14px;padding:14px 16px;
+  box-shadow:0 2px 8px rgba(0,0,0,.3);border-left:5px solid #3b82f6;}
+[data-testid="stMetric"] label{color:#94a3b8 !important;}
+[data-testid="stMetric"] [data-testid="stMetricValue"]{color:#f8fafc !important;}
 .stButton>button{border-radius:10px;font-weight:600;}
 """
     return "<style>" + temel + "".join(k) + "</style>"
@@ -1093,7 +1096,7 @@ def ac_kapa(pid):
     st.session_state["acik_pazar"] = None if st.session_state.get("acik_pazar") == pid else pid
 
 st.sidebar.title("👑 ŞahEntegre")
-st.sidebar.caption("Sürüm: v17")
+st.sidebar.caption("Sürüm: v18")
 for kid, etiket_m, _ in ANA_MENU:
     st.sidebar.button(etiket_m, key=f"nav_{kid}", use_container_width=True,
                       type="primary" if st.session_state["sayfa"] == kid else "secondary",
@@ -1536,7 +1539,7 @@ if sayfa == "Anasayfa":
     c4.metric("Tedarikçi", len(ayarlar["tedarikciler"]))
 
     st.markdown("### 🛒 Pazar Yeri Durumları")
-    # Pazar yerleri için 2'li veya 3'lü dengeli şık grid yapısı
+    # Pazar yerleri için 2'li dengeli şık grid yapısı
     pazar_listesi = list(PAZAR.items())
     for i in range(0, len(pazar_listesi), 2):
         cols = st.columns(2)
@@ -1599,12 +1602,11 @@ elif sayfa == "Urunler":
     if df.empty:
         st.info("Henüz ürün yok. Tedarikçi XML'i senkronize edin.")
     else:
-        # Özet Bilgi Çubuğu ve Aksiyon Butonları
         toplam_u = len(df)
         stoktaki_u = (df['stok'] > 0).sum()
         
         st.markdown(f"""
-            <div style="background:#f8fafc;padding:12px 16px;border-radius:10px;border:1px solid #e2e8f0;margin-bottom:16px;display:flex;justify-content:space-between;align-items:center;">
+            <div style="background:#1e293b;padding:12px 16px;border-radius:10px;border:1px solid #334155;margin-bottom:16px;color:#f8fafc;">
                 <span>📊 Toplam Ürün: <b>{toplam_u:,}</b> | Stokta: <b>{stoktaki_u:,}</b></span>
             </div>
         """, unsafe_allow_html=True)
@@ -1622,14 +1624,12 @@ elif sayfa == "Urunler":
 
         st.markdown("---")
         
-        # Arama çubuğu
         arama = st.text_input("🔍 Ürün Adı veya Barkod ile Ara", key="urun_arama")
         filt_df = df
         if arama.strip():
             q = arama.strip().lower()
             filt_df = df[df["urun_adi"].str.lower().str.contains(q) | df["barkod"].str.lower().str.contains(q)]
 
-        # Ürünleri kutucuklar / kartlar şeklinde veya büyük görselli tablo ile gösterim
         kolonlar = ["gorsel", "tedarikci", "barkod", "urun_adi", "stok", "satis_fiyati", "kategori"]
         goster_df = filt_df[kolonlar].rename(columns={
             "gorsel": "Görsel", "tedarikci": "Tedarikçi", "barkod": "Barkod", "urun_adi": "Ürün Adı",
