@@ -164,7 +164,6 @@ def duzlestir(el, onek="", cikti=None):
     return cikti
 
 def urun_dugumu_bul(kok):
-    ebeveyn = {c: p for p in kok.iter() for c in p}
     sayac = Counter(etiket(e.tag) for e in kok.iter() if len(e) > 0)
     adaylar = {t for t, n in sayac.items() if n >= 2 and t != etiket(kok.tag)}
     dis = {etiket(e.tag) for e in kok.iter() if etiket(e.tag) in adaylar}
@@ -304,7 +303,7 @@ def arka_plan_baslat():
 arka_plan_baslat()
 
 # ---------------------------------------------------------------
-# TRENDRUUM API & BARKOD KONTROLÜ
+# TRENDRUUM API & DOKÜMANA UYUMLU GÜNCELLEME/YÜKLEME
 # ---------------------------------------------------------------
 TR_BASE = "https://api.trendruum.com/api/v1/integration"
 
@@ -355,15 +354,14 @@ def trendruum_markalari_ara(token, arama_metni=""):
         pass
     return []
 
-def trendruum_urun_listesi(df, ayarlar, brand_id, varsayilan_cat):
-    liste, atlanan = [], 0
+def trendruum_urun_listesi(df, brand_id, varsayilan_cat):
+    liste = []
     cat_id = str(varsayilan_cat).strip()
     b_id = str(brand_id).strip()
 
     for _, row in df.iterrows():
         gorsel = str(row["gorsel"]).strip()
         if not gorsel or row["satis_fiyati"] <= 0:
-            atlanan += 1
             continue
         kod = str(row["barkod"]).strip()
         liste.append({
@@ -380,12 +378,50 @@ def trendruum_urun_listesi(df, ayarlar, brand_id, varsayilan_cat):
                 "images": [gorsel],
             }],
         })
-    return liste, atlanan
+    return liste
 
-def trendruum_gonder(liste, token, ilerleme=None, paket=50):
+def trendruum_gonder_ve_guncelle(df, token, ilerleme=None):
     headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+    loglar = []
+    
+    # 1. Dokümana göre /products/bulk-update ile mevcut ürünlerin fiyat ve stoklarını güncelleyelim[span_10](start_span)[span_10](end_span)[span_11](start_span)[span_11](end_span)[span_12](start_span)[span_12](end_span)
+    guncelleme_listesi = []
+    for _, row in df.iterrows():
+        kod = str(row["barkod"]).strip()
+        if kod and row["satis_fiyati"] > 0:
+            guncelleme_listesi.append({
+                "barcode": sabit_barkod(kod),
+                "price": float(row["satis_fiyati"]),
+                "stock": int(row["stok"])
+            })
+    
+    guncelleme_basarili = 0
+    paket_boyutu = 1000  # Dokümana göre /products/bulk-update en fazla 1000 öğe alır[span_13](start_span)[span_13](end_span)
+    toplam_guncelleme_paketi = max(1, (len(guncelleme_listesi) + paket_boyutu - 1) // paket_boyutu)
+    
+    for i in range(0, len(guncelleme_listesi), paket_boyutu):
+        no = i // paket_boyutu + 1
+        grup = guncelleme_listesi[i:i + paket_boyutu]
+        try:
+            r = requests.post(f"{TR_BASE}/products/bulk-update", json={"products": grup}, headers=headers, timeout=60)
+            if r.status_code in (200, 202):
+                guncelleme_basarili += 1
+                loglar.append(f"✅ Stok/Fiyat Güncelleme Paketi {no}: {len(grup)} ürün güncellendi.")
+            else:
+                loglar.append(f"⚠️ Güncelleme Paketi {no}: HTTP {r.status_code} - {r.text[:150]}")
+        except Exception as e:
+            loglar.append(f"⚠️ Güncelleme hata: {e}")
+        time.sleep(0.3)
+
+    # 2. Yeni ürünleri eklemek için /products/bulk kullanalım[span_14](start_span)[span_14](end_span)[span_15](start_span)[span_15](end_span)
+    p_ayar = ayarlar.get("pazar_ayarlari", {}).get("Trendruum", {})
+    b_id = p_ayar.get("marka_id", kimlik(ayarlar, "trendruum_brand"))
+    c_id = p_ayar.get("kategori_id", kimlik(ayarlar, "trendruum_category"))
+    
+    liste = trendruum_urun_listesi(df, b_id, c_id)
+    paket = 50
     toplam = max(1, (len(liste) + paket - 1) // paket)
-    loglar, basarili, var_olan = [], 0, []
+    basarili_ekleme = 0
     
     for i in range(0, len(liste), paket):
         no = i // paket + 1
@@ -397,13 +433,12 @@ def trendruum_gonder(liste, token, ilerleme=None, paket=50):
             try:
                 r = requests.post(f"{TR_BASE}/products/bulk", json={"products": grup}, headers=headers, timeout=60)
             except Exception as e:
-                loglar.append(f"⚠️ Paket {no} bağlantı hatası: {e}")
                 time.sleep(1)
                 continue
                 
             if r.status_code in (200, 202):
-                basarili += 1
-                loglar.append(f"✅ Paket {no}: {len(grup)} ürün gönderildi")
+                basarili_ekleme += 1
+                loglar.append(f"✅ Yeni Ürün Paketi {no}: {len(grup)} ürün eklendi.")
                 break
             elif r.status_code == 422:
                 try:
@@ -411,26 +446,19 @@ def trendruum_gonder(liste, token, ilerleme=None, paket=50):
                     metin = " ".join(map(str, (j.get("errors") or {}).get("errors", []))) or r.text
                 except Exception:
                     metin = r.text
-                
                 cakisan = set(re.findall(r"\"(\d+)\" barkodu", metin))
                 if cakisan:
                     var = [u for u in grup if u["children_products"][0]["barcode"] in cakisan]
                     if var:
-                        var_olan += [u["model_code"] for u in var]
                         grup = [u for u in grup if u not in var]
-                        loglar.append(f"ℹ️ Paket {no}: {len(var)} çakışan ürün ayıklandı.")
+                        loglar.append(f"ℹ️ Paket {no}: {len(var)} zaten kayıtlı ürün geçildi.")
                         continue
-            
-            loglar.append(f"❌ Paket {no}: HTTP {r.status_code} - {r.text[:200]}")
             break
-
         time.sleep(0.3)
         if ilerleme:
             ilerleme(no / toplam, loglar)
-            
-    if var_olan:
-        loglar.append(f"ℹ️ Toplam {len(var_olan)} ürün zaten mağazanızdaydı.")
-    return basarili, toplam, loglar
+
+    return guncelleme_basarili, basarili_ekleme, loglar
 
 def trendruum_siparisler(token, durum="new", limit=50):
     r = requests.get(f"{TR_BASE}/orders", params={"status": durum, "page": 1, "limit": limit},
@@ -441,12 +469,6 @@ def trendruum_siparisler(token, durum="new", limit=50):
 # ---------------------------------------------------------------
 # ŞİFRE KORUMASI
 # ---------------------------------------------------------------
-def _secret_var(ad):
-    try:
-        return ad.upper() in st.secrets
-    except Exception:
-        return False
-
 def sifre_al():
     s = os.environ.get("APP_PASSWORD")
     if s:
@@ -582,8 +604,6 @@ elif sayfa == "📦 Sistemdeki Ürünler":
     st.caption("Sistemimizde mevcut ürünler, stok durumları ve detaylı analizler.")
 
     df = urunleri_oku()
-    
-    # Görsellerdeki gibi metrik kartları ekleyelim
     toplam_kat = df["kategori"].nunique() if not df.empty and "kategori" in df.columns else 0
     toplam_urun = len(df)
     stoklu_urun = int((df["stok"] > 0).sum()) if not df.empty else 0
@@ -600,7 +620,6 @@ elif sayfa == "📦 Sistemdeki Ürünler":
 
     st.markdown("---")
     
-    # Stokları Çek Butonu
     if st.button("📦 Stokları Çek ve Yenile", type="primary"):
         with st.spinner("XML'ler taranıyor..."):
             tumunu_senkronla()
@@ -608,7 +627,6 @@ elif sayfa == "📦 Sistemdeki Ürünler":
         st.rerun()
 
     if not df.empty:
-        # Filtre Butonları ve Arama Alanı (İstediğin ekran görüntüsündeki yapı)
         f_col1, f_col2, f_col3, f_col4 = st.columns([1, 1, 2, 1])
         with f_col1:
             sekme = st.radio("Filtre", ["Tümü", "Stoklu", "Tükenmişler"], horizontal=True, label_visibility="collapsed")
@@ -623,10 +641,8 @@ elif sayfa == "📦 Sistemdeki Ürünler":
         if ara:
             goruntu = goruntu[goruntu["urun_adi"].str.contains(ara, case=False, na=False) | goruntu["barkod"].str.contains(ara, case=False, na=False)]
         
-        # Sayfalama ve Tablo Görünümü
         sayfa_boyutu = st.selectbox("Sayfa Başına Gösterim", [50, 100, 200, 500], index=0, label_visibility="collapsed")
         
-        # İstediğin sütun sırası: #, Resim, Ürün ID / Barkod, Ürün Adı, Fiyat vb.
         gosterim_df = goruntu.head(sayfa_boyutu).copy()
         gosterim_df.insert(0, "Sıra", range(1, len(gosterim_df) + 1))
         
@@ -644,7 +660,7 @@ elif sayfa == "📦 Sistemdeki Ürünler":
             use_container_width=True, hide_index=True
         )
     else:
-        st.info("Veritabanında ürün bulunamadı. Lütfen 'Tedarikçiler & XML' sayfasından stokları çekin.")
+        st.info("Veritabanında ürün bulunamadı.")
 
 elif sayfa == "🔗 Tedarikçiler & XML":
     st.title("Tedarikçi ve XML Yönetimi")
@@ -702,9 +718,6 @@ elif "Tüm İşlemler" in sayfa:
     st.title(f"🚀 {pazar} - Tüm İşlemler ve Sipariş Yönetimi")
     st.markdown(f"**{pazar}** mağazanızdaki ürünler, eşleşme durumları ve tüm yönetim işlemleriniz.")
     
-    if st.button("ℹ️ Önemli Bilgilendirme", type="secondary"):
-        st.info(f"{pazar} entegrasyonu için günde 1 kez Tam Senkronizasyon yapmak yeterlidir; sık çalıştırmak API kotanızı tüketebilir.")
-
     st.markdown("### SENKRON")
     col_s1, col_s2, col_s3 = st.columns(3)
     with col_s1:
@@ -724,7 +737,7 @@ elif "Tüm İşlemler" in sayfa:
     st.markdown("### İŞLEMLER")
     col_i1, col_i2, col_i3 = st.columns(3)
     with col_i1:
-        if st.button("📤 Toplu Ürün Gönder"):
+        if st.button("📤 Toplu Ürün Gönder & Fiyat/Stok Güncelle"):
             p_ayar_veri = ayarlar.get("pazar_ayarlari", {}).get(pazar, {})
             
             if pazar == "Trendruum":
@@ -741,16 +754,15 @@ elif "Tüm İşlemler" in sayfa:
                         if artiss > 0:
                             df["satis_fiyati"] = df["satis_fiyati"] * (1 + artiss / 100)
                         
-                        liste, atlanan = trendruum_urun_listesi(df, ayarlar, tr_brand, cat_id)
                         bar, kutu = st.progress(0), st.empty()
-                        ok, top, loglar = trendruum_gonder(liste, token, lambda p, l: (bar.progress(p), kutu.code("\n".join(l[-10:]))))
-                        st.success(f"Trendruum Toplu Gönderim Tamamlandı: {ok}/{top} paket başarılı.")
+                        guncellenen_paket, eklenen_paket, loglar = trendruum_gonder_ve_guncelle(df, token, lambda p, l: (bar.progress(p), kutu.code("\n".join(l[-10:]))))
+                        st.success(f"Trendruum İşlemi Başarılı: {guncellenen_paket} fiyat/stok güncelleme paketi, {eklenen_paket} yeni ürün paketi işlendi.")
                     except Exception as e:
                         st.error(f"Hata: {e}")
                 else:
                     st.error("Lütfen Genel Ayarlar kısmından 24 haneli Kategori ID ve Marka ObjectId değerlerini eksiksiz girin.")
             else:
-                st.warning(f"{pazar} toplu ürün gönderimi aktif modüldür.")
+                st.warning(f"{pazar} toplu işlem modülü aktif.")
     with col_i2:
         if st.button("🚚 Kargo Süresi Ayarla"):
             st.success("Kargo süreleri güncellendi.")
