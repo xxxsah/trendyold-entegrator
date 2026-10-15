@@ -432,4 +432,108 @@ def trendruum_gonder(liste, token, ilerleme=None, paket=50):
             if r.status_code in (422, 500):
                 try:
                     j = r.json()
-                    metin = " ".join(map(str, (j.get("errors") or {}).get("errors", []))) or r.
+                    metin = " ".join(map(str, (j.get("errors") or {}).get("errors", []))) or r.text
+                except Exception:
+                    metin = r.text
+                cakisan = set(re.findall(r"(\d{6,})\\?\"\s*barkodu", metin))
+                var = [u for u in grup if u["children_products"][0]["barcode"] in cakisan]
+                if var:
+                    var_olan += [u["model_code"] for u in var]
+                    grup = [u for u in grup if u not in var]
+                    loglar.append(f"ℹ️ Paket {no}: {len(var)} ürün mağazada zaten kayıtlı, atlandı")
+                    continue
+            if r.status_code == 429 or r.status_code >= 500:
+                time.sleep(2 * (deneme + 1))
+                continue
+            loglar.append(f"❌ Paket {no}: HTTP {r.status_code} {r.text[:1500]}")
+            art_arda += 1
+            break
+        if ilerleme:
+            ilerleme(no / toplam, loglar)
+        if art_arda >= 3:
+            loglar.append("⛔ Üst üste 3 paket reddedildi, gönderim durduruldu.")
+            if ilerleme:
+                ilerleme(1.0, loglar)
+            break
+    if var_olan:
+        loglar.append(f"ℹ️ Toplam {len(var_olan)} ürün mağazada zaten kayıtlıydı.")
+    return basarili, toplam, loglar
+
+def trendruum_guncelle(df, token, ilerleme=None):
+    headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+    items, orijin = [], {}
+    for _, r in df.iterrows():
+        if r["satis_fiyati"] > 0:
+            sb = sabit_barkod(r["barkod"])
+            orijin[sb] = str(r["barkod"])
+            items.append({"barcode": sb, "price": float(r["satis_fiyati"]), "stock": int(r["stok"])})
+    toplam = max(1, (len(items) + 999) // 1000)
+    guncel, hata, ornek, loglar, hata_s = 0, 0, [], [], set()
+    for i in range(0, len(items), 1000):
+        no = i // 1000 + 1
+        grup = items[i:i + 1000]
+        r = None
+        for deneme in range(4):
+            try:
+                r = requests.post(f"{TR_BASE}/products/bulk-update", json={"products": grup},
+                                  headers=headers, timeout=120)
+            except Exception as e:
+                loglar.append(f"⚠️ Paket {no} bağlantı hatası: {e}")
+                r = None
+                time.sleep(2)
+                continue
+            if r.status_code == 429 or r.status_code >= 500:
+                time.sleep(2 * (deneme + 1))
+                continue
+            break
+        if r is None:
+            hata += len(grup)
+            hata_s |= {x["barcode"] for x in grup}
+        elif r.status_code == 200:
+            try:
+                d = r.json().get("data") or {}
+            except Exception:
+                d = {}
+            guncel += int(d.get("updated_count", 0))
+            hata += int(d.get("failed_count", 0))
+            hatalar = d.get("errors") or []
+            for e in hatalar:
+                hata_s |= set(re.findall(r"\d{6,}", str(e)))
+            ornek += [str(e)[:200] for e in hatalar[:3]]
+            loglar.append(f"✅ Paket {no}: {d.get('updated_count', 0)} güncellendi")
+        else:
+            hata += len(grup)
+            hata_s |= {x["barcode"] for x in grup}
+            loglar.append(f"❌ Paket {no}: HTTP {r.status_code}")
+        if ilerleme:
+            ilerleme(no / toplam)
+    try:
+        pazar_isaretle("trendruum", [orijin[b] for b in orijin if b not in hata_s],
+                       [orijin[b] for b in hata_s if b in orijin])
+    except Exception:
+        pass
+    return guncel, hata, ornek[:5], loglar
+
+def trendruum_durum(token, barkodlar, durum):
+    headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+    ok, hata, loglar = 0, 0, []
+    for i in range(0, len(barkodlar), 500):
+        grup = barkodlar[i:i + 500]
+        no = i // 500 + 1
+        try:
+            r = requests.post(f"{TR_BASE}/products/status-update",
+                              json={"products": [{"barcode": sabit_barkod(b), "status": durum} for b in grup]},
+                              headers=headers, timeout=120)
+        except Exception as e:
+            hata += len(grup)
+            loglar.append(f"⚠️ Paket {no} bağlantı hatası: {e}")
+            continue
+        if r.status_code == 200:
+            ok += len(grup)
+            loglar.append(f"✅ Paket {no}: {len(grup)} ürün güncellendi")
+        else:
+            hata += len(grup)
+            loglar.append(f"❌ Paket {no}: HTTP {r.status_code}")
+    return ok, hata, loglar
+
+def trendru
