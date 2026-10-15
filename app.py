@@ -46,6 +46,7 @@ VARSAYILAN = {
     "oto_senkron": True,
     "tr_oto_guncelle": False,
     "ty_oto_guncelle": False,
+    "idefix_oto_guncelle": False,
     "pazar_ayarlari": {},
 }
 
@@ -371,7 +372,8 @@ def tumunu_senkronla(oto=True):
             sonuclar.append((ad, False, str(e)))
     if oto and any(x[1] for x in sonuclar):
         for ad_, anahtar_, fonk_ in (("Trendruum", "tr_oto_guncelle", trendruum_oto_guncelle),
-                                      ("Trendyol", "ty_oto_guncelle", trendyol_oto_guncelle)):
+                                      ("Trendyol", "ty_oto_guncelle", trendyol_oto_guncelle),
+                                      ("İdefix", "idefix_oto_guncelle", idefix_oto_guncelle)):
             if ayarlar.get(anahtar_):
                 try:
                     fonk_(ayarlar)
@@ -399,6 +401,78 @@ def arka_plan_baslat():
 
 
 arka_plan_baslat()  # süreç başına tek sefer
+
+
+# ---------------------------------------------------------------
+# PAZAR YERİ: İDEFİX
+# ---------------------------------------------------------------
+IDEFIX_BASE = "https://api.idefix.com/api/v1"
+
+def idefix_header(token, secret, satici_id):
+    return {
+        "X-Api-Key": token.strip(),
+        "X-Api-Secret": secret.strip(),
+        "X-Seller-Id": str(satici_id).strip(),
+        "Content-Type": "application/json",
+        "Accept": "application/json"
+    }
+
+def idefix_siparisler(token, secret, satici_id):
+    headers = idefix_header(token, secret, satici_id)
+    r = requests.get(f"{IDEFIX_BASE}/orders", headers=headers, timeout=30)
+    if r.status_code == 200:
+        return r.json().get("data", [])
+    r2 = requests.get(f"{IDEFIX_BASE}/orders/list", headers=headers, timeout=30)
+    if r2.status_code == 200:
+        return r2.json().get("data", [])
+    r.raise_for_status()
+    return []
+
+def idefix_stok_fiyat(token, secret, satici_id, df):
+    headers = idefix_header(token, secret, satici_id)
+    items = [{
+        "barcode": str(r["barkod"]),
+        "price": float(r["satis_fiyati"]),
+        "stock": int(r["stok"])
+    } for _, r in df.iterrows() if r["satis_fiyati"] > 0]
+    
+    ok, log, ok_b, hata_b = 0, [], [], []
+    paket = 200
+    for i in range(0, len(items), paket):
+        grup = items[i:i + paket]
+        try:
+            r = requests.post(f"{IDEFIX_BASE}/inventory-upload", json={"items": grup}, headers=headers, timeout=60)
+            if r.status_code in (200, 201, 202):
+                ok += len(grup)
+                ok_b += [x["barcode"] for x in grup]
+                log.append(f"✅ İdefix {i // paket + 1}. paket gönderildi")
+            else:
+                r2 = requests.post(f"{IDEFIX_BASE}/products/inventory", json={"products": grup}, headers=headers, timeout=60)
+                if r2.status_code in (200, 201, 202):
+                    ok += len(grup)
+                    ok_b += [x["barcode"] for x in grup]
+                    log.append(f"✅ İdefix {i // paket + 1}. paket gönderildi (Alternatif uç)")
+                else:
+                    hata_b += [x["barcode"] for x in grup]
+                    log.append(f"❌ İdefix {i // paket + 1}. paket HTTP {r.status_code}: {r.text[:300]}")
+        except Exception as e:
+            hata_b += [x["barcode"] for x in grup]
+            log.append(f"⚠️ İdefix {i // paket + 1}. paket bağlantı hatası: {e}")
+            
+    try:
+        pazar_isaretle("idefix", ok_b, hata_b)
+    except Exception:
+        pass
+    return ok, len(hata_b), "\n".join(log)
+
+def idefix_oto_guncelle(ayarlar):
+    token, secret, satici = (kimlik(ayarlar, "idefix_token"), kimlik(ayarlar, "idefix_secret"), kimlik(ayarlar, "idefix_satici_id"))
+    if not (token and secret and satici):
+        return
+    with closing(baglan()) as c:
+        df = pd.read_sql("SELECT barkod, stok, satis_fiyati FROM urunler", c)
+    ok, hata, _ = idefix_stok_fiyat(token, secret, satici, df)
+    log_yaz("İdefix", "OK", f"{ok} ürün güncellendi, {hata} hata")
 
 
 # ---------------------------------------------------------------
@@ -713,7 +787,8 @@ def fiyat_artis_uygula(ayarlar, pid, df):
 
 def pazar_bagli(ayarlar, pid):
     gerek = {"trendruum": ["trendruum_key", "trendruum_secret"],
-             "trendyol": ["trendyol_seller_id", "trendyol_key", "trendyol_secret"]}.get(pid)
+             "trendyol": ["trendyol_seller_id", "trendyol_key", "trendyol_secret"],
+             "idefix": ["idefix_token", "idefix_secret", "idefix_satici_id"]}.get(pid)
     return bool(gerek) and all(kimlik(ayarlar, k) for k in gerek)
 
 
@@ -728,6 +803,10 @@ def pazara_gonder(ayarlar, pid, df, ilerleme=None):
         ok, log = trendyol_stok_fiyat(kimlik(ayarlar, "trendyol_seller_id"), kimlik(ayarlar, "trendyol_key"),
                                       kimlik(ayarlar, "trendyol_secret"), df)
         return ok, 0, "\n".join(log)
+    if pid == "idefix":
+        ok, hata, log = idefix_stok_fiyat(kimlik(ayarlar, "idefix_token"), kimlik(ayarlar, "idefix_secret"),
+                                          kimlik(ayarlar, "idefix_satici_id"), df)
+        return ok, hata, log
     raise RuntimeError("Bu pazar yeri için API bağlantısı yok.")
 
 
@@ -857,6 +936,7 @@ PAZAR = {
 CAP = {
     "trendruum": {"sync", "kritik", "barkod", "toplu", "durum"},
     "trendyol": {"sync", "kritik", "barkod"},
+    "idefix": {"sync", "kritik", "barkod"},
 }
 ANA_MENU = [
     ("Anasayfa", "🏠 Anasayfa", "#dbeafe"),
@@ -1099,6 +1179,17 @@ def siparis_paneli(pid):
                     st.info("Bekleyen sipariş yok.")
             except Exception as e:
                 st.error(f"Hata: {e}")
+    elif pid == "idefix":
+        if st.button("Yeni Siparişleri Getir", key="sp_id"):
+            try:
+                sip = idefix_siparisler(kimlik(ayarlar, "idefix_token"), kimlik(ayarlar, "idefix_secret"),
+                                        kimlik(ayarlar, "idefix_satici_id"))
+                if sip:
+                    st.dataframe(pd.DataFrame(sip), use_container_width=True, hide_index=True)
+                else:
+                    st.info("Bekleyen İdefix siparişi yok.")
+            except Exception as e:
+                st.error(f"Hata: {e}")
 
 
 def trendruum_marka_kategori():
@@ -1300,42 +1391,41 @@ def pazar_islemler(pid):
                             st.error(f"Hata: {e}")
                     st.caption("Her senkronizasyonda otomatik uygulamak için 'Oto Kritik Stok' sayfasını kullanın.")
             elif islem == "toplu":
-                if "toplu" not in cap:
-                    st.info("Trendyol'da yeni ürün açmak kategori ve özellik eşleme gerektirir, ayrı kurulum ister."
-                            if pid == "trendyol" else yok_mesaj)
-                elif not bagli:
-                    st.warning("Önce API bilgilerini girin.")
+                if pid == "trendruum":
+                    if not bagli:
+                        st.warning("Önce API bilgilerini girin.")
+                    else:
+                        trendruum_toplu_panel()
                 else:
-                    trendruum_toplu_panel()
-            elif islem == "kargo":
-                st.info("Kargo süresi, ürün güncelleme uç noktasında ürün kimliğiyle ayarlanıyor. Barkodla toplu "
-                        "ayar için pazar yerinin ilgili dokümanı gerekli; bu yüzden şimdilik bağlı değil."
-                        if cap else yok_mesaj)
-            elif islem == "durum":
-                if "durum" not in cap:
                     st.info(yok_mesaj)
-                elif not bagli:
-                    st.warning("Önce API bilgilerini girin.")
+            elif islem == "kargo":
+                st.info("Kargo süresi, pazar yeri entegrasyon API'lerinde ürün bazlı parametrelerle yönetilmektedir.")
+            elif islem == "durum":
+                if pid == "trendruum":
+                    if not bagli:
+                        st.warning("Önce API bilgilerini girin.")
+                    else:
+                        secim = st.radio("İşlem", ["Stoğu 0 olan ürünleri PASİF yap",
+                                                   "Stoğu olan ürünleri AKTİF yap (anında yayına alır)"], key="durum_secim")
+                        pasif = secim.startswith("Stoğu 0")
+                        with closing(baglan()) as c:
+                            bk = [r[0] for r in c.execute(
+                                "SELECT barkod FROM urunler WHERE stok <= 0" if pasif else
+                                "SELECT barkod FROM urunler WHERE stok > 0").fetchall()]
+                        st.write(f"Etkilenecek ürün: **{len(bk):,}**")
+                        if not pasif:
+                            st.warning("AKTİF yapılan ürünler onay beklemeden hemen yayına girer.")
+                        onay = st.checkbox("Onaylıyorum", key="durum_onay")
+                        if st.button("Uygula", key="durum_uygula", disabled=not (onay and len(bk) > 0)):
+                            try:
+                                token = trendruum_token(kimlik(ayarlar, "trendruum_key"), kimlik(ayarlar, "trendruum_secret"))
+                                ok, hata, loglar = trendruum_durum(token, bk, "passive" if pasif else "active")
+                                st.success(f"{ok} ürün gönderildi, {hata} hatalı.")
+                                st.code("\n".join(loglar[-8:]))
+                            except Exception as e:
+                                st.error(f"Hata: {e}")
                 else:
-                    secim = st.radio("İşlem", ["Stoğu 0 olan ürünleri PASİF yap",
-                                               "Stoğu olan ürünleri AKTİF yap (anında yayına alır)"], key="durum_secim")
-                    pasif = secim.startswith("Stoğu 0")
-                    with closing(baglan()) as c:
-                        bk = [r[0] for r in c.execute(
-                            "SELECT barkod FROM urunler WHERE stok <= 0" if pasif else
-                            "SELECT barkod FROM urunler WHERE stok > 0").fetchall()]
-                    st.write(f"Etkilenecek ürün: **{len(bk):,}**")
-                    if not pasif:
-                        st.warning("AKTİF yapılan ürünler onay beklemeden hemen yayına girer.")
-                    onay = st.checkbox("Onaylıyorum", key="durum_onay")
-                    if st.button("Uygula", key="durum_uygula", disabled=not (onay and len(bk) > 0)):
-                        try:
-                            token = trendruum_token(kimlik(ayarlar, "trendruum_key"), kimlik(ayarlar, "trendruum_secret"))
-                            ok, hata, loglar = trendruum_durum(token, bk, "passive" if pasif else "active")
-                            st.success(f"{ok} ürün gönderildi, {hata} hatalı.")
-                            st.code("\n".join(loglar[-8:]))
-                        except Exception as e:
-                            st.error(f"Hata: {e}")
+                    st.info("Eşleme onay ve red işlemleri pazar yeri satıcı panelleri üzerinden yürütülmektedir.")
 
     st.markdown("---")
     with closing(baglan()) as c:
@@ -1352,7 +1442,7 @@ def pazar_islemler(pid):
     m4.metric("Stokta Olanlar", f"{stokta:,}")
     st.metric("Stok Tutmayanlar", f"{tukenen:,}")
 
-    if pid in ("trendruum", "trendyol") and bagli:
+    if pid in ("trendruum", "trendyol", "idefix") and bagli:
         with st.expander("🧾 Siparişler"):
             siparis_paneli(pid)
 
@@ -1369,8 +1459,8 @@ def pazar_ayar(pid):
         pa["fiyat_artis"] = artis
         ayar_yaz(ayarlar)
         st.success("Fiyat artışı kaydedildi.")
-    if pid in ("trendruum", "trendyol"):
-        ok_key = "tr_oto_guncelle" if pid == "trendruum" else "ty_oto_guncelle"
+    if pid in ("trendruum", "trendyol", "idefix"):
+        ok_key = {"trendruum": "tr_oto_guncelle", "trendyol": "ty_oto_guncelle", "idefix": "idefix_oto_guncelle"}[pid]
         oto = st.toggle("Tedarikçi senkronundan sonra stok/fiyatı otomatik gönder",
                         value=bool(ayarlar.get(ok_key, False)), key=f"oto_{pid}")
         if oto != bool(ayarlar.get(ok_key, False)):
@@ -1408,7 +1498,7 @@ def pazar_ai(pid):
     soru = st.text_area("Müşteri sorusu", key=f"ai_soru_{pid}")
     if st.button("✨ Cevap Öner", type="primary", key=f"ai_btn_{pid}"):
         if not anahtar:
-            st.error("Claude API anahtarı gerekli. Yukarıya girin ya da Secrets'a ANTHROPIC_API_KEY ekleyin.")
+            st.error("Claude API anahtarı gerekli. Yukarıya girin ya da Secrets'ta ANTHROPIC_API_KEY ekleyin.")
         elif not soru.strip():
             st.warning("Önce müşteri sorusunu yazın.")
         else:
@@ -1441,6 +1531,8 @@ if sayfa == "Anasayfa":
     ty_s, ty_k, ty_x = (kimlik(ayarlar, "trendyol_seller_id"), kimlik(ayarlar, "trendyol_key"),
                         kimlik(ayarlar, "trendyol_secret"))
     tr_k, tr_x = kimlik(ayarlar, "trendruum_key"), kimlik(ayarlar, "trendruum_secret")
+    id_t, id_s, id_i = kimlik(ayarlar, "idefix_token"), kimlik(ayarlar, "idefix_secret"), kimlik(ayarlar, "idefix_satici_id")
+    
     if st.button("🔄 Siparişleri Yenile"):
         yeni_ozet = {}
         if ty_s and ty_k and ty_x:
@@ -1457,6 +1549,11 @@ if sayfa == "Anasayfa":
                 yeni_ozet["trendruum"] = len(veri)
             except Exception as e:
                 yeni_ozet["trendruum"] = str(e)[:50]
+        if id_t and id_s and id_i:
+            try:
+                yeni_ozet["idefix"] = len(idefix_siparisler(id_t, id_s, id_i))
+            except Exception as e:
+                yeni_ozet["idefix"] = str(e)[:50]
         st.session_state["sip_ozet"] = yeni_ozet
     ozet = st.session_state.get("sip_ozet", {})
 
