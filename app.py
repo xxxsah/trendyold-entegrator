@@ -549,8 +549,6 @@ def n11_oto_guncelle(ayarlar):
         df = pd.read_sql("SELECT barkod, stok, satis_fiyati FROM urunler", c)
     ok, hata, _ = n11_stok_fiyat(key, secret, df)
     log_yaz("N11", "OK", f"{ok} ürün güncellendi, {hata} hata")
-
-
 # ---------------------------------------------------------------
 # PAZAR YERİ: TRENDRUUM
 # ---------------------------------------------------------------
