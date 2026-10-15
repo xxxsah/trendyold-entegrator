@@ -35,7 +35,7 @@ KIMLIK_ALANLARI = [
 ]
 
 # ---------------------------------------------------------------
-# AYARLAR VE GÜVENLİK (Cloud / Secrets / JSON Destekli)
+# AYARLAR VE GÜVENLİK
 # ---------------------------------------------------------------
 VARSAYILAN = {
     "tedarikciler": {},
@@ -176,19 +176,8 @@ def urun_dugumu_bul(kok):
     ebeveyn = {c: p for p in kok.iter() for c in p}
     sayac = Counter(etiket(e.tag) for e in kok.iter() if len(e) > 0)
     adaylar = {t for t, n in sayac.items() if n >= 2 and t != etiket(kok.tag)}
-
-    def ic_icede(el):
-        p = ebeveyn.get(el)
-        while p is not None:
-            if etiket(p.tag) in adaylar:
-                return True
-            p = ebeveyn.get(p)
-        return False
-
-    dis = {etiket(e.tag) for e in kok.iter() if etiket(e.tag) in adaylar and not ic_icede(e)}
-    if not dis:
-        return None
-    return max(dis, key=lambda t: sayac[t])
+    dis = {etiket(e.tag) for e in kok.iter() if etiket(e.tag) in adaylar}
+    return max(dis, key=lambda t: sayac[t]) if dis else None
 
 def xml_oku(veri):
     try:
@@ -303,14 +292,8 @@ def tumunu_senkronla():
         except Exception as e:
             log_yaz(ad, "HATA", e)
             sonuclar.append((ad, False, str(e)))
-    if ayarlar.get("tr_oto_guncelle") and any(x[1] for x in sonuclar):
-        try:
-            trendruum_oto_guncelle(ayarlar)
-        except Exception as e:
-            log_yaz("Trendruum", "HATA", e)
     return sonuclar
 
-# 6 saatte bir çalışan arka plan senkronizasyonu
 def arka_plan_dongusu():
     time.sleep(30)
     while True:
@@ -330,7 +313,7 @@ def arka_plan_baslat():
 arka_plan_baslat()
 
 # ---------------------------------------------------------------
-# TRENDRUUM & TRENDYOL API ENTEGRASYONLARI
+# TRENDRUUM API & TRENDYOL
 # ---------------------------------------------------------------
 TR_BASE = "https://api.trendruum.com/api/v1/integration"
 
@@ -367,7 +350,7 @@ def trendruum_urun_listesi(df, ayarlar, brand_id, varsayilan_cat):
             "name": str(row["urun_adi"]),
             "model_code": kod,
             "category_id": harita.get(ana) or varsayilan_cat,
-            "brand_id": brand_id,
+            "brand_id": str(brand_id),
             "children_products": [{
                 "barcode": sabit_barkod(kod),
                 "stock_code": kod,
@@ -382,7 +365,7 @@ def trendruum_urun_listesi(df, ayarlar, brand_id, varsayilan_cat):
 def trendruum_gonder(liste, token, ilerleme=None, paket=50):
     headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
     toplam = max(1, (len(liste) + paket - 1) // paket)
-    loglar, basarili, art_arda, var_olan = [], 0, 0, []
+    loglar, basarili = [], 0
     for i in range(0, len(liste), paket):
         no = i // paket + 1
         grup = liste[i:i + paket]
@@ -404,18 +387,6 @@ def trendruum_siparisler(token, durum="new", limit=50):
                      headers={"Authorization": f"Bearer {token}"}, timeout=30)
     r.raise_for_status()
     return r.json()
-
-TY_BASE = "https://apigw.trendyol.com/integration"
-def trendyol_header(seller, key, secret):
-    tok = base64.b64encode(f"{key}:{secret}".encode()).decode()
-    return {"Authorization": f"Basic {tok}", "User-Agent": f"{seller} - SelfIntegration", "Content-Type": "application/json"}
-
-def trendyol_siparisler(seller, key, secret, durum="Created", boyut=50):
-    r = requests.get(f"{TY_BASE}/order/sellers/{seller}/orders",
-                     params={"status": durum, "size": boyut},
-                     headers=trendyol_header(seller, key, secret), timeout=30)
-    r.raise_for_status()
-    return r.json().get("content", [])
 
 # ---------------------------------------------------------------
 # ŞİFRE KORUMASI
@@ -538,7 +509,7 @@ def urunleri_oku():
 sayfa = st.session_state.secili_sayfa
 
 # ---------------------------------------------------------------
-# SAYFA İÇERİKLERİ
+# SAYFA YÖNETİMLERİ
 # ---------------------------------------------------------------
 if sayfa == "🏠 Anasayfa":
     st.title("👑 Mağaza ve Pazar Yeri Özeti")
@@ -548,31 +519,6 @@ if sayfa == "🏠 Anasayfa":
     c2.metric("Stokta (>0)", f"{(df['stok'] > 0).sum():,}" if not df.empty else "0")
     c3.metric("Tükenmiş (<=0)", f"{(df['stok'] <= 0).sum():,}" if not df.empty else "0")
     c4.metric("Tedarikçi", len(ayarlar["tedarikciler"]))
-
-    st.markdown("---")
-    st.subheader("🛒 Pazar Yeri Durum Kutucukları")
-    col_p1, col_p2, col_p3 = st.columns(3)
-    with col_p1:
-        with st.container(border=True):
-            st.markdown("### 🛍️ HEPSİBURADA")
-            st.caption("Bağlantı Bekleniyor")
-        with st.container(border=True):
-            st.markdown("### 📮 E-PTT AVM")
-            st.caption("Çok Yakında")
-    with col_p2:
-        with st.container(border=True):
-            st.markdown("### 🟠 TRENDYOL")
-            st.caption("Aktif / Sipariş Bekliyor")
-        with st.container(border=True):
-            st.markdown("### 🔴 N11")
-            st.caption("Çok Yakında")
-    with col_p3:
-        with st.container(border=True):
-            st.markdown("### 🌸 ÇİÇEKSEPETİ")
-            st.caption("Çok Yakında")
-        with st.container(border=True):
-            st.markdown("### 🛒 TRENDRUUM")
-            st.caption("Aktif / Canlı Entegrasyon")
 
 elif sayfa == "📦 Sistemdeki Ürünler":
     st.title("📦 Sistemdeki Ürün Analizi")
@@ -676,22 +622,35 @@ elif "Tüm İşlemler" in sayfa:
     col_i1, col_i2, col_i3 = st.columns(3)
     with col_i1:
         if st.button("📤 Toplu Ürün Gönder"):
+            p_ayar_veri = ayarlar.get("pazar_ayarlari", {}).get(pazar, {})
+            key = p_ayar_veri.get("servis_anahtari") or kimlik(ayarlar, f"{pazar.lower()}_key")
+            secret = p_ayar_veri.get("servis_anahtari") or kimlik(ayarlar, f"{pazar.lower()}_secret")
+            brand = p_ayar_veri.get("magaza_marka") or kimlik(ayarlar, f"{pazar.lower()}_brand")
+
             if pazar == "Trendruum":
-                key, secret = kimlik(ayarlar, "trendruum_key"), kimlik(ayarlar, "trendruum_secret")
-                brand = ayarlar.get("pazar_ayarlari", {}).get("Trendruum", {}).get("magaza_marka") or kimlik(ayarlar, "trendruum_brand")
-                cat = kimlik(ayarlar, "trendruum_category")
-                if key and secret and brand:
+                # Trendruum için özel alan eşitlemesi
+                tr_key = kimlik(ayarlar, "trendruum_key") or p_ayar_veri.get("servis_anahtari")
+                tr_secret = kimlik(ayarlar, "trendruum_secret") or p_ayar_veri.get("servis_anahtari")
+                tr_brand = p_ayar_veri.get("magaza_marka") or kimlik(ayarlar, "trendruum_brand")
+                cat = kimlik(ayarlar, "trendruum_category") or "0"
+
+                if tr_key and tr_secret and tr_brand:
                     try:
-                        token = trendruum_token(key, secret)
+                        token = trendruum_token(tr_key, tr_secret)
                         df = urunleri_oku()
-                        liste, atlanan = trendruum_urun_listesi(df, ayarlar, brand, cat or "0")
+                        # Fiyat artış oranı ve kâr oranını uygula
+                        artiss = float(p_ayar_veri.get("fiyat_artis", 0.0))
+                        if artiss > 0:
+                            df["satis_fiyati"] = df["satis_fiyati"] * (1 + artiss / 100)
+                        
+                        liste, atlanan = trendruum_urun_listesi(df, ayarlar, tr_brand, cat)
                         bar, kutu = st.progress(0), st.empty()
                         ok, top, loglar = trendruum_gonder(liste, token, lambda p, l: (bar.progress(p), kutu.code("\n".join(l[-10:]))))
                         st.success(f"Trendruum Toplu Gönderim Tamamlandı: {ok}/{top} paket başarılı.")
                     except Exception as e:
                         st.error(f"Hata: {e}")
                 else:
-                    st.error("Trendruum Genel Ayarlar'dan Mağaza ID/Marka ve API Key bilgilerini girin.")
+                    st.error("Lütfen sol menüden ilgili pazar yerinin 'Genel Ayarlar' kısmından Mağaza Marka adı ve API anahtarlarını eksiksiz doldurun.")
             else:
                 st.warning(f"{pazar} toplu ürün gönderimi aktif modüldür.")
     with col_i2:
@@ -713,7 +672,9 @@ elif "Tüm İşlemler" in sayfa:
     ])
     with tab_tum:
         if pazar == "Trendruum":
-            key, secret = kimlik(ayarlar, "trendruum_key"), kimlik(ayarlar, "trendruum_secret")
+            p_ayar_veri = ayarlar.get("pazar_ayarlari", {}).get("Trendruum", {})
+            key = kimlik(ayarlar, "trendruum_key") or p_ayar_veri.get("servis_anahtari")
+            secret = kimlik(ayarlar, "trendruum_secret") or p_ayar_veri.get("servis_anahtari")
             if key and secret:
                 try:
                     token = trendruum_token(key, secret)
@@ -761,8 +722,14 @@ elif "Genel Ayarlar" in sayfa:
             "satis_orani": satis_orani,
             "fiyat_artis": fiyat_artis
         })
+        # Otomatik olarak ana kimlik alanlarına da senkronize et
+        if pazar == "Trendruum":
+            ayarlar["kimlik"]["trendruum_key"] = sanahtar.strip()
+            ayarlar["kimlik"]["trendruum_secret"] = sanahtar.strip()
+            ayarlar["kimlik"]["trendruum_brand"] = marka.strip()
+        
         ayar_yaz(ayarlar)
-        st.success(f"{pazar} entegrasyon ayarları başarıyla kaydedildi[span_2](start_span)[span_2](end_span)!")
+        st.success(f"{pazar} entegrasyon ayarları başarıyla kaydedildi ve uygulandı!")
 
     if st.button("🗑️ Entegrasyon Bilgilerimi Sil"):
         ayarlar["pazar_ayarlari"][pazar] = {}
