@@ -24,7 +24,7 @@ st.set_page_config(page_title="ŞahEntegre", page_icon="👑", layout="wide")
 BASE = Path(__file__).parent
 DB_DOSYA = BASE / "metentegre.db"
 AYAR_DOSYA = BASE / "ayarlar.json"
-SENKRON_ARALIK = 6 * 3600  # Günde 4 kez
+SENKRON_ARALIK = 6 * 3600  # Günde 4 kez otomatik
 KILIT = threading.Lock()
 
 KIMLIK_ALANLARI = [
@@ -35,7 +35,7 @@ KIMLIK_ALANLARI = [
 ]
 
 # ---------------------------------------------------------------
-# AYARLAR VE GÜVENLİK (Claude / Cloud / JSON Tam Altyapı)
+# AYARLAR VE GÜVENLİK (Cloud / Secrets / JSON Tam Altyapı)
 # ---------------------------------------------------------------
 VARSAYILAN = {
     "tedarikciler": {},
@@ -100,7 +100,7 @@ def kimlik(ayarlar, ad):
     return ayarlar.get("kimlik", {}).get(ad, "")
 
 # ---------------------------------------------------------------
-# VERİTABANI VE LOGLAMA
+# VERİTABANI
 # ---------------------------------------------------------------
 def baglan():
     conn = sqlite3.connect(DB_DOSYA, timeout=30)
@@ -313,7 +313,7 @@ def arka_plan_baslat():
 arka_plan_baslat()
 
 # ---------------------------------------------------------------
-# TRENDRUUM API ENTEGRASYONU (Gelişmiş Marka ve Kategori Desteği)
+# TRENDRUUM API ENTEGRASYONU (Çakışan Barkod Ayıklama Mantığı)
 # ---------------------------------------------------------------
 TR_BASE = "https://api.trendruum.com/api/v1/integration"
 
@@ -394,21 +394,51 @@ def trendruum_urun_listesi(df, ayarlar, brand_id, varsayilan_cat):
 def trendruum_gonder(liste, token, ilerleme=None, paket=50):
     headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
     toplam = max(1, (len(liste) + paket - 1) // paket)
-    loglar, basarili = [], 0
+    loglar, basarili, var_olan = [], 0, []
+    
     for i in range(0, len(liste), paket):
         no = i // paket + 1
         grup = liste[i:i + paket]
-        try:
-            r = requests.post(f"{TR_BASE}/products/bulk", json={"products": grup}, headers=headers, timeout=60)
+        
+        for deneme in range(5):
+            if not grup:
+                break
+            try:
+                r = requests.post(f"{TR_BASE}/products/bulk", json={"products": grup}, headers=headers, timeout=60)
+            except Exception as e:
+                loglar.append(f"⚠️ Paket {no} bağlantı hatası: {e}")
+                time.sleep(2)
+                continue
+                
             if r.status_code in (200, 202):
                 basarili += 1
-                loglar.append(f"✅ Paket {no}: {len(grup)} ürün gönderildi")
-            else:
-                loglar.append(f"❌ Paket {no}: HTTP {r.status_code} {r.text[:300]}")
-        except Exception as e:
-            loglar.append(f"⚠️ Paket {no} hata: {e}")
+                loglar.append(f"✅ Paket {no}: {len(grup)} ürün başarıyla gönderildi")
+                break
+            elif r.status_code == 422:
+                # Çakışan barkodları otomatik ayıkla ve tekrar dene
+                try:
+                    j = r.json()
+                    metin = " ".join(map(str, (j.get("errors") or {}).get("errors", []))) or r.text
+                except Exception:
+                    metin = r.text
+                
+                cakisan = set(re.findall(r"\"(\d+)\" barkodu", metin))
+                if cakisan:
+                    var = [u for u in grup if u["children_products"][0]["barcode"] in cakisan]
+                    if var:
+                        var_olan += [u["model_code"] for u in var]
+                        grup = [u for u in grup if u not in var]
+                        loglar.append(f"ℹ️ Paket {no}: {len(var)} çakışan ürün mağazada kayıtlı, ayıklandı. Kalanlar gönderiliyor...")
+                        continue
+            
+            loglar.append(f"❌ Paket {no}: HTTP {r.status_code} - {r.text[:300]}")
+            break
+
         if ilerleme:
             ilerleme(no / toplam, loglar)
+            
+    if var_olan:
+        loglar.append(f"ℹ️ Toplam {len(var_olan)} ürün zaten mağazanızda kayıtlıydı.")
     return basarili, toplam, loglar
 
 def trendruum_siparisler(token, durum="new", limit=50):
@@ -418,7 +448,52 @@ def trendruum_siparisler(token, durum="new", limit=50):
     return r.json()
 
 # ---------------------------------------------------------------
-# ARAYÜZ (Claude & Eksiksiz Altyapı Korundu)
+# GİRİŞ KORUMASI (ŞİFRE EKRANI)
+# ---------------------------------------------------------------
+def _secret_var(ad):
+    try:
+        return ad.upper() in st.secrets
+    except Exception:
+        return False
+
+def sifre_al():
+    s = os.environ.get("APP_PASSWORD")
+    if s:
+        return s
+    try:
+        if "APP_PASSWORD" in st.secrets:
+            return str(st.secrets["APP_PASSWORD"])
+    except Exception:
+        pass
+    return None
+
+sifre = sifre_al()
+if sifre and not st.session_state.get("giris_ok"):
+    st.markdown("<h1 style='text-align:center'>👑 ŞahEntegre</h1>"
+                "<p style='text-align:center'>Yönetim Paneli Girişi</p>", unsafe_allow_html=True)
+    _, orta, _ = st.columns([1, 1.2, 1])
+    with orta:
+        deneme = st.session_state.get("deneme", 0)
+        kilit_bitis = st.session_state.get("kilit_bitis", 0)
+        if time.time() < kilit_bitis:
+            st.error(f"Çok fazla hatalı deneme. {int(kilit_bitis - time.time())} sn bekleyin.")
+        else:
+            girilen = st.text_input("🔑 Yönetici Şifresi", type="password")
+            if st.button("Giriş Yap", type="primary", use_container_width=True):
+                if hmac.compare_digest(girilen.encode(), str(sifre).encode()):
+                    st.session_state.giris_ok = True
+                    st.session_state.deneme = 0
+                    st.rerun()
+                else:
+                    st.session_state.deneme = deneme + 1
+                    if st.session_state.deneme >= 5:
+                        st.session_state.kilit_bitis = time.time() + 60
+                        st.session_state.deneme = 0
+                    st.error("❌ Hatalı şifre.")
+    st.stop()
+
+# ---------------------------------------------------------------
+# ARAYÜZ & YAN MENÜ
 # ---------------------------------------------------------------
 if "ayarlar" not in st.session_state:
     st.session_state.ayarlar = ayar_oku()
@@ -485,6 +560,31 @@ if sayfa == "🏠 Anasayfa":
     c2.metric("Stokta (>0)", f"{(df['stok'] > 0).sum():,}" if not df.empty else "0")
     c3.metric("Tükenmiş (<=0)", f"{(df['stok'] <= 0).sum():,}" if not df.empty else "0")
     c4.metric("Tedarikçi", len(ayarlar["tedarikciler"]))
+
+    st.markdown("---")
+    st.subheader("🛒 Pazar Yeri Durum Kutucukları")
+    col_p1, col_p2, col_p3 = st.columns(3)
+    with col_p1:
+        with st.container(border=True):
+            st.markdown("### 🛍️ HEPSİBURADA")
+            st.caption("Bağlantı Bekleniyor | Sipariş: 0")
+        with st.container(border=True):
+            st.markdown("### 📮 E-PTT AVM")
+            st.caption("Modül Aktif | Sipariş: 0")
+    with col_p2:
+        with st.container(border=True):
+            st.markdown("### 🟠 TRENDYOL")
+            st.caption("Aktif Entegrasyon | Sipariş Bekliyor")
+        with st.container(border=True):
+            st.markdown("### 🔴 N11")
+            st.caption("Modül Aktif | Sipariş: 0")
+    with col_p3:
+        with st.container(border=True):
+            st.markdown("### 🌸 ÇİÇEKSEPETİ")
+            st.caption("Modül Aktif | Sipariş: 0")
+        with st.container(border=True):
+            st.markdown("### 🛒 TRENDRUUM")
+            st.caption("Canlı Entegrasyon | Aktif")
 
 elif sayfa == "📦 Sistemdeki Ürünler":
     st.title("📦 Sistemdeki Ürün Analizi")
@@ -611,7 +711,7 @@ elif "Tüm İşlemler" in sayfa:
                     except Exception as e:
                         st.error(f"Hata: {e}")
                 else:
-                    st.error("Lütfen Genel Ayarlar kısmından 24 haneli Kategori ID ve 24 haneli Marka ObjectId değerlerini canlı sorgulayıp kaydedin.")
+                    st.error("Lütfen Genel Ayarlar kısmından 24 haneli Kategori ID ve 24 haneli Marka ObjectId değerlerini sorgulayıp kaydedin.")
             else:
                 st.warning(f"{pazar} toplu ürün gönderimi aktif modüldür.")
     with col_i2:
@@ -671,7 +771,7 @@ elif "Genel Ayarlar" in sayfa:
 
     if pazar == "Trendruum":
         st.markdown("### 🏷️ Trendruum Marka Seçimi (24 haneli Brand ObjectId)")
-        m_arama = st.text_input("Marka Adı Girin (Örn: Irmak, Şah mat vb.)", value=p_ayar.get("magaza_marka", "Irmak"))
+        m_arama = st.text_input("Marka Adı Girin", value=p_ayar.get("magaza_marka", "Irmak"))
         marka_id_mevcut = p_ayar.get("marka_id", kimlik(ayarlar, "trendruum_brand"))
         
         if st.button("🔍 Marka Ara ve ID Getir"):
