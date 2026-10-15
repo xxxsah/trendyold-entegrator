@@ -1594,7 +1594,6 @@ elif sayfa == "Urunler":
     if df.empty:
         st.info("Henüz ürün yok.")
     else:
-        # Görsel sütununu en başa alıyoruz ve tabloyu daha geniş gösteriyoruz
         kolonlar = ["gorsel"] + [c for c in df.columns if c not in ("gorsel", "id")]
         goster_df = df[kolonlar].rename(columns={
             "gorsel": "Görsel", "tedarikci": "Tedarikçi", "barkod": "Barkod", "urun_adi": "Ürün Adı",
