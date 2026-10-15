@@ -304,7 +304,7 @@ def arka_plan_baslat():
 arka_plan_baslat()
 
 # ---------------------------------------------------------------
-# TRENDRUUM API ENTEGRASYONU
+# TRENDRUUM API & BARKOD KONTROLÜ
 # ---------------------------------------------------------------
 TR_BASE = "https://api.trendruum.com/api/v1/integration"
 
@@ -424,7 +424,7 @@ def trendruum_gonder(liste, token, ilerleme=None, paket=50):
             loglar.append(f"❌ Paket {no}: HTTP {r.status_code} - {r.text[:200]}")
             break
 
-        time.sleep(0.3)  # Sunucu aşımını önlemek için kısa bekleme
+        time.sleep(0.3)
         if ilerleme:
             ilerleme(no / toplam, loglar)
             
@@ -439,7 +439,7 @@ def trendruum_siparisler(token, durum="new", limit=50):
     return r.json()
 
 # ---------------------------------------------------------------
-# GİRİŞ KORUMASI
+# ŞİFRE KORUMASI
 # ---------------------------------------------------------------
 def _secret_var(ad):
     try:
@@ -579,26 +579,72 @@ if sayfa == "🏠 Anasayfa":
 
 elif sayfa == "📦 Sistemdeki Ürünler":
     st.title("📦 Sistemdeki Ürün Analizi")
+    st.caption("Sistemimizde mevcut ürünler, stok durumları ve detaylı analizler.")
+
     df = urunleri_oku()
+    
+    # Görsellerdeki gibi metrik kartları ekleyelim
+    toplam_kat = df["kategori"].nunique() if not df.empty and "kategori" in df.columns else 0
+    toplam_urun = len(df)
+    stoklu_urun = int((df["stok"] > 0).sum()) if not df.empty else 0
+    tukenmis_urun = int((df["stok"] <= 0).sum()) if not df.empty else 0
+
+    m1, m2, m3 = st.columns(3)
+    m1.metric("TOPLAM SİSTEM KATEGORİSİ", f"{toplam_kat:,}")
+    m2.metric("TOPLAM SİSTEM ÜRÜNÜ", f"{toplam_urun:,}")
+    m3.metric("STOKLU ÜRÜNLER (>0)", f"{stoklu_urun:,}")
+
+    m4, m5 = st.columns(2)
+    m4.metric("TÜKENMİŞ ÜRÜNLER (<=0)", f"{tukenmis_urun:,}")
+    m5.metric("BU SAYFADAKI ÜRÜN", f"{min(50, toplam_urun):,}")
+
+    st.markdown("---")
+    
+    # Stokları Çek Butonu
     if st.button("📦 Stokları Çek ve Yenile", type="primary"):
         with st.spinner("XML'ler taranıyor..."):
             tumunu_senkronla()
         st.success("Stoklar güncellendi!")
         st.rerun()
-    
+
     if not df.empty:
-        ara = st.text_input("🔍 Ürün Adı veya Barkod Ara")
+        # Filtre Butonları ve Arama Alanı (İstediğin ekran görüntüsündeki yapı)
+        f_col1, f_col2, f_col3, f_col4 = st.columns([1, 1, 2, 1])
+        with f_col1:
+            sekme = st.radio("Filtre", ["Tümü", "Stoklu", "Tükenmişler"], horizontal=True, label_visibility="collapsed")
+        
         goruntu = df.copy()
+        if sekme == "Stoklu":
+            goruntu = goruntu[goruntu["stok"] > 0]
+        elif sekme == "Tükenmişler":
+            goruntu = goruntu[goruntu["stok"] <= 0]
+
+        ara = st.text_input("SKU, model, ürün adı... (Enter)", placeholder="SKU, model, ürün adı...")
         if ara:
             goruntu = goruntu[goruntu["urun_adi"].str.contains(ara, case=False, na=False) | goruntu["barkod"].str.contains(ara, case=False, na=False)]
         
+        # Sayfalama ve Tablo Görünümü
+        sayfa_boyutu = st.selectbox("Sayfa Başına Gösterim", [50, 100, 200, 500], index=0, label_visibility="collapsed")
+        
+        # İstediğin sütun sırası: #, Resim, Ürün ID / Barkod, Ürün Adı, Fiyat vb.
+        gosterim_df = goruntu.head(sayfa_boyutu).copy()
+        gosterim_df.insert(0, "Sıra", range(1, len(gosterim_df) + 1))
+        
         st.dataframe(
-            goruntu.head(200),
-            column_config={"gorsel": st.column_config.ImageColumn("Görsel", width="small")},
+            gosterim_df[["Sıra", "gorsel", "barkod", "urun_adi", "stok", "satis_fiyati", "kategori"]],
+            column_config={
+                "Sıra": "#",
+                "gorsel": st.column_config.ImageColumn("RESİM", width="small"),
+                "barkod": "ÜRÜN ID / BARKOD",
+                "urun_adi": "ÜRÜN ADI",
+                "stok": "STOK",
+                "satis_fiyati": "SATIŞ FİYATI",
+                "kategori": "KATEGORİ"
+            },
             use_container_width=True, hide_index=True
         )
     else:
-        st.info("Veritabanında ürün bulunamadı.")
+        st.info("Veritabanında ürün bulunamadı. Lütfen 'Tedarikçiler & XML' sayfasından stokları çekin.")
 
 elif sayfa == "🔗 Tedarikçiler & XML":
     st.title("Tedarikçi ve XML Yönetimi")
