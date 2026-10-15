@@ -663,8 +663,7 @@ def n11_stok_fiyat(key, secret, df):
         pass
     return ok, log
 
-def def n11_yeni_urun_gonder(key, secret, df, varsayilan_kategori=""):
-    """N11 tarafında yeni ürün oluşturma API entegrasyonu."""
+def n11_yeni_urun_gonder(key, secret, df, varsayilan_kategori=""):
     ok, log, ok_b, hata_b = 0, [], [], []
     
     for _, r in df.iterrows():
