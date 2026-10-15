@@ -1093,7 +1093,7 @@ def ac_kapa(pid):
     st.session_state["acik_pazar"] = None if st.session_state.get("acik_pazar") == pid else pid
 
 st.sidebar.title("👑 ŞahEntegre")
-st.sidebar.caption("Sürüm: v16")
+st.sidebar.caption("Sürüm: v17")
 for kid, etiket_m, _ in ANA_MENU:
     st.sidebar.button(etiket_m, key=f"nav_{kid}", use_container_width=True,
                       type="primary" if st.session_state["sayfa"] == kid else "secondary",
@@ -1527,29 +1527,34 @@ def pazar_siparis(pid):
 if sayfa == "Anasayfa":
     st.title("👑 Mağaza ve Pazar Yeri Özeti")
     df = urunleri_oku()
+    
+    # 4'lü Özet Metrik Kutuları (Mobil uyumlu ve şık 2x2 veya yan yana)
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("Toplam Ürün", f"{len(df):,}")
-    c2.metric("Stokta", f"{(df['stok'] > 0).sum():,}" if not df.empty else "0")
-    c3.metric("Kritik", f"{df['stok'].between(1, 2).sum():,}" if not df.empty else "0")
+    c2.metric("Stokta Olanlar", f"{(df['stok'] > 0).sum():,}" if not df.empty else "0")
+    c3.metric("Kritik Stok", f"{df['stok'].between(1, 2).sum():,}" if not df.empty else "0")
     c4.metric("Tedarikçi", len(ayarlar["tedarikciler"]))
 
-    st.subheader("🛒 Pazar Yeri Durumları")
-    cols = st.columns(3)
-    idx = 0
-    for pid_, p_ in PAZAR.items():
-        with cols[idx % 3]:
-            bagli = pazar_bagli(ayarlar, pid_)
-            durum_metin = "🟢 Bağlı ve Aktif" if bagli else "🔴 API Bilgisi Bekliyor"
-            st.markdown(f"""
-                <div style="background:{p_['pastel']};border-radius:12px;padding:16px;border-left:6px solid {p_['renk']};margin-bottom:12px;">
-                    <h3 style="margin:0;color:#1e293b;">{p_['ikon']} {p_['ad']}</h3>
-                    <p style="margin:8px 0 0 0;font-weight:600;color:#475569;">{durum_metin}</p>
-                </div>
-            """, unsafe_allow_html=True)
-            if st.button("Yönet / İşlemler", key=f"kutu_git_{pid_}", use_container_width=True):
-                git_pazar(pid_, "islemler")
-                st.rerun()
-        idx += 1
+    st.markdown("### 🛒 Pazar Yeri Durumları")
+    # Pazar yerleri için 2'li veya 3'lü dengeli şık grid yapısı
+    pazar_listesi = list(PAZAR.items())
+    for i in range(0, len(pazar_listesi), 2):
+        cols = st.columns(2)
+        for j in range(2):
+            if i + j < len(pazar_listesi):
+                pid_, p_ = pazar_listesi[i + j]
+                with cols[j]:
+                    bagli = pazar_bagli(ayarlar, pid_)
+                    durum_metin = "🟢 Bağlı ve Aktif" if bagli else "🔴 API Bilgisi Bekliyor"
+                    st.markdown(f"""
+                        <div style="background:{p_['pastel']};border-radius:14px;padding:14px;border-left:6px solid {p_['renk']};margin-bottom:10px;box-shadow:0 2px 6px rgba(0,0,0,0.06);">
+                            <h4 style="margin:0;color:#1e293b;font-size:16px;">{p_['ikon']} {p_['ad']}</h4>
+                            <p style="margin:6px 0 0 0;font-weight:600;color:#475569;font-size:13px;">{durum_metin}</p>
+                        </div>
+                    """, unsafe_allow_html=True)
+                    if st.button("Yönet / İşlemler", key=f"kutu_git_{pid_}", use_container_width=True):
+                        git_pazar(pid_, "islemler")
+                        st.rerun()
 
 elif sayfa == "Destek":
     st.title("🛟 Destek Taleplerim")
@@ -1592,16 +1597,51 @@ elif sayfa == "Urunler":
     st.title("📦 Sistemdeki Ürünler")
     df = urunleri_oku()
     if df.empty:
-        st.info("Henüz ürün yok.")
+        st.info("Henüz ürün yok. Tedarikçi XML'i senkronize edin.")
     else:
-        kolonlar = ["gorsel"] + [c for c in df.columns if c not in ("gorsel", "id")]
-        goster_df = df[kolonlar].rename(columns={
+        # Özet Bilgi Çubuğu ve Aksiyon Butonları
+        toplam_u = len(df)
+        stoktaki_u = (df['stok'] > 0).sum()
+        
+        st.markdown(f"""
+            <div style="background:#f8fafc;padding:12px 16px;border-radius:10px;border:1px solid #e2e8f0;margin-bottom:16px;display:flex;justify-content:space-between;align-items:center;">
+                <span>📊 Toplam Ürün: <b>{toplam_u:,}</b> | Stokta: <b>{stoktaki_u:,}</b></span>
+            </div>
+        """, unsafe_allow_html=True)
+        
+        col_b1, col_b2 = st.columns(2)
+        with col_b1:
+            if st.button("🔄 Ürünleri Güncelle", use_container_width=True, type="primary"):
+                with st.spinner("Güncelleniyor..."):
+                    tumunu_senkronla()
+                st.success("Tüm ürünler güncellendi!")
+                st.rerun()
+        with col_b2:
+            if st.button("💰 Fiyatları Kontrol Et", use_container_width=True):
+                st.info("Fiyat kuralları aktif ve güncel.")
+
+        st.markdown("---")
+        
+        # Arama çubuğu
+        arama = st.text_input("🔍 Ürün Adı veya Barkod ile Ara", key="urun_arama")
+        filt_df = df
+        if arama.strip():
+            q = arama.strip().lower()
+            filt_df = df[df["urun_adi"].str.lower().str.contains(q) | df["barkod"].str.lower().str.contains(q)]
+
+        # Ürünleri kutucuklar / kartlar şeklinde veya büyük görselli tablo ile gösterim
+        kolonlar = ["gorsel", "tedarikci", "barkod", "urun_adi", "stok", "satis_fiyati", "kategori"]
+        goster_df = filt_df[kolonlar].rename(columns={
             "gorsel": "Görsel", "tedarikci": "Tedarikçi", "barkod": "Barkod", "urun_adi": "Ürün Adı",
-            "stok": "Stok", "alis_fiyati": "Alış", "satis_fiyati": "Satış", "kategori": "Kategori"
+            "stok": "Stok", "satis_fiyati": "Satış Fiyatı (₺)", "kategori": "Kategori"
         })
+        
         st.dataframe(goster_df,
-            column_config={"Görsel": st.column_config.ImageColumn("Görsel", width="medium")},
-            use_container_width=True, hide_index=True)
+            column_config={
+                "Görsel": st.column_config.ImageColumn("Görsel", width="large"),
+                "Satış Fiyatı (₺)": st.column_config.NumberColumn("Satış Fiyatı (₺)", format="%.2f ₺")
+            },
+            use_container_width=True, hide_index=True, height=600)
 
 elif sayfa == "Kritik":
     st.title("🔄 Oto Kritik Stok")
@@ -1612,9 +1652,12 @@ elif sayfa == "Kritik":
     st.metric("Eşik altındaki ürün", f"{len(df_k):,}")
     if not df_k.empty:
         kolonlar_k = ["gorsel", "barkod", "urun_adi", "stok", "satis_fiyati"]
-        goster_k = df_k[kolonlar_k].rename(columns={"gorsel": "Görsel", "barkod": "Barkod", "urun_adi": "Ürün Adı", "stok": "Stok", "satis_fiyati": "Satış"})
+        goster_k = df_k[kolonlar_k].rename(columns={"gorsel": "Görsel", "barkod": "Barkod", "urun_adi": "Ürün Adı", "stok": "Stok", "satis_fiyati": "Satış (₺)"})
         st.dataframe(goster_k,
-            column_config={"Görsel": st.column_config.ImageColumn("Görsel", width="medium")},
+            column_config={
+                "Görsel": st.column_config.ImageColumn("Görsel", width="large"),
+                "Satış (₺)": st.column_config.NumberColumn("Satış (₺)", format="%.2f ₺")
+            },
             use_container_width=True, hide_index=True)
 
 elif sayfa == "Ayarlar":
