@@ -410,6 +410,10 @@ def fiyat_artis_uygula(ayarlar, pid, df):
 TR_BASE = "https://api.trendruum.com/api/v1/integration"
 
 
+def objectid_mi(v):
+    return bool(re.fullmatch(r"[0-9a-fA-F]{24}", str(v or "").strip()))
+
+
 def gecerli_barkod(kod):
     k = str(kod).strip()
     return k if k.isdigit() and 8 <= len(k) <= 14 else None
@@ -463,7 +467,7 @@ def trendruum_urun_listesi(df, ayarlar, brand_id, varsayilan_cat):
         liste.append({
             "name": str(row["urun_adi"]),
             "model_code": kod,
-            "category_id": harita.get(ana) or varsayilan_cat,
+            "category_id": (str(harita.get(ana) or "").strip() if objectid_mi(harita.get(ana)) else varsayilan_cat),
             "brand_id": brand_id,
             "children_products": [{
                 "barcode": barkod,
@@ -635,7 +639,9 @@ def trendruum_kategoriler(token):
     def gez(liste):
         for k in liste or []:
             alt = k.get("sub_categories") or []
-            duz.append({"id": k.get("id"), "ad": k.get("name", ""),
+            adaylar = [k.get("id"), k.get("_id"), k.get("category_id"), k.get("object_id")]
+            kid = next((x for x in adaylar if objectid_mi(x)), k.get("id") or k.get("_id"))
+            duz.append({"id": kid, "ad": k.get("name", ""),
                         "yol": k.get("full_path") or k.get("name", ""),
                         "parent": k.get("parent_id"), "alt": bool(alt)})
             gez(alt)
@@ -1371,6 +1377,11 @@ def trendruum_toplu_panel():
         if eksik:
             st.error("Eksik alan: " + ", ".join(eksik) + ". Genel Ayarları sayfasından doldurun.")
             return
+        gecersiz = [ad for ad, v in (("Brand ID", brand), ("Varsayılan Kategori ID", cat)) if not objectid_mi(v)]
+        if gecersiz:
+            st.error(", ".join(gecersiz) + " geçersiz: 24 karakterlik ID olmalı (isim/slug olmaz). "
+                     "Genel Ayarları'ndaki arama ile yeniden seçin.")
+            return
         df = urunleri_oku()
         if tek_stok:
             df = df[df["stok"] > 0]
@@ -1444,7 +1455,9 @@ def trendruum_marka_kategori():
                 sec_k = st.selectbox("Sonuçlar", bulunan,
                                      format_func=lambda k: f"{k['yol'] or k['ad']}" + ("" if k["yaprak"] else "  (üst kategori)"))
                 st.code(sec_k["id"])
-                if st.button("Varsayılan kategori yap"):
+                if not objectid_mi(sec_k["id"]):
+                    st.warning("Bu kategorinin ID'si 24 karakterlik ObjectId değil, seçmeyin.")
+                if st.button("Varsayılan kategori yap", disabled=not objectid_mi(sec_k["id"])):
                     ayarlar["kimlik"]["trendruum_category"] = sec_k["id"]
                     ayar_yaz(ayarlar)
                     st.rerun()
