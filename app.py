@@ -641,9 +641,22 @@ def trendruum_kategoriler(token):
             alt = k.get("sub_categories") or []
             adaylar = [k.get("id"), k.get("_id"), k.get("category_id"), k.get("object_id")]
             kid = next((x for x in adaylar if objectid_mi(x)), k.get("id") or k.get("_id"))
-            duz.append({"id": kid, "ad": k.get("name", ""),
-                        "yol": k.get("full_path") or k.get("name", ""),
-                        "parent": k.get("parent_id"), "alt": bool(alt)})
+            def _ad(x):
+                for an in ("name", "title", "label", "category_name", "ad"):
+                    v = x.get(an)
+                    if isinstance(v, dict):
+                        v = v.get("tr") or next((y for y in v.values() if y), "")
+                    if v:
+                        return str(v)
+                return ""
+            ad_ = _ad(k)
+            yol_ = k.get("full_path") or k.get("path") or k.get("breadcrumb") or ad_
+            if isinstance(yol_, list):
+                yol_ = " > ".join(str(y) for y in yol_)
+            duz.append({"id": kid, "ad": ad_, "yol": str(yol_ or ad_),
+                        "parent": k.get("parent_id") or k.get("parentId"), "alt": bool(alt),
+                        "ham": json.dumps({a_: v_ for a_, v_ in k.items() if not isinstance(v_, (list, dict))},
+                                          ensure_ascii=False)})
             gez(alt)
 
     gez(veri)
@@ -1442,18 +1455,20 @@ def trendruum_marka_kategori():
                 st.error(f"Hata: {e}")
     kats = st.session_state.get("tr_kat", [])
     if kats:
+        with st.expander("🔧 Ham kategori örneği (sorun giderme)"):
+            st.json(kats[:3])
         kat_ara = st.text_input("Kategori ara", key="kat_ara")
         hepsi = st.checkbox("Üst kategorileri de göster", key="kat_hepsi")
         if kat_ara.strip():
             q = tr_kucuk(kat_ara)
             bulunan = [k for k in kats if (hepsi or k["yaprak"]) and
-                       (q in tr_kucuk(k["yol"]) or q in tr_kucuk(k["ad"]))][:50]
+                       (q in tr_kucuk(k["yol"]) or q in tr_kucuk(k["ad"]) or q in tr_kucuk(k.get("ham", "")))][:50]
             if not bulunan:
                 st.warning("Sonuç yok. Daha kısa bir kelime deneyin ya da 'Üst kategorileri de göster'i açın.")
             else:
                 st.caption(f"{len(bulunan)} sonuç")
                 sec_k = st.selectbox("Sonuçlar", bulunan,
-                                     format_func=lambda k: f"{k['yol'] or k['ad']}" + ("" if k["yaprak"] else "  (üst kategori)"))
+                                     format_func=lambda k: f"{k['yol'] or k['ad'] or k.get('ham', '')[:80]}" + ("" if k["yaprak"] else "  (üst kategori)"))
                 st.code(sec_k["id"])
                 if not objectid_mi(sec_k["id"]):
                     st.warning("Bu kategorinin ID'si 24 karakterlik ObjectId değil, seçmeyin.")
