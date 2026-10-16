@@ -423,6 +423,9 @@ def sabit_barkod(kod, uret=False):
         return g
     if not uret:
         return None
+    temiz = "".join(ch for ch in str(kod) if ch.isdigit())  # eski sürümle birebir aynı eşleme
+    if len(temiz) >= 8:
+        return temiz
     h = int(hashlib.md5(str(kod).encode()).hexdigest(), 16) % 10**9
     return f"869{h:09d}"
 
@@ -1623,10 +1626,10 @@ def pazar_ayar(pid):
         pa = ayarlar.setdefault("pazar_ayarlari", {}).setdefault(pid, {})
         kdv = st.selectbox("KDV oranı (%)", [0, 1, 10, 20], index=[0, 1, 10, 20].index(int(pa.get("kdv", 20) or 20))
                            if int(pa.get("kdv", 20) or 20) in (0, 1, 10, 20) else 3, key="tr_kdv")
-        gecici = st.checkbox("Geçerli barkodu olmayan ürünlere GEÇİCİ barkod üret (önerilmez)",
+        gecici = st.checkbox("Eski barkod eşlemesini kullan (daha önce Trendruum'a gönderilen ürünler için)",
                              value=bool(pa.get("gecici_barkod", False)), key="tr_gecici")
-        st.caption("Kapalıyken 8-14 haneli sayısal barkodu olmayan ürünler pazar yerine gönderilmez. "
-                   "Uydurma barkod, pazar yerinde katalog eşleşmesini ve ürün kalitesini bozabilir.")
+        st.caption("Kapalıyken 8-14 haneli sayısal barkodu olmayan ürünler atlanır. Ürünlerinizi daha önce eski sürümle "
+                   "gönderdiyseniz bu kutuyu açın, aynı barkodlarla güncellenirler.")
         if kdv != pa.get("kdv", 20) or gecici != bool(pa.get("gecici_barkod", False)):
             pa["kdv"], pa["gecici_barkod"] = kdv, gecici
             ayar_yaz(ayarlar)
