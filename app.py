@@ -1366,8 +1366,10 @@ def trendruum_toplu_panel():
     miktar = st.selectbox("Gönderilecek ürün", ["Tek ürün (test)", "İlk 100", "İlk 500", "Tümü"], key="tp_miktar")
     tek_stok = st.checkbox("Sadece stokta olanları gönder", value=True, key="tp_stok")
     if st.button("📤 Trendruum'a Gönder", type="primary", key="tp_gonder"):
-        if not (key and secret and brand and cat):
-            st.error("Key, Secret, Brand ID ve Kategori ID zorunlu.")
+        eksik = [ad for ad, v in (("API Key", key), ("API Secret", secret),
+                                  ("Brand ID", brand), ("Varsayılan Kategori ID", cat)) if not v]
+        if eksik:
+            st.error("Eksik alan: " + ", ".join(eksik) + ". Genel Ayarları sayfasından doldurun.")
             return
         df = urunleri_oku()
         if tek_stok:
@@ -1430,11 +1432,17 @@ def trendruum_marka_kategori():
     kats = st.session_state.get("tr_kat", [])
     if kats:
         kat_ara = st.text_input("Kategori ara", key="kat_ara")
+        hepsi = st.checkbox("Üst kategorileri de göster", key="kat_hepsi")
         if kat_ara.strip():
             q = tr_kucuk(kat_ara)
-            bulunan = [k for k in kats if k["yaprak"] and q in tr_kucuk(k["yol"])][:50]
-            if bulunan:
-                sec_k = st.selectbox("Sonuçlar", bulunan, format_func=lambda k: k["yol"])
+            bulunan = [k for k in kats if (hepsi or k["yaprak"]) and
+                       (q in tr_kucuk(k["yol"]) or q in tr_kucuk(k["ad"]))][:50]
+            if not bulunan:
+                st.warning("Sonuç yok. Daha kısa bir kelime deneyin ya da 'Üst kategorileri de göster'i açın.")
+            else:
+                st.caption(f"{len(bulunan)} sonuç")
+                sec_k = st.selectbox("Sonuçlar", bulunan,
+                                     format_func=lambda k: f"{k['yol'] or k['ad']}" + ("" if k["yaprak"] else "  (üst kategori)"))
                 st.code(sec_k["id"])
                 if st.button("Varsayılan kategori yap"):
                     ayarlar["kimlik"]["trendruum_category"] = sec_k["id"]
