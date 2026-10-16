@@ -1414,7 +1414,11 @@ def trendruum_toplu_panel():
             bar, kutu = st.progress(0), st.empty()
             ok, top, loglar = trendruum_gonder(
                 liste, token, lambda p, l: (bar.progress(min(p, 1.0)), kutu.code("\n".join(l[-15:]))))
-            st.success(f"Tamamlandı: {ok}/{top} paket başarılı.")
+            if ok == 0:
+                st.warning("Hiçbir paket yeni ürün olarak kabul edilmedi. Ürünler mağazada zaten kayıtlıysa "
+                           "bunlar için 'Tüm Stok/Fiyatları Güncelle' ve 'Durum Aç/Kapat' işlemlerini kullanın.")
+            else:
+                st.success(f"Tamamlandı: {ok}/{top} paket başarılı.")
         except Exception as e:
             st.error(f"Hata: {e}")
 
