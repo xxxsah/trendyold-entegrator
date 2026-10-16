@@ -1455,6 +1455,9 @@ def tam_senkron(pid):
     with st.spinner("Tedarikçi XML'leri çekiliyor..."):
         for ad_, ok, msg in tumunu_senkronla(oto=False):
             (st.success if ok else st.error)(f"{ad_}: {msg}")
+    if urunleri_oku().empty:
+        st.warning("Hiç ürün çekilemedi. Ayarlar > Tedarikçiler & XML'de tedarikçi ekli mi kontrol edin.")
+        return
     if pazar_bagli(ayarlar, pid):
         with st.spinner("Pazar yerine gönderiliyor..."):
             try:
@@ -1466,6 +1469,9 @@ def tam_senkron(pid):
 
 
 def tum_barkodlar(pid):
+    if urunleri_oku().empty:
+        st.warning("Sistemde ürün yok. Önce Ayarlar > Tedarikçiler & XML'den tedarikçi ekleyip senkronlayın.")
+        return
     with st.spinner("Tüm barkodlar gönderiliyor..."):
         try:
             g, h, msg = pazara_gonder(ayarlar, pid, urunleri_oku())
@@ -1496,7 +1502,10 @@ def pazar_islemler(pid):
     if c1.button("🔄 Tam Senkronizasyon", key=f"b1_{pid}", type="primary"):
         st.session_state[k] = None
         if "sync" in cap:
-            tam_senkron(pid) if bagli else st.warning("Önce API bilgilerini girin.")
+            if bagli:
+                tam_senkron(pid)
+            else:
+                st.warning("Önce API bilgilerini girin.")
         else:
             st.info(yok_mesaj)
     if c2.button("⚠️ Kritik Stok Sıfırla", key=f"b2_{pid}"):
@@ -1504,7 +1513,10 @@ def pazar_islemler(pid):
     if c3.button("🔢 Tüm Stok/Fiyatları Güncelle", key=f"b3_{pid}"):
         st.session_state[k] = None
         if "barkod" in cap:
-            tum_barkodlar(pid) if bagli else st.warning("Önce API bilgilerini girin.")
+            if bagli:
+                tum_barkodlar(pid)
+            else:
+                st.warning("Önce API bilgilerini girin.")
         else:
             st.info(yok_mesaj)
 
