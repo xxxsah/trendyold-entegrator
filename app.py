@@ -671,7 +671,7 @@ def trendyol_stok_fiyat(seller, key, secret, df):
         pass
     return ok, log
 
-HB_BASE = "https://merchant-api.hepsiburada.com"
+HB_BASE = "https://listing-external.hepsiburada.com"
 
 def hepsiburada_header(user, password):
     tok = base64.b64encode(f"{user}:{password}".encode()).decode()
@@ -697,7 +697,7 @@ def hepsiburada_stok_fiyat(merchant_id, user, password, df, ayarlar=None):
         grup = items[i:i + 500]
         no = i // 500 + 1
         try:
-            r = http("POST", f"{HB_BASE}/products/listings/merchantid/{merchant_id}/price-and-inventory",
+            r = http("POST", f"{HB_BASE}/listings/merchantid/{merchant_id}/price-and-inventory",
                      json={"items": grup}, headers=hepsiburada_header(user, password), timeout=60)
         except Exception as e:
             hata_b += [x["merchantSku"] for x in grup]
@@ -1017,8 +1017,15 @@ def baglanti_testi(ayarlar, pid):
                      headers=trendyol_header(s_, k_, x_), timeout=30)
         elif pid == "hb":
             m_, u_, p_ = kimlik(ayarlar, "hb_merchant_id"), kimlik(ayarlar, "hb_user"), kimlik(ayarlar, "hb_pass")
-            r = http("GET", f"{HB_BASE}/products/listings/merchantid/{m_}", params={"page": 1, "limit": 1},
-                     headers=hepsiburada_header(u_, p_), timeout=30)
+            # Hepsiburada güncel endpoint testi
+            r = requests.post(f"{HB_BASE}/listings/merchantid/{m_}/price-and-inventory",
+                              json={"items": []}, headers=hepsiburada_header(u_, p_), timeout=30)
+            if r.status_code in (200, 201, 202, 400):
+                return True, f"Hepsiburada API Bağlantısı Başarılı! (HTTP {r.status_code})"
+            elif r.status_code == 401:
+                return False, "Hatalı Giriş (HTTP 401): Kullanıcı adı veya Servis Anahtarı (şifre) yanlış."
+            else:
+                return False, f"HTTP {r.status_code}: {r.text[:300]}"
         elif pid == "n11":
             r = http("GET", f"{N11_BASE}/rest/delivery/v1/shipmentPackages",
                      params={"status": "Created", "page": 0, "size": 1},
@@ -1341,7 +1348,7 @@ def ac_kapa(pid):
     st.session_state["acik_pazar"] = None if st.session_state.get("acik_pazar") == pid else pid
 
 st.sidebar.title("👑 ŞahEntegre")
-st.sidebar.caption("Sürüm: v33 - HB Önek Destekli Tam Sürüm")
+st.sidebar.caption("Sürüm: v34 - HB API Güncellendi")
 for kid, etiket_m, _ in ANA_MENU:
     st.sidebar.button(etiket_m, key=f"nav_{kid}", use_container_width=True,
                       type="primary" if st.session_state["sayfa"] == kid else "secondary",
@@ -1787,7 +1794,6 @@ def pazar_ayar(pid):
         kargo = st.number_input("Sabit kargo fiyatı (TL)", 0.0, 5000.0, float(pa.get("sabit_kargo", 0.0)), 5.0, key=f"kargo_{pid}")
         artis = st.number_input("Ek fiyat artışı (%)", 0.0, 100.0, float(pa.get("fiyat_artis", 0.0)), 0.5, key=f"artis_{pid}")
         
-        # Hepsiburada için özel SKU Öneki ayarı
         if pid == "hb":
             sku_prefix = st.text_input("Merchant SKU Öneki (Örn: SAH-)", value=pa.get("sku_prefix", ""), key=f"sku_prefix_{pid}")
             if sku_prefix != pa.get("sku_prefix", ""):
