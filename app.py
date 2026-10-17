@@ -525,4 +525,94 @@ def trendyol_siparisler(seller, key, secret, durum="Created", boyut=50):
              params={"status": durum, "size": boyut, "orderByField": "PackageLastModifiedDate",
                      "orderByDirection": "DESC"},
              headers=trendyol_header(seller, key, secret), timeout=30)
-v = r.json().get("content", [])
+    r.raise_for_status()
+    return r.json().get("content", [])
+
+
+def trendyol_stok_fiyat(seller, key, secret, df):
+    items = [{"barcode": str(r["barkod"]), "quantity": int(min(max(r["stok"], 0), 20000)),
+              "salePrice": float(r["satis_fiyati"]), "listPrice": float(r["satis_fiyati"])}
+             for _, r in df.iterrows() if r["satis_fiyati"] > 0]
+    ok, log, ok_b, hata_b = 0, [], [], []
+    for i in range(0, len(items), 1000):
+        grup = items[i:i + 1000]
+        no = i // 1000 + 1
+        try:
+            r = http("POST", f"{TY_BASE}/inventory/sellers/{seller}/products/price-and-inventory",
+                     json={"items": grup}, headers=trendyol_header(seller, key, secret), timeout=60)
+        except Exception as e:
+            hata_b += [x["barcode"] for x in grup]
+            log.append(f"⚠️ Paket {no}: {e}")
+            continue
+        if r.status_code == 200:
+            ok += len(grup)
+            ok_b += [x["barcode"] for x in grup]
+            log.append(f"✅ Paket {no}: {len(grup)} kalem kuyruğa alındı")
+        else:
+            hata_b += [x["barcode"] for x in grup]
+            log.append(f"❌ Paket {no}: HTTP {r.status_code} {r.text[:200]}")
+    try:
+        pazar_isaretle("trendyol", ok_b, hata_b)
+    except Exception:
+        pass
+    return ok, log
+
+
+N11_BASE = "https://api.n11.com"
+
+
+def n11_header(key, secret):
+    return {"appKey": key, "appSecret": secret, "Content-Type": "application/json"}
+
+
+def n11_stok_fiyat(key, secret, df):
+    skular = []
+    for _, r in df.iterrows():
+        if r["satis_fiyati"] > 0:
+            fiyat = round(float(r["satis_fiyati"]), 2)
+            skular.append(f"""
+            <stockItem>
+                <sellerStockCode>{esc(str(r["barkod"]))}</sellerStockCode>
+                <price>{fiyat}</price>
+                <quantity>{int(max(r["stok"], 0))}</quantity>
+            </stockItem>""")
+    
+    ok, log, ok_b, hata_b = 0, [], [], []
+    chunk_size = 100
+    for i in range(0, len(skular), chunk_size):
+        grup = skular[i:i + chunk_size]
+        no = i // chunk_size + 1
+        
+        xml_payload = f"""<?xml version="1.0" encoding="utf-8"?>
+<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:sch="http://www.n11.com/ws/schemas">
+   <soapenv:Header/>
+   <soapenv:Body>
+      <sch:UpdateStockPriceByIdRequest>
+         <auth>
+             <appKey>{esc(key.strip())}</appKey>
+             <appSecret>{esc(secret.strip())}</appSecret>
+         </auth>
+         <stockItems>
+            {"".join(grup)}
+         </stockItems>
+      </sch:UpdateStockPriceByIdRequest>
+   </soapenv:Body>
+</soapenv:Envelope>"""
+
+        headers = {
+            "Content-Type": "text/xml; charset=utf-8",
+            "SOAPAction": "UpdateStockPriceById"
+        }
+        
+        try:
+            r = requests.post(f"{N11_BASE}/ws/productService", data=xml_payload.encode("utf-8"), headers=headers, timeout=120)
+            if r.status_code == 200:
+                if "success" in r.text.lower() or "errorCode>0" in r.text or "<errorCode></errorCode>" in r.text:
+                    ok += len(grup)
+                    for item_str in grup:
+                        m = re.search(r"<sellerStockCode>(.*?)</sellerStockCode>", item_str)
+                        if m:
+                            ok_b.append(m.group(1))
+                    log.append(f"✅ Paket {no}: {len(grup)} ürün N11'e güncellendi")
+                else:
+                    err_m =
