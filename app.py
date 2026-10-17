@@ -882,16 +882,11 @@ def idefix_urun_listesi(df, ayarlar):
             "description": ad,
             "price": round(float(r["satis_fiyati"]), 2),
             "comparePrice": round(float(r["satis_fiyati"]), 2),
+            "vatRate": kdv,
             "deliveryDuration": sure,
             "deliveryType": "regular",
             "images": [{"url": gorsel}],
             "attributes": atr,
-        })
-            "inventoryQuantity": int(max(r["stok"], 0)), "vendorStockCode": kod,
-            "description": ad, "price": round(float(r["satis_fiyati"]), 2),
-            "comparePrice": round(float(r["satis_fiyati"]), 2), "vatRate": kdv,
-            "deliveryDuration": sure, "deliveryType": "regular",
-            "images": [{"url": gorsel}], "attributes": atr,
         })
     return liste, atlanan
 
@@ -1035,7 +1030,6 @@ def baglanti_testi(ayarlar, pid):
             if not m_ or not u_ or not p_:
                 return False, "Eksik bilgi: Merchant ID, Kullanıcı Adı veya Şifre boş bırakılamaz."
             
-            # Yenilenmiş, kararlı Hepsiburada Bağlantı Testi
             url = f"{HB_BASE}/listings/merchantid/{m_}/price-and-inventory"
             headers = hepsiburada_header(u_, p_)
             
@@ -1369,7 +1363,7 @@ def ac_kapa(pid):
     st.session_state["acik_pazar"] = None if st.session_state.get("acik_pazar") == pid else pid
 
 st.sidebar.title("👑 ŞahEntegre")
-st.sidebar.caption("Sürüm: v35 - HB Bağlantı Mekanizması Yenilendi")
+st.sidebar.caption("Sürüm: v36 - İdefix Hatası Giderildi")
 for kid, etiket_m, _ in ANA_MENU:
     st.sidebar.button(etiket_m, key=f"nav_{kid}", use_container_width=True,
                       type="primary" if st.session_state["sayfa"] == kid else "secondary",
