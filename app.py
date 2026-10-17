@@ -1264,7 +1264,7 @@ def ac_kapa(pid):
     st.session_state["acik_pazar"] = None if st.session_state.get("acik_pazar") == pid else pid
 
 st.sidebar.title("👑 ŞahEntegre")
-st.sidebar.caption("Sürüm: v29 - Tam Sürüm")
+st.sidebar.caption("Sürüm: v30 - Kesintisiz Tam Sürüm")
 for kid, etiket_m, _ in ANA_MENU:
     st.sidebar.button(etiket_m, key=f"nav_{kid}", use_container_width=True,
                       type="primary" if st.session_state["sayfa"] == kid else "secondary",
@@ -1543,7 +1543,44 @@ elif sayfa == "Urunler":
     if df.empty:
         st.info("Henüz ürün yok.")
     else:
-        st.dataframe(df[["barkod", "urun_adi", "stok", "satis_fiyati", "tedarikci"]], use_container_width=True, hide_index=True)
+        st.markdown(f"""
+            <div style="background:#1e293b;padding:10px 14px;border-radius:10px;border:1px solid #334155;margin-bottom:14px;color:#f8fafc;text-align:center;">
+                <span>📊 Toplam Ürün: <b>{len(df):,}</b> | Stokta Olan: <b>{int((df['stok'] > 0).sum()):,}</b></span>
+            </div>
+        """, unsafe_allow_html=True)
+
+        if st.button("🔄 Ürünleri Güncelle", use_container_width=True, type="primary"):
+            with st.spinner("Güncelleniyor..."):
+                sonuc = tumunu_senkronla()
+            for ad_, ok_, msg_ in sonuc:
+                (st.success if ok_ else st.error)(f"{ad_}: {msg_}")
+
+        arama = st.text_input("🔍 Ürün Adı veya Barkod ile Ara", key="urun_arama")
+        filt_df = df
+        if arama.strip():
+            q = arama.strip().lower()
+            filt_df = df[df["urun_adi"].str.lower().str.contains(q, regex=False) |
+                         df["barkod"].str.lower().str.contains(q, regex=False)]
+
+        SAYFA_BOYU = 50
+        toplam_sayfa = max(1, (len(filt_df) + SAYFA_BOYU - 1) // SAYFA_BOYU)
+        sn = st.number_input(f"Sayfa (1-{toplam_sayfa})", 1, toplam_sayfa, 1, key="urun_sayfa")
+        st.caption(f"{len(filt_df):,} ürün bulundu")
+        for _, row in filt_df.iloc[(sn - 1) * SAYFA_BOYU: sn * SAYFA_BOYU].iterrows():
+            with st.container(border=True):
+                c_img, c_det = st.columns([1, 3])
+                with c_img:
+                    g_url = str(row["gorsel"]).strip()
+                    if g_url.startswith("http"):
+                        st.markdown(f'<div style="display:flex;justify-content:center;"><img src="{esc(g_url, quote=True)}" '
+                                    'style="max-height:85px;border-radius:6px;object-fit:contain;"></div>',
+                                    unsafe_allow_html=True)
+                    else:
+                        st.markdown("🖼️ *(Görsel yok)*")
+                with c_det:
+                    st.markdown(f"<div style='font-size:14px;font-weight:700;color:#1e3a8a;margin-bottom:2px;'>{esc(str(row['urun_adi']))}</div>", unsafe_allow_html=True)
+                    st.markdown(f"<div style='font-size:12px;color:#475569;'>Barkod: <b>{esc(str(row['barkod']))}</b> | Tedarikçi: <b>{esc(str(row['tedarikci']))}</b></div>", unsafe_allow_html=True)
+                    st.markdown(f"<div style='font-size:12px;color:#475569;'>Kategori: {esc(str(row['kategori']))} | Stok: <b>{int(row['stok'])}</b> | Fiyat: <b style='color:#047857;'>{row['satis_fiyati']:.2f} ₺</b></div>", unsafe_allow_html=True)
 
 elif sayfa == "Kritik":
     st.title("🔄 Oto Kritik Stok")
