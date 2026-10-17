@@ -973,11 +973,16 @@ def siparis_eylem(ayarlar, o, eylem):
 AI_MODEL = "claude-sonnet-5-5"
 
 def ai_cevap(soru, urun_metni, anahtar):
-    sistem = "Sen bir e-ticaret müşteri temsilcisisin. Kısa, net ve kibar yanıt ver."
+    sistem = ("Sen Türkiye'de bir e-ticaret mağazasının nazik müşteri temsilcisisin. Müşteri sorularına kısa, "
+              "net ve saygılı Türkçe cevap yaz. Sana verilen ürün bilgisinde olmayan teknik özellik, garanti, "
+              "teslimat süresi gibi konularda bilgi UYDURMA; emin değilsen mağazanın kontrol edip dönüş "
+              "yapacağını söyle. Fiyat veya stok sözü verme.")
     r = requests.post("https://api.anthropic.com/v1/messages",
-                      headers={"x-api-key": anahtar, "anthropic-version": "2023-06-01", "content-type": "application/json"},
+                      headers={"x-api-key": anahtar, "anthropic-version": "2023-06-01",
+                               "content-type": "application/json"},
                       json={"model": AI_MODEL, "max_tokens": 600, "system": sistem,
-                            "messages": [{"role": "user", "content": f"Ürün:\n{urun_metni}\n\nSoru:\n{soru}"}]},
+                            "messages": [{"role": "user",
+                                          "content": f"Ürün bilgisi:\n{urun_metni or '(seçilmedi)'}\n\nMüşteri sorusu:\n{soru}"}]},
                       timeout=60)
     r.raise_for_status()
     return "".join(b.get("text", "") for b in r.json().get("content", []))
@@ -996,7 +1001,8 @@ def sifre_al():
 
 sifre = sifre_al()
 if sifre and not st.session_state.get("giris_ok"):
-    st.markdown("<h1 style='text-align:center'>👑 ŞahEntegre</h1><p style='text-align:center'>Yönetim Paneli Girişi</p>", unsafe_allow_html=True)
+    st.markdown("<h1 style='text-align:center'>👑 ŞahEntegre</h1>"
+                "<p style='text-align:center'>Yönetim Paneli Girişi</p>", unsafe_allow_html=True)
     _, orta, _ = st.columns([1, 1.2, 1])
     with orta:
         deneme = st.session_state.get("deneme", 0)
@@ -1030,7 +1036,7 @@ def kimlik_kaydet(ad, deger):
 
 def gizli_input(etiket_, ad, parola=True):
     if os.environ.get(ad.upper()) or _secret_var(ad):
-        st.caption(f"🔒 {etiket_}: ortam üzerinden tanımlı")
+        st.caption(f"🔒 {etiket_}: ortam/secrets üzerinden tanımlı")
         return kimlik(ayarlar, ad)
     v = st.text_input(etiket_, value=ayarlar["kimlik"].get(ad, ""), type="password" if parola else "default")
     kimlik_kaydet(ad, v.strip())
@@ -1038,52 +1044,121 @@ def gizli_input(etiket_, ad, parola=True):
 
 PAZAR = {
     "trendyol": {"ad": "Trendyol", "renk": "#e5391c", "ikon": "🧡", "pastel": "#ffedd5",
-                 "alanlar": [("Satıcı ID", "trendyol_seller_id", False), ("API Key", "trendyol_key", True), ("API Secret", "trendyol_secret", True)]},
+                 "alanlar": [("Satıcı (Seller) ID", "trendyol_seller_id", False),
+                             ("API Key", "trendyol_key", True), ("API Secret", "trendyol_secret", True)]},
     "cicek": {"ad": "ÇiçekSepeti", "renk": "#db2777", "ikon": "🌸", "pastel": "#e0e7ff",
               "alanlar": [("API Key", "cicek_key", True)]},
     "n11": {"ad": "N11", "renk": "#e0392b", "ikon": "🔴", "pastel": "#fee2e2",
-            "alanlar": [("App Key", "n11_key", True), ("App Secret", "n11_secret", True), ("Varsayılan Kategori ID", "n11_category", False)]},
+            "alanlar": [("App Key (API Key)", "n11_key", True), ("App Secret", "n11_secret", True),
+                        ("Varsayılan Kategori ID", "n11_category", False)]},
     "ptt": {"ad": "E-PTT AVM", "renk": "#ea8a0c", "ikon": "📮", "pastel": "#fef9c3",
             "alanlar": [("Kullanıcı Adı", "ptt_user", False), ("Şifre", "ptt_pass", True)]},
     "hb": {"ad": "HepsiBurada", "renk": "#f97316", "ikon": "🛍️", "pastel": "#ffedd5",
-           "alanlar": [("Merchant ID", "hb_merchant_id", False), ("API Kullanıcı", "hb_user", False), ("API Şifre", "hb_pass", True)]},
+           "alanlar": [("Merchant ID", "hb_merchant_id", False), ("API Kullanıcı Adı", "hb_user", False),
+                       ("API Şifresi", "hb_pass", True)]},
     "pazarama": {"ad": "Pazarama", "renk": "#0e86d4", "ikon": "🏪", "pastel": "#fce7f3",
                  "alanlar": [("Client ID", "pazarama_key", False), ("Client Secret", "pazarama_secret", True)]},
     "idefix": {"ad": "İdefix", "renk": "#1a9a4a", "ikon": "📚", "pastel": "#dbeafe",
-               "alanlar": [("Satıcı ID", "idefix_satici_id", False), ("API Key", "idefix_token", True), ("API Secret", "idefix_secret", True)]},
+               "alanlar": [("Satıcı ID", "idefix_satici_id", False), ("API Key", "idefix_token", True),
+                           ("API Secret", "idefix_secret", True)]},
     "trendruum": {"ad": "Trendruum", "renk": "#7c3aed", "ikon": "🛒", "pastel": "#ede9fe",
-                  "alanlar": [("API Key", "trendruum_key", True), ("API Secret", "trendruum_secret", True), ("Brand ID", "trendruum_brand", False), ("Kategori ID", "trendruum_category", False)]},
+                  "alanlar": [("API Key (Client ID)", "trendruum_key", True), ("API Secret", "trendruum_secret", True),
+                              ("Brand ID", "trendruum_brand", False),
+                              ("Varsayılan Kategori ID", "trendruum_category", False)]},
 }
 
-CAP = {"trendruum": {"sync", "kritik", "barkod", "toplu", "durum"}, "trendyol": {"sync", "kritik", "barkod"}, "n11": {"sync", "kritik", "barkod", "toplu"}, "idefix": {"sync", "kritik", "barkod", "toplu"}}
-ANA_MENU = [("Anasayfa", "🏠 Anasayfa", "#dbeafe"), ("Destek", "🛟 Destek Taleplerim", "#d1fae5"), ("Bildirim", "🔔 Bildirimler", "#fef3c7"), ("Duyuru", "📣 Duyurular", "#e0e7ff"), ("Urunler", "📦 Sistemdeki Ürünler", "#f8fafc"), ("Kritik", "🔄 Oto Kritik Stok", "#dbeafe")]
-ALT = [("siparis", "Siparişler", "🧾"), ("islemler", "Tüm İşlemleri", "🔗"), ("ayar", "Genel Ayarları", "⚙️"), ("ai", "AI Soru Cevap", "🤖")]
+CAP = {
+    "trendruum": {"sync", "kritik", "barkod", "toplu", "durum"},
+    "trendyol": {"sync", "kritik", "barkod"},
+    "n11": {"sync", "kritik", "barkod", "toplu"},
+    "idefix": {"sync", "kritik", "barkod", "toplu"},
+}
+ANA_MENU = [
+    ("Anasayfa", "🏠 Anasayfa", "#dbeafe"),
+    ("Destek", "🛟 Destek Taleplerim", "#d1fae5"),
+    ("Bildirim", "🔔 Bildirimler", "#fef3c7"),
+    ("Duyuru", "📣 Duyurular", "#e0e7ff"),
+    ("Urunler", "📦 Sistemdeki Ürünler", "#f8fafc"),
+    ("Kritik", "🔄 Oto Kritik Stok", "#dbeafe"),
+]
+ALT = [("siparis", "Siparişler", "🧾"), ("islemler", "Tüm İşlemleri", "🔗"),
+       ("ayar", "Genel Ayarları", "⚙️"), ("ai", "AI Soru Cevap", "🤖")]
 
 def tema_css():
-    return "<style>[data-testid='stHeader']{background:#1e2a4a;} [data-testid='stSidebar']{background:#f4f7fb;}</style>"
+    k = []
+    for kid, _, renk in ANA_MENU:
+        k.append(f".st-key-nav_{kid} button{{background:{renk};}}")
+    for pid, p in PAZAR.items():
+        k.append(f".st-key-navp_{pid} button{{background:{p['pastel']};}}")
+        for alt, _, _ in ALT:
+            k.append(f".st-key-sub_{pid}_{alt} button{{background:#fff;border-left:5px solid {p['renk']};"
+                     "margin-left:16px;width:calc(100% - 16px);}")
+    k.append(".st-key-nav_Ayarlar button{background:#e2e8f0;}")
+    temel = """
+[data-testid="stHeader"]{background:#1e2a4a;}
+[data-testid="stHeader"] button svg{fill:#ffffff !important;color:#ffffff !important;width:28px !important;height:28px !important;}
+[data-testid="stSidebar"]{background:#f4f7fb;}
+[data-testid="stSidebar"] .stButton button{justify-content:flex-start;text-align:left;border-radius:10px;
+  padding:10px 12px;border:1px solid rgba(0,0,0,.05);box-shadow:0 1px 3px rgba(0,0,0,.10);min-height:44px;}
+[data-testid="stSidebar"] .stButton button div{justify-content:flex-start;}
+[data-testid="stSidebar"] .stButton button p{font-weight:600;color:#1e293b;font-size:15px;}
+[data-testid="stSidebar"] .stButton button[kind="primary"],
+[data-testid="stSidebar"] .stButton button[data-testid="stBaseButton-primary"]{
+  background:linear-gradient(90deg,#2563eb,#4f46e5) !important;border:0 !important;}
+[data-testid="stSidebar"] .stButton button[kind="primary"] p,
+[data-testid="stSidebar"] .stButton button[data-testid="stBaseButton-primary"] p{color:#fff !important;}
+h1,h2,h3{color:#1e3a8a;}
+[data-testid="stMetric"]{background:#1e293b !important;border-radius:14px;padding:14px 16px;
+  box-shadow:0 2px 8px rgba(0,0,0,.3);border-left:5px solid #3b82f6;}
+[data-testid="stMetric"] label{color:#94a3b8 !important;}
+[data-testid="stMetric"] [data-testid="stMetricValue"]{color:#f8fafc !important;}
+button[data-testid="stSidebarCollapseButton"], button[aria-label="Close sidebar"],
+button[aria-label="Open sidebar"], [data-testid="stSidebar"] button[kind="header"]{
+    color:#ffffff !important;background-color:#2563eb !important;border-radius:8px !important;
+    padding:6px !important;z-index:999999 !important;position:relative !important;
+    opacity:1 !important;visibility:visible !important;}
+button[data-testid="stSidebarCollapseButton"] svg, button[aria-label="Close sidebar"] svg,
+button[aria-label="Open sidebar"] svg{fill:#ffffff !important;color:#ffffff !important;}
+.stButton>button{border-radius:10px;font-weight:600;}
+"""
+    return "<style>" + temel + "".join(k) + "</style>"
 
 st.markdown(tema_css(), unsafe_allow_html=True)
+
 st.session_state.setdefault("sayfa", "Anasayfa")
 st.session_state.setdefault("acik_pazar", None)
 
-def git(sayfa_id): st.session_state["sayfa"] = sayfa_id
+def git(sayfa_id):
+    st.session_state["sayfa"] = sayfa_id
+
 def git_pazar(pid, alt):
     st.session_state["acik_pazar"] = pid
     st.session_state["sayfa"] = f"{pid}:{alt}"
-def ac_kapa(pid): st.session_state["acik_pazar"] = None if st.session_state.get("acik_pazar") == pid else pid
+
+def ac_kapa(pid):
+    st.session_state["acik_pazar"] = None if st.session_state.get("acik_pazar") == pid else pid
 
 st.sidebar.title("👑 ŞahEntegre")
-st.sidebar.caption("Sürüm: v29 (Tek Dosya)")
+st.sidebar.caption("Sürüm: v30 (Orijinal Tasarım)")
+if not sifre:
+    st.sidebar.warning("⚠️ APP_PASSWORD tanımlı değil: panel herkese açık!")
 for kid, etiket_m, _ in ANA_MENU:
-    st.sidebar.button(etiket_m, key=f"nav_{kid}", use_container_width=True, type="primary" if st.session_state["sayfa"] == kid else "secondary", on_click=git, args=(kid,))
+    st.sidebar.button(etiket_m, key=f"nav_{kid}", use_container_width=True,
+                      type="primary" if st.session_state["sayfa"] == kid else "secondary",
+                      on_click=git, args=(kid,))
 for pid, p in PAZAR.items():
     acik = st.session_state["acik_pazar"] == pid
-    st.sidebar.button(f"{p['ikon']} {p['ad']}  {'▾' if acik else '▸'}", key=f"navp_{pid}", use_container_width=True, on_click=ac_kapa, args=(pid,))
+    st.sidebar.button(f"{p['ikon']} {p['ad']}  {'▾' if acik else '▸'}", key=f"navp_{pid}",
+                      use_container_width=True, on_click=ac_kapa, args=(pid,))
     if acik:
         for alt, etk, ik in ALT:
             sid = f"{pid}:{alt}"
-            st.sidebar.button(f"{ik} {p['ad']} {etk}", key=f"sub_{pid}_{alt}", use_container_width=True, type="primary" if st.session_state["sayfa"] == sid else "secondary", on_click=git, args=(sid,))
-st.sidebar.button("⚙️ Ayarlar", key="nav_Ayarlar", use_container_width=True, type="primary" if st.session_state["sayfa"] == "Ayarlar" else "secondary", on_click=git, args=("Ayarlar",))
+            st.sidebar.button(f"{ik} {p['ad']} {etk}", key=f"sub_{pid}_{alt}", use_container_width=True,
+                              type="primary" if st.session_state["sayfa"] == sid else "secondary",
+                              on_click=git, args=(sid,))
+st.sidebar.button("⚙️ Ayarlar", key="nav_Ayarlar", use_container_width=True,
+                  type="primary" if st.session_state["sayfa"] == "Ayarlar" else "secondary",
+                  on_click=git, args=("Ayarlar",))
 
 sayfa = st.session_state["sayfa"]
 
@@ -1093,16 +1168,20 @@ def tedarikci_sayfasi():
         t_ad = st.text_input("Tedarikçi Adı")
         t_link = st.text_input("XML Linki")
         if st.button("Kaydet", type="primary"):
-            if not t_ad.strip() or not t_link.strip(): st.error("Ad ve link zorunlu.")
+            if not t_ad.strip() or not t_link.strip():
+                st.error("Ad ve link zorunlu.")
             else:
                 tedarikciler[t_ad.strip()] = {"link": t_link.strip(), "harita": {}, "marj": 30.0, "sabit_ek": 0.0}
                 ayar_yaz(ayarlar)
                 st.rerun()
-    if not tedarikciler: return
+
+    if not tedarikciler:
+        return
     oto = st.toggle("🤖 Otomatik senkronizasyon (6 saatte bir)", value=ayarlar.get("oto_senkron", True))
     if oto != ayarlar.get("oto_senkron", True):
         ayarlar["oto_senkron"] = oto
         ayar_yaz(ayarlar)
+
     for ad, bilgi in list(tedarikciler.items()):
         with st.expander(f"⚙️ {ad}"):
             if st.button(f"🗑️ {ad} sil", key=f"sil_{ad}"):
@@ -1119,30 +1198,36 @@ def genel_ayarlar():
 def gunluk_sayfasi():
     with closing(baglan()) as c:
         lg = pd.read_sql("SELECT zaman, tedarikci, durum, mesaj FROM senkron_log ORDER BY id DESC LIMIT 200", c)
-    if lg.empty: st.info("Kayıt yok.")
-    else: st.dataframe(lg, use_container_width=True, hide_index=True)
+    if lg.empty:
+        st.info("Kayıt yok.")
+    else:
+        st.dataframe(lg, use_container_width=True, hide_index=True)
 
 def pazar_islemler(pid):
     p = PAZAR[pid]
     st.title(f"{p['ikon']} {p['ad']} Tüm İşlemler")
     bagli = pazar_bagli(ayarlar, pid)
-    if not bagli: st.warning("API bilgileri eksik.")
-    
+    if not bagli:
+        st.warning("API bilgileri eksik.")
+
     if st.button("🔄 Tam Senkronizasyon", type="primary"):
         with st.spinner("İşlem yapılıyor..."):
-            for ad_, ok, msg in tumunu_senkronla(oto=False): pass
+            for ad_, ok, msg in tumunu_senkronla(oto=False):
+                pass
             if bagli:
                 try:
                     g, h, msg = pazara_gonder(ayarlar, pid, urunleri_oku())
                     st.success(f"{g} ürün gönderildi, {h} hata.")
                     st.code(msg)
-                except Exception as e: st.error(f"Hata: {e}")
+                except Exception as e:
+                    st.error(f"Hata: {e}")
 
     if pid == "n11":
         st.markdown("---")
         st.subheader("🔴 N11 Ürün Oluşturma & Güncelleme")
         n11_cat = kimlik(ayarlar, "n11_category")
-        if not n11_cat: st.warning("Ayarlardan N11 Kategori ID girin.")
+        if not n11_cat:
+            st.warning("Ayarlardan N11 Kategori ID girin.")
         if st.button("📤 N11'e Ürünleri Oluştur (SaveProduct)", type="primary"):
             if n11_cat:
                 df_n = fiyat_artis_uygula(ayarlar, "n11", urunleri_oku())
@@ -1154,7 +1239,8 @@ def pazar_islemler(pid):
             try:
                 g, h, msg = pazara_gonder(ayarlar, "n11", urunleri_oku())
                 st.success(f"Güncellendi: {g}, Hata: {h}")
-            except Exception as e: st.error(f"Hata: {e}")
+            except Exception as e:
+                st.error(f"Hata: {e}")
 
 def pazar_ayar(pid):
     p = PAZAR[pid]
@@ -1168,8 +1254,10 @@ def pazar_ai(pid):
     soru = st.text_area("Müşteri Sorusu")
     if st.button("✨ Cevap Öner", type="primary"):
         if anahtar and soru:
-            try: st.code(ai_cevap(soru, "Genel ürün", anahtar))
-            except Exception as e: st.error(f"Hata: {e}")
+            try:
+                st.code(ai_cevap(soru, "Genel ürün", anahtar))
+            except Exception as e:
+                st.error(f"Hata: {e}")
 
 def pazar_siparis(pid):
     p = PAZAR[pid]
@@ -1177,7 +1265,8 @@ def pazar_siparis(pid):
     if st.button("🔄 Siparişleri Çek", type="primary"):
         try:
             st.session_state[f"sip_{pid}"] = siparis_cek(ayarlar, pid)
-        except Exception as e: st.error(f"Hata: {e}")
+        except Exception as e:
+            st.error(f"Hata: {e}")
     liste = st.session_state.get(f"sip_{pid}")
     if liste:
         for i, o in enumerate(liste, 1):
@@ -1187,7 +1276,8 @@ def pazar_siparis(pid):
                     try:
                         kod, yanit = siparis_eylem(ayarlar, o, "hazirla")
                         st.success(f"Başarılı: {yanit}")
-                    except Exception as e: st.error(f"Hata: {e}")
+                    except Exception as e:
+                        st.error(f"Hata: {e}")
 
 if sayfa == "Anasayfa":
     st.title("👑 E-Ticaret Yönetim Paneli")
@@ -1207,16 +1297,21 @@ elif sayfa == "Duyuru":
 elif sayfa == "Urunler":
     st.title("📦 Ürünler")
     df = urunleri_oku()
-    if not df.empty: st.dataframe(df, use_container_width=True)
-    else: st.info("Ürün bulunamadı.")
+    if not df.empty:
+        st.dataframe(df, use_container_width=True)
+    else:
+        st.info("Ürün bulunamadı.")
 elif sayfa == "Kritik":
     st.title("🔄 Kritik Stok")
 elif sayfa == "Ayarlar":
     st.title("⚙️ Ayarlar")
     t1, t2, t3 = st.tabs(["Tedarikçiler", "Genel", "Loglar"])
-    with t1: tedarikci_sayfasi()
-    with t2: genel_ayarlar()
-    with t3: gunluk_sayfasi()
+    with t1:
+        tedarikci_sayfasi()
+    with t2:
+        genel_ayarlar()
+    with t3:
+        gunluk_sayfasi()
 elif ":" in sayfa:
     pid_, alt_ = sayfa.split(":", 1)
     if pid_ in PAZAR:
