@@ -864,7 +864,7 @@ def idefix_urun_listesi(df, ayarlar):
     kdv = int(pa.get("kdv", 20) or 0)
     sure = int(pa.get("teslim_suresi", 3) or 1)
     liste, atlanan = [], 0
-    for _, r in df.iterrows():
+        for _, r in df.iterrows():
         gorsel = str(r["gorsel"]).strip()
         kod = str(r["barkod"]).strip()
         bk = idefix_barkod(kod, ayarlar)
@@ -881,9 +881,7 @@ def idefix_urun_listesi(df, ayarlar):
             "deliveryDuration": sure, "deliveryType": "regular",
             "images": [{"url": gorsel}], "attributes": atr,
         })
-           "barcode": bk, "title": ad[:250], "productMainId": kod,
-            "brandId": int(brand) if brand else 0, "categoryId": int(cat) if cat else 0, 
-            "inventoryQuantity": int(max(r["stok"], 0)), "vendorStockCode": kod,
+     "inventoryQuantity": int(max(r["stok"], 0)), "vendorStockCode": kod,
             "description": ad, "price": round(float(r["satis_fiyati"]), 2),
             "comparePrice": round(float(r["satis_fiyati"]), 2), "vatRate": kdv,
             "deliveryDuration": sure, "deliveryType": "regular",
