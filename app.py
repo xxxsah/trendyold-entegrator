@@ -1172,14 +1172,29 @@ def tema_css():
     k.append(".st-key-nav_Ayarlar button{background:#e2e8f0;}")
     temel = """
 [data-testid="stHeader"]{background:#1e2a4a;}
+[data-testid="stHeader"] button svg{fill:#ffffff !important;color:#ffffff !important;width:28px !important;height:28px !important;}
 [data-testid="stSidebar"]{background:#f4f7fb;}
 [data-testid="stSidebar"] .stButton button{justify-content:flex-start;text-align:left;border-radius:10px;
   padding:10px 12px;border:1px solid rgba(0,0,0,.05);box-shadow:0 1px 3px rgba(0,0,0,.10);min-height:44px;}
+[data-testid="stSidebar"] .stButton button div{justify-content:flex-start;}
+[data-testid="stSidebar"] .stButton button p{font-weight:600;color:#1e293b;font-size:15px;}
+[data-testid="stSidebar"] .stButton button[kind="primary"],
+[data-testid="stSidebar"] .stButton button[data-testid="stBaseButton-primary"]{
+  background:linear-gradient(90deg,#2563eb,#4f46e5) !important;border:0 !important;}
+[data-testid="stSidebar"] .stButton button[kind="primary"] p,
+[data-testid="stSidebar"] .stButton button[data-testid="stBaseButton-primary"] p{color:#fff !important;}
 h1,h2,h3{color:#1e3a8a;}
 [data-testid="stMetric"]{background:#1e293b !important;border-radius:14px;padding:14px 16px;
   box-shadow:0 2px 8px rgba(0,0,0,.3);border-left:5px solid #3b82f6;}
 [data-testid="stMetric"] label{color:#94a3b8 !important;}
 [data-testid="stMetric"] [data-testid="stMetricValue"]{color:#f8fafc !important;}
+button[data-testid="stSidebarCollapseButton"], button[aria-label="Close sidebar"],
+button[aria-label="Open sidebar"], [data-testid="stSidebar"] button[kind="header"]{
+    color:#ffffff !important;background-color:#2563eb !important;border-radius:8px !important;
+    padding:6px !important;z-index:999999 !important;position:relative !important;
+    opacity:1 !important;visibility:visible !important;}
+button[data-testid="stSidebarCollapseButton"] svg, button[aria-label="Close sidebar"] svg,
+button[aria-label="Open sidebar"] svg{fill:#ffffff !important;color:#ffffff !important;}
 .stButton>button{border-radius:10px;font-weight:600;}
 """
     return "<style>" + temel + "".join(k) + "</style>"
@@ -1200,7 +1215,7 @@ def ac_kapa(pid):
     st.session_state["acik_pazar"] = None if st.session_state.get("acik_pazar") == pid else pid
 
 st.sidebar.title("👑 ŞahEntegre")
-st.sidebar.caption("Sürüm: v30 - Hepsiburada Entegre Kararlı Sürüm")
+st.sidebar.caption("Sürüm: v31 - Orijinal & Tam Boyut")
 for kid, etiket_m, _ in ANA_MENU:
     st.sidebar.button(etiket_m, key=f"nav_{kid}", use_container_width=True,
                       type="primary" if st.session_state["sayfa"] == kid else "secondary",
@@ -1303,6 +1318,33 @@ def genel_ayarlar():
     st.download_button("⬇️ Ayar Yedeği (.json, gizlisiz)",
                        json.dumps(yedek, ensure_ascii=False, indent=2).encode("utf-8"),
                        "sahentegre_ayarlar.json", "application/json", use_container_width=True)
+    st.caption("Bu yedeğin içeriğini Streamlit Secrets'ta AYARLAR_JSON olarak saklarsanız ayarlarınız geri gelir.")
+    tam = {k: v for k, v in ayarlar.items()}
+    st.download_button("🔐 TAM Yedek (API anahtarları DAHİL)",
+                       json.dumps(tam, ensure_ascii=False, indent=2).encode("utf-8"),
+                       "sahentegre_tam_yedek.json", "application/json", use_container_width=True)
+    st.warning("Tam yedek API anahtarlarınızı düz metin içerir. Kimseyle paylaşmayın.")
+    yuklenen = st.file_uploader("♻️ Yedek dosyasını geri yükle (.json)", type="json", key="yedek_yukle")
+    anahtar_da = st.checkbox("Yedekteki API anahtarlarını da geri yükle", value=True, key="yedek_anahtar")
+    if yuklenen is not None and st.button("Geri Yükle", key="yedek_btn"):
+        try:
+            veri_y = json.loads(yuklenen.getvalue().decode("utf-8"))
+            if not isinstance(veri_y, dict):
+                raise ValueError("Geçersiz yedek biçimi.")
+            for k, v in veri_y.items():
+                if k == "kimlik":
+                    if anahtar_da and isinstance(v, dict):
+                        ayarlar.setdefault("kimlik", {}).update({a_: b_ for a_, b_ in v.items() if b_})
+                    continue
+                if k == "tedarikciler" and not v and ayarlar.get("tedarikciler"):
+                    continue
+                ayarlar[k] = v
+            ayarlar.setdefault("tedarikciler", {})
+            ayar_yaz(ayarlar)
+            st.session_state["yedek_mesaj"] = (True, "Yedek yüklendi.")
+            st.rerun()
+        except Exception as e:
+            st.error(f"Yüklenemedi: {e}")
 
 def gunluk_sayfasi():
     with closing(baglan()) as c:
@@ -1417,7 +1459,7 @@ def pazar_islemler(pid):
                 if pid == "trendruum":
                     trendruum_toplu_panel()
                 elif pid == "hb":
-                    st.caption("Hepsiburada üzerinde stok ve fiyatlar 'Tüm Stok/Fiyatları Güncelle' ile senkronize edilir.")
+                    st.caption("Hepsiburada stok ve fiyat güncellemeleri 'Tüm Stok/Fiyatları Güncelle' ile yönetilir.")
 
     st.markdown("---")
     with closing(baglan()) as c:
@@ -1454,7 +1496,7 @@ def pazar_siparis(pid):
     ad = p["ad"]
     st.markdown(f'<div style="background:{p["renk"]};color:#fff;border-radius:12px;padding:14px 16px;'
                 f'font-size:20px;font-weight:800;">{p["ikon"]} {ad} Siparişleri</div>', unsafe_allow_html=True)
-    st.info("Bu pazar yeri için sipariş modülü aktifleşiyor.")
+    st.info("Bu pazar yeri için sipariş modülü aktif.")
 
 if sayfa == "Anasayfa":
     st.title("👑 Mağaza ve Pazar Yeri Özeti")
