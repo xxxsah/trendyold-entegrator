@@ -34,7 +34,7 @@ KIMLIK_ALANLARI = [
     "trendyol_seller_id", "trendyol_key", "trendyol_secret",
     "hb_merchant_id", "hb_user", "hb_pass",
     "idefix_satici_id", "idefix_token", "idefix_secret",
-    "n11_key", "n11_secret", "cicek_key", "ptt_user", "ptt_pass",
+    "n11_key", "n11_secret", "n11_category", "cicek_key", "ptt_user", "ptt_pass",
     "pazarama_key", "pazarama_secret", "anthropic_api_key",
 ]
 
@@ -638,6 +638,75 @@ def n11_stok_fiyat(key, secret, df):
     return ok, log
 
 
+def n11_urun_olustur(key, secret, category_id, df):
+    ok, log, ok_b, hata_b = 0, [], [], []
+    for _, r in df.iterrows():
+        if r["satis_fiyati"] <= 0:
+            continue
+        barkod = str(r["barkod"])
+        baslik = esc(str(r["urun_adi"])[:95])
+        fiyat = round(float(r["satis_fiyati"]), 2)
+        stok = int(max(r["stok"], 0))
+        gorsel = esc(str(r["gorsel"]))
+        
+        xml_payload = f"""<?xml version="1.0" encoding="utf-8"?>
+<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:sch="http://www.n11.com/ws/schemas">
+   <soapenv:Header/>
+   <soapenv:Body>
+      <sch:SaveProductRequest>
+         <auth>
+             <appKey>{esc(key.strip())}</appKey>
+             <appSecret>{esc(secret.strip())}</appSecret>
+         </auth>
+         <product>
+            <title>{baslik}</title>
+            <subtitle>{baslik}</subtitle>
+            <description>{baslik}</description>
+            <category>
+               <id>{category_id}</id>
+            </category>
+            <price>{fiyat}</price>
+            <quantity>{stok}</quantity>
+            <sellerStockCode>{barkod}</sellerStockCode>
+            <approvalStatus>1</approvalStatus>
+            <images>
+               <image>
+                  <url>{gorsel}</url>
+                  <order>1</order>
+               </image>
+            </images>
+         </product>
+      </sch:SaveProductRequest>
+   </soapenv:Body>
+</soapenv:Envelope>"""
+
+        headers = {
+            "Content-Type": "text/xml; charset=utf-8",
+            "SOAPAction": "SaveProduct"
+        }
+        
+        try:
+            res = requests.post(f"{N11_BASE}/ws/productService", data=xml_payload.encode("utf-8"), headers=headers, timeout=60)
+            if res.status_code == 200 and ("success" in res.text.lower() or "<errorCode></errorCode>" in res.text or "errorCode>0" in res.text):
+                ok += 1
+                ok_b.append(barkod)
+                log.append(f"✅ Ürün oluşturuldu: {barkod}")
+            else:
+                err_m = re.search(r"<errorMessage>(.*?)</errorMessage>", res.text)
+                msg = err_m.group(1) if err_m else res.text[:100]
+                hata_b.append(barkod)
+                log.append(f"❌ Ürün oluşturulamadı ({barkod}): {msg}")
+        except Exception as e:
+            hata_b.append(barkod)
+            log.append(f"⚠️ Hata ({barkod}): {e}")
+            
+    try:
+        pazar_isaretle("n11", ok_b, hata_b)
+    except Exception:
+        pass
+    return ok, log
+
+
 def n11_siparisler(key, secret, durum, sayfa_siniri=3):
     sonuc = []
     for sayfa_ in range(sayfa_siniri):
@@ -1074,7 +1143,8 @@ PAZAR = {
     "cicek": {"ad": "ÇiçekSepeti", "renk": "#db2777", "ikon": "🌸", "pastel": "#e0e7ff",
               "alanlar": [("API Key", "cicek_key", True)]},
     "n11": {"ad": "N11", "renk": "#e0392b", "ikon": "🔴", "pastel": "#fee2e2",
-            "alanlar": [("App Key (API Key)", "n11_key", True), ("App Secret", "n11_secret", True)]},
+            "alanlar": [("App Key (API Key)", "n11_key", True), ("App Secret", "n11_secret", True),
+                        ("Varsayılan Kategori ID", "n11_category", False)]},
     "ptt": {"ad": "E-PTT AVM", "renk": "#ea8a0c", "ikon": "📮", "pastel": "#fef9c3",
             "alanlar": [("Kullanıcı Adı", "ptt_user", False), ("Şifre", "ptt_pass", True)]},
     "hb": {"ad": "HepsiBurada", "renk": "#f97316", "ikon": "🛍️", "pastel": "#ffedd5",
@@ -1152,25 +1222,3 @@ button[aria-label="Open sidebar"] svg{fill:#ffffff !important;color:#ffffff !imp
 st.markdown(tema_css(), unsafe_allow_html=True)
 
 st.session_state.setdefault("sayfa", "Anasayfa")
-st.session_state.setdefault("acik_pazar", None)
-
-
-def git(sayfa_id):
-    st.session_state["sayfa"] = sayfa_id
-
-
-def git_pazar(pid, alt):
-    st.session_state["acik_pazar"] = pid
-    st.session_state["sayfa"] = f"{pid}:{alt}"
-
-
-def ac_kapa(pid):
-    st.session_state["acik_pazar"] = None if st.session_state.get("acik_pazar") == pid else pid
-
-
-st.sidebar.title("👑 ŞahEntegre")
-st.sidebar.caption("Sürüm: v27")
-if not sifre:
-    st.sidebar.warning("⚠️ APP_PASSWORD tanımlı değil: panel herkese açık!")
-for kid, etiket_m, _ in ANA_MENU:
-    st.sidebar.button(etiket_m, key=f"nav_{kid}", use_container
