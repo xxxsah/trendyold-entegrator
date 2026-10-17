@@ -868,7 +868,7 @@ def idefix_urun_listesi(df, ayarlar):
         gorsel = str(r["gorsel"]).strip()
         kod = str(r["barkod"]).strip()
         bk = idefix_barkod(kod, ayarlar)
-                if not gorsel.startswith("https") or r["satis_fiyati"] is None:
+        if not gorsel.startswith("https") or r["satis_fiyati"] is None:
             atlanan += 1
             continue
         ad = str(r["urun_adi"]).strip()
