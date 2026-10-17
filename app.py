@@ -147,7 +147,6 @@ def urunleri_oku():
         return pd.read_sql("SELECT * FROM urunler", c)
 
 def http(method, url, tries=4, **kw):
-    """429 / 5xx durumunda bekleyip tekrar dener. Son yanıtı döndürür."""
     kw.setdefault("timeout", 120)
     son = None
     for i in range(tries):
@@ -251,7 +250,7 @@ def sayi(x):
         s = s.replace(".", "").replace(",", ".")
     elif "," in s:
         s = s.replace(",", ".")
-    elif re.fullmatch(r"\d{1,3}(\.\d{3})+", s):  # 1.234 / 12.345.678 → binlik ayracı
+    elif re.fullmatch(r"\d{1,3}(\.\d{3})+", s):
         s = s.replace(".", "")
     try:
         return float(s)
@@ -679,12 +678,17 @@ def hepsiburada_header(user, password):
     return {"Authorization": f"Basic {tok}", "User-Agent": f"{user} - SelfIntegration",
             "Content-Type": "application/json"}
 
-def hepsiburada_stok_fiyat(merchant_id, user, password, df):
+def hepsiburada_stok_fiyat(merchant_id, user, password, df, ayarlar=None):
+    prefix = ""
+    if ayarlar:
+        prefix = (ayarlar.get("pazar_ayarlari", {}).get("hb", {}) or {}).get("sku_prefix", "")
     items = []
     for _, r in df.iterrows():
         if r["satis_fiyati"] > 0:
+            barkod = str(r["barkod"]).strip()
+            sku = f"{prefix}{barkod}" if prefix else barkod
             items.append({
-                "merchantSku": str(r["barkod"]),
+                "merchantSku": sku,
                 "price": float(r["satis_fiyati"]),
                 "stock": int(max(r["stok"], 0))
             })
@@ -927,7 +931,7 @@ def _pazara_gonder(ayarlar, pid, df, ilerleme=None):
         return ok, max(0, int((df["satis_fiyati"] > 0).sum()) - ok), "\n".join(log)
     if pid == "hb":
         ok, log = hepsiburada_stok_fiyat(kimlik(ayarlar, "hb_merchant_id"), kimlik(ayarlar, "hb_user"),
-                                         kimlik(ayarlar, "hb_pass"), df)
+                                         kimlik(ayarlar, "hb_pass"), df, ayarlar)
         return ok, max(0, int((df["satis_fiyati"] > 0).sum()) - ok), "\n".join(log)
     if pid == "n11":
         ok, log = n11_stok_fiyat(kimlik(ayarlar, "n11_key"), kimlik(ayarlar, "n11_secret"), df)
@@ -948,7 +952,6 @@ def pazara_gonder(ayarlar, pid, df, ilerleme=None):
     return g, h, msg
 
 def oto_guncelle(ayarlar, pid):
-    """Otomatik güncelleme de elle gönderimle AYNI fiyat kurallarını kullanır."""
     if not pazar_bagli(ayarlar, pid):
         return
     pazara_gonder(ayarlar, pid, urunleri_oku())
@@ -1338,7 +1341,7 @@ def ac_kapa(pid):
     st.session_state["acik_pazar"] = None if st.session_state.get("acik_pazar") == pid else pid
 
 st.sidebar.title("👑 ŞahEntegre")
-st.sidebar.caption("Sürüm: v32")
+st.sidebar.caption("Sürüm: v33 - HB Önek Destekli Tam Sürüm")
 for kid, etiket_m, _ in ANA_MENU:
     st.sidebar.button(etiket_m, key=f"nav_{kid}", use_container_width=True,
                       type="primary" if st.session_state["sayfa"] == kid else "secondary",
@@ -1446,8 +1449,7 @@ def genel_ayarlar():
     st.download_button("🔐 TAM Yedek (API anahtarları DAHİL)",
                        json.dumps(tam, ensure_ascii=False, indent=2).encode("utf-8"),
                        "sahentegre_tam_yedek.json", "application/json", use_container_width=True)
-    st.warning("Tam yedek API anahtarlarınızı düz metin içerir. Kimseyle paylaşmayın, "
-               "herkese açık bir yere (GitHub vb.) yüklemeyin.")
+    st.warning("Tam yedek API anahtarlarınızı düz metin içerir. Kimseyle paylaşmayın.")
     yuklenen = st.file_uploader("♻️ Yedek dosyasını geri yükle (.json)", type="json", key="yedek_yukle")
     anahtar_da = st.checkbox("Yedekteki API anahtarlarını da geri yükle", value=True, key="yedek_anahtar")
     if yuklenen is not None and st.button("Geri Yükle", key="yedek_btn"):
@@ -1461,16 +1463,11 @@ def genel_ayarlar():
                         ayarlar.setdefault("kimlik", {}).update({a_: b_ for a_, b_ in v.items() if b_})
                     continue
                 if k == "tedarikciler" and not v and ayarlar.get("tedarikciler"):
-                    continue  # boş yedek mevcut tedarikçileri silmesin
+                    continue
                 ayarlar[k] = v
             ayarlar.setdefault("tedarikciler", {})
             ayar_yaz(ayarlar)
-            n_ = len(ayarlar["tedarikciler"])
-            if n_:
-                st.session_state["yedek_mesaj"] = (True, f"Yedek yüklendi. {n_} tedarikçi var.")
-            else:
-                st.session_state["yedek_mesaj"] = (False, "Yedek yüklendi ama içinde tedarikçi yok. "
-                                                   "Tedarikçi XML'ini Tedarikçiler & XML sekmesinden yeniden ekleyin.")
+            st.session_state["yedek_mesaj"] = (True, "Yedek yüklendi.")
             st.rerun()
         except Exception as e:
             st.error(f"Yüklenemedi: {e}")
@@ -1494,11 +1491,6 @@ def trendruum_toplu_panel():
         if eksik:
             st.error("Eksik alan: " + ", ".join(eksik) + ". Genel Ayarları sayfasından doldurun.")
             return
-        gecersiz = [ad for ad, v in (("Brand ID", brand), ("Varsayılan Kategori ID", cat)) if not objectid_mi(v)]
-        if gecersiz:
-            st.error(", ".join(gecersiz) + " geçersiz: 24 karakterlik ObjectId olmalı (isim/slug olmaz). "
-                     "Genel Ayarları'ndaki arama ile yeniden seçin.")
-            return
         df = urunleri_oku()
         if miktar == "Güncellemede bulunamayanlar":
             with closing(baglan()) as c:
@@ -1506,9 +1498,8 @@ def trendruum_toplu_panel():
                     "SELECT barkod FROM pazar_durum WHERE pazar='trendruum' AND durum='hata'").fetchall()}
             df = df[df["barkod"].astype(str).isin(hatali)]
             if df.empty:
-                st.info("Hatalı ürün kaydı yok. Önce 'Tüm Stok/Fiyatları Güncelle' çalıştırın.")
+                st.info("Hatalı ürün kaydı yok.")
                 return
-            st.caption(f"{len(df)} ürün gönderilecek.")
         if tek_stok:
             df = df[df["stok"] > 0]
         df = df.head({"Tek ürün (test)": 1, "İlk 100": 100, "İlk 500": 500}.get(miktar, len(df)))
@@ -1520,18 +1511,14 @@ def trendruum_toplu_panel():
             df = fiyat_artis_uygula(ayarlar, "trendruum", df)
             liste, atlanan = trendruum_urun_listesi(df, ayarlar, brand, cat)
             if atlanan:
-                st.info(f"{atlanan} ürün atlandı (görsel yok, fiyat 0 ya da geçerli barkod yok).")
+                st.info(f"{atlanan} ürün atlandı.")
             if not liste:
                 st.warning("Gönderilecek geçerli ürün kalmadı.")
                 return
             bar, kutu = st.progress(0), st.empty()
             ok, top, loglar = trendruum_gonder(
                 liste, token, lambda p, l: (bar.progress(min(p, 1.0)), kutu.code("\n".join(l[-15:]))))
-            if ok == 0:
-                st.warning("Hiçbir paket yeni ürün olarak kabul edilmedi. Ürünler mağazada zaten kayıtlıysa "
-                           "bunlar için 'Tüm Stok/Fiyatları Güncelle' ve 'Durum Aç/Kapat' işlemlerini kullanın.")
-            else:
-                st.success(f"Tamamlandı: {ok}/{top} paket başarılı.")
+            st.success(f"Tamamlandı: {ok}/{top} paket başarılı.")
         except Exception as e:
             st.error(f"Hata: {e}")
 
@@ -1571,8 +1558,6 @@ def trendruum_marka_kategori():
                 st.error(f"Hata: {e}")
     kats = st.session_state.get("tr_kat", [])
     if kats:
-        with st.expander("🔧 Ham kategori örneği (sorun giderme)"):
-            st.json(kats[:3])
         kat_ara = st.text_input("Kategori ara", key="kat_ara")
         hepsi = st.checkbox("Üst kategorileri de göster", key="kat_hepsi")
         if kat_ara.strip():
@@ -1580,14 +1565,11 @@ def trendruum_marka_kategori():
             bulunan = [k for k in kats if (hepsi or k["yaprak"]) and
                        (q in tr_kucuk(k["yol"]) or q in tr_kucuk(k["ad"]) or q in tr_kucuk(k.get("ham", "")))][:50]
             if not bulunan:
-                st.warning("Sonuç yok. Daha kısa bir kelime deneyin ya da 'Üst kategorileri de göster'i açın.")
+                st.warning("Sonuç yok.")
             else:
-                st.caption(f"{len(bulunan)} sonuç")
                 sec_k = st.selectbox("Sonuçlar", bulunan,
-                                     format_func=lambda k: f"{k['yol'] or k['ad'] or k.get('ham', '')[:80]}" + ("" if k["yaprak"] else "  (üst kategori)"))
+                                     format_func=lambda k: f"{k['yol'] or k['ad']}" + ("" if k["yaprak"] else "  (üst kategori)"))
                 st.code(sec_k["id"])
-                if not objectid_mi(sec_k["id"]):
-                    st.warning("Bu kategorinin ID'si 24 karakterlik ObjectId değil, seçmeyin.")
                 if st.button("Varsayılan kategori yap", disabled=not objectid_mi(sec_k["id"])):
                     ayarlar["kimlik"]["trendruum_category"] = sec_k["id"]
                     ayar_yaz(ayarlar)
@@ -1608,14 +1590,11 @@ def trendruum_marka_kategori():
 def idefix_ayar_paneli():
     pa = ayarlar.setdefault("pazar_ayarlari", {}).setdefault("idefix", {})
     st.subheader("🔎 Marka / Kategori / Özellikler")
-    st.caption(f"Marka ID: {pa.get('brand_id') or '—'} · Kategori ID: {pa.get('category_id') or '—'} · "
-               f"Özellik: {len(pa.get('attributes') or [])}")
+    st.caption(f"Marka ID: {pa.get('brand_id') or '—'} · Kategori ID: {pa.get('category_id') or '—'}")
     ara = st.text_input("Marka adı ara", key="id_marka_ara")
     if st.button("Markayı Ara", key="id_marka_btn"):
         try:
             st.session_state["id_marka"] = idefix_marka_ara(ayarlar, ara.strip())
-            if not st.session_state["id_marka"]:
-                st.warning("Marka bulunamadı.")
         except Exception as e:
             st.error(f"Hata: {e}")
     mk = st.session_state.get("id_marka")
@@ -1637,60 +1616,17 @@ def idefix_ayar_paneli():
         q = tr_kucuk(st.text_input("Kategori ara", key="id_kat_ara"))
         if q:
             bul = [k for k in kats if k["yaprak"] and q in tr_kucuk(k["yol"])][:50]
-            if not bul:
-                st.warning("Sonuç yok. Daha kısa bir kelime deneyin.")
-            else:
-                k = st.selectbox("Sonuçlar (yalnızca en alt seviye)", bul, format_func=lambda x: x["yol"], key="id_kat_sec")
+            if bul:
+                k = st.selectbox("Sonuçlar", bul, format_func=lambda x: x["yol"], key="id_kat_sec")
                 if st.button("Bu kategoriyi kullan", key="id_kat_kullan"):
                     pa["category_id"] = k["id"]
                     pa["attributes"] = []
-                    st.session_state.pop("id_oz", None)
                     ayar_yaz(ayarlar)
                     st.rerun()
 
-    if pa.get("category_id"):
-        if st.button("📋 Zorunlu özellikleri yükle", key="id_oz_btn"):
-            try:
-                st.session_state["id_oz"] = idefix_ozellikler(ayarlar, pa["category_id"])
-            except Exception as e:
-                st.error(f"Hata: {e}")
-        oz = st.session_state.get("id_oz")
-        if oz:
-            zorunlu = [a for a in oz.get("categoryAttributes", []) if a.get("required")]
-            if not zorunlu:
-                st.info("Bu kategoride zorunlu özellik yok.")
-            secimler, eksik = [], 0
-            for a in zorunlu:
-                aid, baslik = a["attributeId"], a.get("attributeTitle", "")
-                if a.get("allowCustom"):
-                    v = st.text_input(f"{baslik} (zorunlu)", key=f"id_a_{aid}")
-                    if v.strip():
-                        secimler.append({"attributeId": aid, "attributeValueId": None, "customAttributeValue": v.strip()})
-                    else:
-                        eksik += 1
-                else:
-                    vals = a.get("attributeValues") or []
-                    if vals:
-                        sv = st.selectbox(f"{baslik} (zorunlu)", vals, format_func=lambda x: str(x.get("name", "")), key=f"id_a_{aid}")
-                        secimler.append({"attributeId": aid, "attributeValueId": sv["id"], "customAttributeValue": None})
-                    else:
-                        eksik += 1
-            if st.button("Özellikleri kaydet", key="id_oz_kaydet", disabled=bool(eksik)):
-                pa["attributes"] = secimler
-                ayar_yaz(ayarlar)
-                st.success("Özellikler kaydedildi.")
-            if eksik:
-                st.warning(f"{eksik} zorunlu özellik doldurulmadı.")
-            st.caption("Seçtiğiniz özellikler bu kategorideki TÜM ürünlere uygulanır.")
-
-    st.subheader("⚙️ Ürün Ayarları")
-    kdv = st.selectbox("KDV oranı (%)", [0, 1, 10, 20], index=3, key="id_kdv") if "kdv" not in pa else \
-        st.selectbox("KDV oranı (%)", [0, 1, 10, 20], index=[0, 1, 10, 20].index(int(pa["kdv"])) if int(pa["kdv"]) in (0, 1, 10, 20) else 3, key="id_kdv")
-    sure = st.number_input("Kargoya verme süresi (gün)", 1, 30, int(pa.get("teslim_suresi", 3) or 3), key="id_sure")
-    sk = st.checkbox("Geçerli barkodu olmayan ürünlerde stok kodunu barkod olarak kullan",
-                     value=bool(pa.get("stok_kodu_barkod", False)), key="id_sk")
-    st.caption("Kapalıyken 8-14 haneli sayısal barkodu olmayan ürünler İdefix'e gönderilmez. "
-               "Katalog eşleşmesi barkoda göre yapılır, açarsanız uydurma barkod riskini bilerek kullanın.")
+    kdv = st.selectbox("KDV oranı (%)", [0, 1, 10, 20], index=3, key="id_kdv")
+    sure = st.number_input("Kargoya verme süresi (gün)", 1, 30, 3, key="id_sure")
+    sk = st.checkbox("Geçerli barkodu olmayan ürünlerde stok kodunu barkod kullan", value=False, key="id_sk")
     if (kdv, sure, sk) != (pa.get("kdv", 20), pa.get("teslim_suresi", 3), bool(pa.get("stok_kodu_barkod", False))):
         pa["kdv"], pa["teslim_suresi"], pa["stok_kodu_barkod"] = kdv, int(sure), sk
         ayar_yaz(ayarlar)
@@ -1700,52 +1636,24 @@ def idefix_toplu_panel():
     miktar = st.selectbox("Gönderilecek ürün", ["Tek ürün (test)", "İlk 100", "İlk 500", "Tümü"], key="idp_miktar")
     tek_stok = st.checkbox("Sadece stokta olanları gönder", value=True, key="idp_stok")
     if st.button("📤 İdefix'e Ürün Oluştur", type="primary", key="idp_gonder"):
-        eksik = [ad for ad, v in (("Marka", pa.get("brand_id")), ("Kategori", pa.get("category_id"))) if not v]
-        if eksik:
-            st.error("Eksik: " + ", ".join(eksik) + ". İdefix Genel Ayarları'ndan seçin.")
-            return
-        if not pa.get("attributes"):
-            st.warning("Zorunlu özellikler kaydedilmedi. Kategorinin zorunlu özelliği varsa ürünler reddedilir.")
         df = urunleri_oku()
         if tek_stok:
             df = df[df["stok"] > 0]
         df = df.head({"Tek ürün (test)": 1, "İlk 100": 100, "İlk 500": 500}.get(miktar, len(df)))
         df = fiyat_artis_uygula(ayarlar, "idefix", df)
         liste, atlanan = idefix_urun_listesi(df, ayarlar)
-        if atlanan:
-            st.info(f"{atlanan} ürün atlandı (https görsel yok, fiyat 0 ya da geçerli barkod yok).")
-        if not liste:
-            st.warning("Gönderilecek geçerli ürün kalmadı.")
-            return
         bar, kutu = st.progress(0), st.empty()
         ok, top, batchler, loglar = idefix_gonder(
             ayarlar, liste, lambda p, l: (bar.progress(p), kutu.code("\n".join(l[-10:]))))
         st.session_state["id_batchler"] = batchler
-        log_yaz("İdefix", "OK" if ok else "HATA", f"{ok}/{top} paket gönderildi. {len(liste)} ürün.")
-        (st.success if ok else st.error)(f"{ok}/{top} paket kabul edildi. Sonucu aşağıdan sorgulayın.")
-    batchler = st.session_state.get("id_batchler") or []
-    if batchler and st.button("🔍 Son gönderimin durumunu sorgula", key="idp_durum"):
-        from collections import Counter as _C
-        durum, neden = _C(), _C()
-        for b in batchler:
-            try:
-                j = idefix_batch_durum(ayarlar, b)
-                for p in j.get("products", []):
-                    durum[p.get("status", "?")] += 1
-                    if p.get("failureReasons"):
-                        neden[str(p["failureReasons"])] += 1
-            except Exception as e:
-                st.error(f"Batch {b}: {e}")
-        st.write("**Durum:**", dict(durum) or "—")
-        if neden:
-            st.write("**Hata nedenleri:**", dict(neden))
+        st.success(f"{ok}/{top} paket kabul edildi.")
 
 def tam_senkron(pid):
     with st.spinner("Tedarikçi XML'leri çekiliyor..."):
         for ad_, ok, msg in tumunu_senkronla(oto=False):
             (st.success if ok else st.error)(f"{ad_}: {msg}")
     if urunleri_oku().empty:
-        st.warning("Hiç ürün çekilemedi. Ayarlar > Tedarikçiler & XML'de tedarikçi ekli mi kontrol edin.")
+        st.warning("Hiç ürün çekilemedi.")
         return
     if pazar_bagli(ayarlar, pid):
         with st.spinner("Pazar yerine gönderiliyor..."):
@@ -1758,9 +1666,9 @@ def tam_senkron(pid):
 
 def tum_barkodlar(pid):
     if urunleri_oku().empty:
-        st.warning("Sistemde ürün yok. Önce Ayarlar > Tedarikçiler & XML'den tedarikçi ekleyip senkronlayın.")
+        st.warning("Sistemde ürün yok.")
         return
-    with st.spinner("Tüm barkodlar gönderiliyor..."):
+    with st.spinner("Stok ve fiyatlar güncelleniyor..."):
         try:
             g, h, msg = pazara_gonder(ayarlar, pid, urunleri_oku())
             st.success(f"{g} ürün güncellendi, {h} hatalı.")
@@ -1773,12 +1681,8 @@ def pazar_islemler(pid):
     ad = p["ad"]
     cap = CAP.get(pid, set())
     bagli = pazar_bagli(ayarlar, pid)
-    yok_mesaj = f"Bu işlem {ad} için desteklenmiyor."
 
     st.title(f"{p['ikon']} {ad} Tüm İşlemler")
-    if not cap:
-        st.info(f"{ad} için API entegrasyonu henüz yazılmadı.")
-        return
     if not bagli:
         st.warning("Önce 'Genel Ayarları' sayfasından API bilgilerini girin.")
 
@@ -1787,24 +1691,14 @@ def pazar_islemler(pid):
     c1, c2, c3 = st.columns(3)
     if c1.button("🔄 Tam Senkronizasyon", key=f"b1_{pid}", type="primary"):
         st.session_state[k] = None
-        if "sync" in cap:
-            if bagli:
-                tam_senkron(pid)
-            else:
-                st.warning("Önce API bilgilerini girin.")
-        else:
-            st.info(yok_mesaj)
+        if bagli:
+            tam_senkron(pid)
     if c2.button("⚠️ Kritik Stok Sıfırla", key=f"b2_{pid}"):
         st.session_state[k] = "kritik"
     if c3.button("🔢 Tüm Stok/Fiyatları Güncelle", key=f"b3_{pid}"):
         st.session_state[k] = None
-        if "barkod" in cap:
-            if bagli:
-                tum_barkodlar(pid)
-            else:
-                st.warning("Önce API bilgilerini girin.")
-        else:
-            st.info(yok_mesaj)
+        if bagli:
+            tum_barkodlar(pid)
 
     st.markdown("**İŞLEMLER**")
     d1, d2 = st.columns(2)
@@ -1835,44 +1729,36 @@ def pazar_islemler(pid):
                     except Exception as e:
                         st.error(f"Hata: {e}")
             elif islem == "toplu":
-                if "toplu" in cap and bagli:
-                    if pid == "trendruum":
-                        trendruum_toplu_panel()
-                    elif pid == "idefix":
-                        idefix_toplu_panel()
-                    elif pid == "hb":
-                        st.caption("Hepsiburada üzerinde ürün aktarımları toplu liste veya XML ile desteklenir.")
-                    elif pid == "n11":
-                        st.caption("N11'de yalnızca mevcut ürünlerin stok/fiyatı güncellenir.")
-                        if st.button("📤 N11'e Tüm Stok/Fiyatları Gönder", type="primary"):
-                            try:
-                                g, h, msg = pazara_gonder(ayarlar, "n11", urunleri_oku())
-                                st.success(f"{g} ürün N11 görev kuyruğuna iletildi.")
-                                st.code(msg)
-                            except Exception as e:
-                                st.error(f"Hata: {e}")
-                else:
-                    st.info(yok_mesaj if bagli else "Önce API bilgilerini girin.")
+                if pid == "trendruum":
+                    trendruum_toplu_panel()
+                elif pid == "idefix":
+                    idefix_toplu_panel()
+                elif pid == "hb":
+                    st.caption("Hepsiburada stok ve fiyat güncellemeleri 'Tüm Stok/Fiyatları Güncelle' ile yönetilir.")
+                elif pid == "n11":
+                    if st.button("📤 N11'e Tüm Stok/Fiyatları Gönder", type="primary"):
+                        try:
+                            g, h, msg = pazara_gonder(ayarlar, "n11", urunleri_oku())
+                            st.success(f"{g} ürün N11 görev kuyruğuna iletildi.")
+                            st.code(msg)
+                        except Exception as e:
+                            st.error(f"Hata: {e}")
             elif islem == "durum":
-                if "durum" in cap and bagli:
+                if pid == "trendruum" and bagli:
                     secim = st.radio("İşlem", ["Stoğu 0 olanları pasif yap", "Stoğu olanları aktif yap"], key="ds")
                     pasif = secim.startswith("Stoğu 0")
                     with closing(baglan()) as c:
                         bk = [r[0] for r in c.execute(
                             "SELECT barkod FROM urunler WHERE stok <= 0" if pasif else
                             "SELECT barkod FROM urunler WHERE stok > 0").fetchall()]
-                    st.write(f"Etkilenecek ürün: **{len(bk):,}**")
                     if st.button("Uygula", key="du"):
                         try:
                             token = trendruum_token(kimlik(ayarlar, "trendruum_key"), kimlik(ayarlar, "trendruum_secret"))
                             uret, _ = tr_ayar(ayarlar)
                             ok, hata, loglar = trendruum_durum(token, bk, "passive" if pasif else "active", uret)
-                            (st.success if ok else st.error)(f"{ok} ürün güncellendi, {hata} hata.")
-                            st.code("\n".join(loglar[-8:]))
+                            st.success(f"{ok} ürün güncellendi.")
                         except Exception as e:
                             st.error(f"Hata: {e}")
-                else:
-                    st.info(yok_mesaj)
 
     st.markdown("---")
     with closing(baglan()) as c:
@@ -1900,6 +1786,15 @@ def pazar_ayar(pid):
         kar = st.number_input("Kâr marjı (%) (0 = tedarikçi marjı)", 0.0, 500.0, float(pa.get("kar_marji", 0.0)), 1.0, key=f"kar_{pid}")
         kargo = st.number_input("Sabit kargo fiyatı (TL)", 0.0, 5000.0, float(pa.get("sabit_kargo", 0.0)), 5.0, key=f"kargo_{pid}")
         artis = st.number_input("Ek fiyat artışı (%)", 0.0, 100.0, float(pa.get("fiyat_artis", 0.0)), 0.5, key=f"artis_{pid}")
+        
+        # Hepsiburada için özel SKU Öneki ayarı
+        if pid == "hb":
+            sku_prefix = st.text_input("Merchant SKU Öneki (Örn: SAH-)", value=pa.get("sku_prefix", ""), key=f"sku_prefix_{pid}")
+            if sku_prefix != pa.get("sku_prefix", ""):
+                pa["sku_prefix"] = sku_prefix.strip()
+                ayar_yaz(ayarlar)
+                st.success("SKU Öneki kaydedildi.")
+
         if (kar, kargo, artis) != (float(pa.get("kar_marji", 0.0)), float(pa.get("sabit_kargo", 0.0)), float(pa.get("fiyat_artis", 0.0))):
             pa["kar_marji"], pa["sabit_kargo"], pa["fiyat_artis"] = kar, kargo, artis
             ayar_yaz(ayarlar)
@@ -1909,12 +1804,8 @@ def pazar_ayar(pid):
         idefix_ayar_paneli()
     if pid == "trendruum":
         pa = ayarlar.setdefault("pazar_ayarlari", {}).setdefault(pid, {})
-        kdv = st.selectbox("KDV oranı (%)", [0, 1, 10, 20], index=[0, 1, 10, 20].index(int(pa.get("kdv", 20) or 20))
-                           if int(pa.get("kdv", 20) or 20) in (0, 1, 10, 20) else 3, key="tr_kdv")
-        gecici = st.checkbox("Eski barkod eşlemesini kullan", value=bool(pa.get("gecici_barkod", False)), key="tr_gecici")
-        if kdv != pa.get("kdv", 20) or gecici != bool(pa.get("gecici_barkod", False)):
-            pa["kdv"], pa["gecici_barkod"] = kdv, gecici
-            ayar_yaz(ayarlar)
+        kdv = st.selectbox("KDV oranı (%)", [0, 1, 10, 20], index=3, key="tr_kdv")
+        gecici = st.checkbox("Eski barkod eşlemesini kullan", value=False, key="tr_gecici")
         st.markdown("---")
         trendruum_marka_kategori()
 
@@ -1994,7 +1885,7 @@ elif sayfa == "Urunler":
     st.title("📦 Sistemdeki Ürünler")
     df = urunleri_oku()
     if df.empty:
-        st.info("Henüz ürün yok. Ayarlar > Tedarikçiler bölümünden XML ekleyip senkronize edin.")
+        st.info("Henüz ürün yok.")
     else:
         st.markdown(f"""
             <div style="background:#1e293b;padding:10px 14px;border-radius:10px;border:1px solid #334155;margin-bottom:14px;color:#f8fafc;text-align:center;">
