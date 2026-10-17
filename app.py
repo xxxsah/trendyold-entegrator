@@ -570,36 +570,67 @@ def n11_stok_fiyat(key, secret, df):
     for _, r in df.iterrows():
         if r["satis_fiyati"] > 0:
             fiyat = round(float(r["satis_fiyati"]), 2)
-            skular.append({
-                "stockCode": str(r["barkod"]),
-                "price": fiyat,
-                "quantity": int(max(r["stok"], 0))
-            })
+            skular.append(f"""
+            <stockItem>
+                <sellerStockCode>{esc(str(r["barkod"]))}</sellerStockCode>
+                <price>{fiyat}</price>
+                <quantity>{int(max(r["stok"], 0))}</quantity>
+            </stockItem>""")
+    
     ok, log, ok_b, hata_b = 0, [], [], []
-    headers = {
-        "appKey": key.strip(),
-        "appSecret": secret.strip(),
-        "Content-Type": "application/json"
-    }
-    for i in range(0, len(skular), 100):
-        grup = skular[i:i + 100]
-        no = i // 100 + 1
-        payload = {
-            "catalogId": 0,
-            "stockItems": grup
+    chunk_size = 100
+    for i in range(0, len(skular), chunk_size):
+        grup = skular[i:i + chunk_size]
+        no = i // chunk_size + 1
+        
+        xml_payload = f"""<?xml version="1.0" encoding="utf-8"?>
+<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:sch="http://www.n11.com/ws/schemas">
+   <soapenv:Header/>
+   <soapenv:Body>
+      <sch:UpdateStockPriceByIdRequest>
+         <auth>
+             <appKey>{esc(key.strip())}</appKey>
+             <appSecret>{esc(secret.strip())}</appSecret>
+         </auth>
+         <stockItems>
+            {"".join(grup)}
+         </stockItems>
+      </sch:UpdateStockPriceByIdRequest>
+   </soapenv:Body>
+</soapenv:Envelope>"""
+
+        headers = {
+            "Content-Type": "text/xml; charset=utf-8",
+            "SOAPAction": "UpdateStockPriceById"
         }
+        
         try:
-            r = requests.post(f"{N11_BASE}/rest/product/v1/stock", json=payload, headers=headers, timeout=120)
+            r = requests.post(f"{N11_BASE}/ws/productService", data=xml_payload.encode("utf-8"), headers=headers, timeout=120)
             if r.status_code == 200:
-                ok += len(grup)
-                ok_b += [x["stockCode"] for x in grup]
-                log.append(f"✅ Paket {no}: {len(grup)} ürün güncellendi")
+                if "success" in r.text.lower() or "errorCode>0" in r.text or "<errorCode></errorCode>" in r.text:
+                    ok += len(grup)
+                    for item_str in grup:
+                        m = re.search(r"<sellerStockCode>(.*?)</sellerStockCode>", item_str)
+                        if m:
+                            ok_b.append(m.group(1))
+                    log.append(f"✅ Paket {no}: {len(grup)} ürün N11'e güncellendi")
+                else:
+                    err_m = re.search(r"<errorMessage>(.*?)</errorMessage>", r.text)
+                    msg = err_m.group(1) if err_m else "N11 reddetti"
+                    for item_str in grup:
+                        m = re.search(r"<sellerStockCode>(.*?)</sellerStockCode>", item_str)
+                        if m:
+                            hata_b.append(m.group(1))
+                    log.append(f"❌ Paket {no}: {msg}")
             else:
-                hata_b += [x["stockCode"] for x in grup]
-                log.append(f"❌ Paket {no}: HTTP {r.status_code} - {r.text[:100]}")
+                for item_str in grup:
+                    m = re.search(r"<sellerStockCode>(.*?)</sellerStockCode>", item_str)
+                    if m:
+                        hata_b.append(m.group(1))
+                log.append(f"❌ Paket {no}: HTTP {r.status_code}")
         except Exception as e:
-            hata_b += [x["stockCode"] for x in grup]
             log.append(f"⚠️ Paket {no}: {e}")
+            
     try:
         pazar_isaretle("n11", ok_b, hata_b)
     except Exception:
