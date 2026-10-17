@@ -674,8 +674,10 @@ def trendyol_stok_fiyat(seller, key, secret, df):
 HB_BASE = "https://listing-external.hepsiburada.com"
 
 def hepsiburada_header(user, password):
-    tok = base64.b64encode(f"{user}:{password}".encode()).decode()
-    return {"Authorization": f"Basic {tok}", "User-Agent": f"{user} - SelfIntegration",
+    temiz_user = str(user).strip()
+    temiz_pass = str(password).strip()
+    tok = base64.b64encode(f"{temiz_user}:{temiz_pass}".encode("utf-8")).decode("utf-8").strip()
+    return {"Authorization": f"Basic {tok}", "User-Agent": f"{temiz_user} - SelfIntegration",
             "Content-Type": "application/json"}
 
 def hepsiburada_stok_fiyat(merchant_id, user, password, df, ayarlar=None):
@@ -778,7 +780,9 @@ def idefix_ayar(ayarlar):
 
 def idefix_header(ayarlar):
     key, secret = kimlik(ayarlar, "idefix_token"), kimlik(ayarlar, "idefix_secret")
-    tok = base64.b64encode(f"{key}:{secret}".encode()).decode()
+    temiz_key = str(key).strip()
+    temiz_secret = str(secret).strip()
+    tok = base64.b64encode(f"{temiz_key}:{temiz_secret}".encode("utf-8")).decode("utf-8").strip()
     return {"X-API-KEY": tok, "Content-Type": "application/json"}
 
 def idefix_vendor(ayarlar):
@@ -834,7 +838,7 @@ def idefix_stok_fiyat(ayarlar, df):
                           "inventoryQuantity": int(max(r["stok"], 0))})
     ok, log, ok_b, hata_b = 0, [], [], []
     if len(df) and not items:
-        log.append("ℹ️ Geçerli barkodu olmayan ürün yok (Genel Ayarları'nda 'stok kodunu barkod kullan' seçeneğine bakın).")
+        log.append("ℹ️ Geçerli barkodu olan ürün yok (Genel Ayarları'nda 'stok kodunu barkod kullan' seçeneğine bakın).")
     for i in range(0, len(items), 500):
         grup = items[i:i + 500]
         no = i // 500 + 1
@@ -1364,7 +1368,7 @@ def ac_kapa(pid):
     st.session_state["acik_pazar"] = None if st.session_state.get("acik_pazar") == pid else pid
 
 st.sidebar.title("👑 ŞahEntegre")
-st.sidebar.caption("Sürüm: v37 - HB Debug Güncellemesi")
+st.sidebar.caption("Sürüm: v38 - Header Base64 Strip Düzeltmesi")
 for kid, etiket_m, _ in ANA_MENU:
     st.sidebar.button(etiket_m, key=f"nav_{kid}", use_container_width=True,
                       type="primary" if st.session_state["sayfa"] == kid else "secondary",
