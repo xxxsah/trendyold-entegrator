@@ -1237,8 +1237,9 @@ def tema_css():
     temel = """
 [data-testid="stHeader"]{background:#1e2a4a;}
 [data-testid="stSidebar"]{background:#f4f7fb;}
-[data-testid="stSidebar"] .stButton button{justify-content:flex-start;text-align:left;border-radius:10px;
-  padding:10px 12px;border:1px solid rgba(0,0,0,.05);box-shadow:0 1px 3px rgba(0,0,0,.10);min-height:44px;}
+[data-testid="stSidebar"] .stButton button{border-radius:10px;
+  padding:10px 12px;border:1px solid rgba(0,0,0,.05);box-shadow:0 1px 3px rgba(0,0,0,.10);min-height:44px;white-space:normal !important;overflow:visible !important;}
+[data-testid="stSidebar"] .stButton button p{white-space:normal !important;}
 h1,h2,h3{color:#1e3a8a;}
 [data-testid="stMetric"]{background:#1e293b !important;border-radius:14px;padding:14px 16px;
   box-shadow:0 2px 8px rgba(0,0,0,.3);border-left:5px solid #3b82f6;}
@@ -1264,7 +1265,7 @@ def ac_kapa(pid):
     st.session_state["acik_pazar"] = None if st.session_state.get("acik_pazar") == pid else pid
 
 st.sidebar.title("👑 ŞahEntegre")
-st.sidebar.caption("Sürüm: v33 - Tam Orijinal ve Kusursuz")
+st.sidebar.caption("Sürüm: v34 - Kusursuz Orijinal Menü ve Hepsiburada")
 for kid, etiket_m, _ in ANA_MENU:
     st.sidebar.button(etiket_m, key=f"nav_{kid}", use_container_width=True,
                       type="primary" if st.session_state["sayfa"] == kid else "secondary",
