@@ -571,40 +571,34 @@ def n11_stok_fiyat(key, secret, df):
         if r["satis_fiyati"] > 0:
             fiyat = round(float(r["satis_fiyati"]), 2)
             skular.append({
-                "sellerStockCode": str(r["barkod"]),
+                "stockCode": str(r["barkod"]),
                 "price": fiyat,
-                "stockQuantity": int(max(r["stok"], 0))
+                "quantity": int(max(r["stok"], 0))
             })
     ok, log, ok_b, hata_b = 0, [], [], []
+    headers = {
+        "appKey": key.strip(),
+        "appSecret": secret.strip(),
+        "Content-Type": "application/json"
+    }
     for i in range(0, len(skular), 100):
         grup = skular[i:i + 100]
         no = i // 100 + 1
         payload = {
-            "auth": {"appKey": key.strip(), "appSecret": secret.strip()},
+            "catalogId": 0,
             "stockItems": grup
         }
         try:
-            r = requests.post(f"{N11_BASE}/ws/productService", json=payload, headers={"Content-Type": "application/json"}, timeout=120)
+            r = requests.post(f"{N11_BASE}/rest/product/v1/stock", json=payload, headers=headers, timeout=120)
             if r.status_code == 200:
-                try:
-                    res = r.json()
-                    result = res.get("result", {})
-                    if result.get("status") == "success" or not result.get("errorCode"):
-                        ok += len(grup)
-                        ok_b += [x["sellerStockCode"] for x in grup]
-                        log.append(f"✅ Paket {no}: {len(grup)} ürün N11'e güncellendi")
-                    else:
-                        hata_b += [x["sellerStockCode"] for x in grup]
-                        log.append(f"❌ Paket {no}: {result.get('errorMessage', r.text[:150])}")
-                except Exception:
-                    ok += len(grup)
-                    ok_b += [x["sellerStockCode"] for x in grup]
-                    log.append(f"✅ Paket {no}: N11'e iletildi")
+                ok += len(grup)
+                ok_b += [x["stockCode"] for x in grup]
+                log.append(f"✅ Paket {no}: {len(grup)} ürün güncellendi")
             else:
-                hata_b += [x["sellerStockCode"] for x in grup]
-                log.append(f"❌ Paket {no}: HTTP {r.status_code}")
+                hata_b += [x["stockCode"] for x in grup]
+                log.append(f"❌ Paket {no}: HTTP {r.status_code} - {r.text[:100]}")
         except Exception as e:
-            hata_b += [x["sellerStockCode"] for x in grup]
+            hata_b += [x["stockCode"] for x in grup]
             log.append(f"⚠️ Paket {no}: {e}")
     try:
         pazar_isaretle("n11", ok_b, hata_b)
