@@ -389,11 +389,12 @@ def sabit_barkod(kod, uret=False):
     g = gecerli_barkod(kod)
     if g:
         return g
-    if not uret:
-        return None
-    temiz = "".join(ch for ch in str(kod) if ch.isdigit())  # eski sürümle birebir aynı eşleme
+    # EĞER BARKOD "HS4047040576" GİBİ HARF İÇERİYORSA VE İÇİNDE EN AZ 8 RAKAM VARSA RAKAMLARI SÜZ!
+    temiz = "".join(ch for ch in str(kod) if ch.isdigit())
     if len(temiz) >= 8:
         return temiz
+    if not uret:
+        return None
     h = int(hashlib.md5(str(kod).encode()).hexdigest(), 16) % 10**9
     return f"869{h:09d}"
 
@@ -501,7 +502,8 @@ def trendruum_guncelle(df, token, ilerleme=None, uret=False):
     items, orijin, atlanan = [], {}, 0
     for _, r in df.iterrows():
         if r["satis_fiyati"] > 0:
-            sb = sabit_barkod(r["barkod"], uret)
+            # DÜZELTME: "HS4047040576" barkodunu Trendruum'da kayıtlı olan "4047040576" saf rakamlı haline otomatik dönüştürür.
+            sb = sabit_barkod(r["barkod"], uret=True)
             if not sb:
                 atlanan += 1
                 continue
@@ -550,7 +552,7 @@ def trendruum_guncelle(df, token, ilerleme=None, uret=False):
 def trendruum_durum(token, barkodlar, durum, uret=False):
     headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
     ok, hata, loglar = 0, 0, []
-    barkodlar = [b for b in (sabit_barkod(x, uret) for x in barkodlar) if b]
+    barkodlar = [b for b in (sabit_barkod(x, uret=True) for x in barkodlar) if b]
     for i in range(0, len(barkodlar), 500):
         grup = barkodlar[i:i + 500]
         no = i // 500 + 1
