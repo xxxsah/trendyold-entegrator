@@ -147,7 +147,7 @@ def urunleri_oku():
 
 def http(method, url, tries=4, **kw):
     """429 / 5xx durumunda bekleyip tekrar dener. Son yanıtı döndürür."""
-    kw.setdefault("timeout", 60)
+    kw.setdefault("timeout", 120)
     son = None
     for i in range(tries):
         try:
@@ -504,7 +504,6 @@ def trendruum_guncelle(df, token, ilerleme=None, uret=False):
             if not sb:
                 atlanan += 1
                 continue
-            # DÜZELTME: Hem dönen saf barkodu (4047...) hem orijinal barkodu (HS4047...) çift taraflı eşleştiriyoruz.
             orijin[sb] = raw_b
             orijin[raw_b] = raw_b
             items.append({"barcode": sb, "price": float(r["satis_fiyati"]), "stock": int(r["stok"])})
