@@ -87,7 +87,6 @@ def ayar_oku():
     for k in KIMLIK_ALANLARI:
         if k in veri and isinstance(veri[k], str):
             veri["kimlik"].setdefault(k, veri.pop(k))
-    # Otomatik olarak Hepsiburada bilgilerini sabitleyelim
     veri["kimlik"].setdefault("hb_merchant_id", "4fd80747-062b-41e8-980b-30a5481a8e1e")
     veri["kimlik"].setdefault("hb_user", "sahin724_dev")
     veri["kimlik"].setdefault("hb_pass", "uExAH7y8Qxuw")
@@ -1265,7 +1264,7 @@ def ac_kapa(pid):
     st.session_state["acik_pazar"] = None if st.session_state.get("acik_pazar") == pid else pid
 
 st.sidebar.title("👑 ŞahEntegre")
-st.sidebar.caption("Sürüm: v28 - HB Entegrasyonlu")
+st.sidebar.caption("Sürüm: v29 - Tam Sürüm")
 for kid, etiket_m, _ in ANA_MENU:
     st.sidebar.button(etiket_m, key=f"nav_{kid}", use_container_width=True,
                       type="primary" if st.session_state["sayfa"] == kid else "secondary",
