@@ -181,166 +181,12 @@ def http(method, url, tries=4, **kw):
 
 
 # ───────────────────────── XML ─────────────────────────
-def etiket(tag):
-    return tag.split("}", 1)[-1]
-
-
-def indir(url):
-    if not url.lower().startswith(("http://", "https://")):
-        raise ValueError("Yalnızca http/https bağlantıları desteklenir.")
-    istek = urllib.request.Request(url, headers={
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36",
-        "Accept": "application/xml,text/xml,*/*",
-        "Accept-Encoding": "gzip",
-    })
-    with urllib.request.urlopen(istek, timeout=90) as r:
-        veri = r.read()
-    if veri[:2] == b"\x1f\x8b":
-        veri = gzip.decompress(veri)
-    return veri
-
-
-def ekle(sozluk, anahtar, deger):
-    if anahtar in sozluk and deger:
-        sozluk[anahtar] = (sozluk[anahtar] + "|" + deger) if sozluk[anahtar] else deger
-    elif anahtar not in sozluk:
-        sozluk[anahtar] = deger
-
-
-def duzlestir(el, onek="", cikti=None):
-    if cikti is None:
-        cikti = {}
-    for ad, deger in el.attrib.items():
-        ekle(cikti, f"{onek}@{ad}", deger)
-    for cocuk in el:
-        yol = f"{onek}{etiket(cocuk.tag)}"
-        if len(cocuk) == 0:
-            ekle(cikti, yol, (cocuk.text or "").strip())
-            for ad, deger in cocuk.attrib.items():
-                ekle(cikti, f"{yol}@{ad}", deger)
-        else:
-            duzlestir(cocuk, yol + ".", cikti)
-    return cikti
-
-
-def urun_dugumu_bul(kok):
-    ebeveyn = {c: p for p in kok.iter() for c in p}
-    sayac = Counter(etiket(e.tag) for e in kok.iter() if len(e) > 0)
-    adaylar = {t for t, n in sayac.items() if n >= 2 and t != etiket(kok.tag)}
-
-    def ic_icede(el):
-        p = ebeveyn.get(el)
-        while p is not None:
-            if etiket(p.tag) in adaylar:
-                return True
-            p = ebeveyn.get(p)
-        return False
-
-    dis = {etiket(e.tag) for e in kok.iter() if etiket(e.tag) in adaylar and not ic_icede(e)}
-    if not dis:
-        return None
-
-    def puan(tag):
-        ornek = next(e for e in kok.iter() if etiket(e.tag) == tag)
-        return sayac[tag] * len(list(ornek.iter()))
-
-    return max(dis, key=puan)
-
-
-def xml_oku(veri):
-    try:
-        kok = ET.fromstring(veri)
-    except ET.ParseError:
-        ilk = veri[:200].decode("utf-8", "replace")
-        raise ValueError(f"Geçerli XML değil. Gelen içerik: {ilk}")
-    tag = urun_dugumu_bul(kok)
-    if not tag:
-        raise ValueError("XML içinde tekrar eden ürün kaydı bulunamadı.")
-    satirlar = [duzlestir(e) for e in kok.iter() if etiket(e.tag) == tag]
-    return pd.DataFrame(satirlar).fillna("")
+from xmlkit import etiket, indir, xml_oku, sayi, tahmin, ilk_gorsel, normalle  # noqa: E402
 
 
 @st.cache_data(ttl=600, show_spinner=False)
 def xml_onizleme(url):
     return xml_oku(indir(url))
-
-
-def sayi(x):
-    s = str(x).strip().replace("TL", "").replace("₺", "").replace(" ", "")
-    if not s:
-        return 0.0
-    if "," in s and "." in s:
-        s = s.replace(".", "").replace(",", ".")
-    elif "," in s:
-        s = s.replace(",", ".")
-    elif re.fullmatch(r"\d{1,3}(\.\d{3})+", s):  # 1.234 / 12.345.678 → binlik ayracı
-        s = s.replace(".", "")
-    try:
-        return float(s)
-    except ValueError:
-        return 0.0
-
-
-def tahmin(kolonlar, anahtarlar):
-    kolonlar = list(kolonlar)
-    for a in anahtarlar:
-        for k in kolonlar:
-            if k.lower() == a:
-                return k
-    for a in anahtarlar:
-        for k in kolonlar:
-            kl = k.lower()
-            if a in kl and "variant" not in kl and "count" not in kl and "code" not in kl:
-                return k
-    for a in anahtarlar:
-        for k in kolonlar:
-            if a in k.lower():
-                return k
-    return "(yok)"
-
-
-def ilk_gorsel(df, secili):
-    adaylar = [secili] if secili != "(yok)" else []
-    adaylar += [c for c in df.columns if c != secili and "image" in c.lower() and "count" not in c.lower()]
-    sonuc = pd.Series([""] * len(df), index=df.index)
-    for c in adaylar:
-        if c not in df.columns:
-            continue
-        deger = df[c].astype(str).str.split("|").str[0].str.strip()
-        sonuc = sonuc.where(sonuc != "", deger)
-    return sonuc.str.replace("http://", "https://", regex=False)
-
-
-def normalle(tedarikci, df, harita, marj, sabit_ek, kritik_esik=0):
-    def kol(ad):
-        k = harita.get(ad, "(yok)")
-        if k == "(yok)" or k not in df.columns:
-            return pd.Series([""] * len(df), index=df.index)
-        return df[k]
-
-    alis = kol("fiyat").map(sayi)
-    satis = alis * (1 + marj / 100) + sabit_ek
-    stok = kol("stok").map(sayi).clip(lower=0).astype(int)
-    if kritik_esik and kritik_esik > 0:
-        stok = stok.where(stok > kritik_esik, 0)
-
-    kk = harita.get("kategori", "(yok)")
-    if kk == "(yok)" or kk not in df.columns:
-        kk = tahmin(df.columns, ["kategori", "category", "cat", "tur", "grup", "maincategory"])
-    kategori = df[kk].astype(str) if kk in df.columns else pd.Series(["Genel"] * len(df), index=df.index)
-
-    out = pd.DataFrame({
-        "gorsel": ilk_gorsel(df, harita.get("gorsel", "(yok)")),
-        "tedarikci": tedarikci,
-        "barkod": kol("kod").astype(str).str.strip(),
-        "urun_adi": kol("ad").astype(str).str.strip(),
-        "stok": stok,
-        "alis_fiyati": alis.round(2),
-        "satis_fiyati": satis.round(2),
-        "kategori": kategori,
-    })
-    out = out[(out["barkod"] != "") & (out["urun_adi"] != "")]
-    return out.drop_duplicates(subset=["barkod"], keep="first")
 
 
 def tedarikci_senkron(ad, bilgi, kritik_esik=0):
@@ -1063,117 +909,8 @@ def baglanti_testi(ayarlar, pid):
 
 
 # ───────────────────────── Siparişler ─────────────────────────
-def tr_tarih(v):
-    try:
-        if isinstance(v, (int, float)) or (isinstance(v, str) and v.isdigit()):
-            n = float(v)
-            n = n / 1000 if n > 1e11 else n
-            return datetime.fromtimestamp(n).strftime("%d.%m.%Y %H:%M")
-        if v:
-            return str(v)[:16].replace("T", " ")
-    except Exception:
-        pass
-    return ""
-
-
-def getp(d, *yollar):
-    for y in yollar:
-        cur = d
-        for k in y.split("."):
-            if isinstance(cur, dict) and k in cur:
-                cur = cur[k]
-            else:
-                cur = None
-                break
-        if cur not in (None, "", [], {}):
-            return cur
-    return None
-
-
-def metin(v):
-    if isinstance(v, dict):
-        return ", ".join(str(x) for x in v.values() if x not in (None, ""))
-    return "" if v is None else str(v)
-
-
-DURUM_ETIKET = {"yeni": "🆕 Yeni", "hazir": "🚚 Gönderime Hazır", "kargoda": "🚛 Kargoda",
-                "teslim": "✅ Teslim Edildi", "iptal": "❌ İptal"}
-
-
-def durum_kodu(pid, d):
-    d = str(d or "").lower()
-    if pid in ("trendyol", "n11"):
-        harita = {"created": "yeni", "picking": "hazir", "invoiced": "hazir", "shipped": "kargoda",
-                  "delivered": "teslim", "cancelled": "iptal", "unsupplied": "iptal", "unpacked": "iptal"}
-    else:
-        harita = {"new": "yeni", "pending": "yeni", "in_progress": "hazir", "shipped": "kargoda",
-                  "shipping": "kargoda", "delivered": "teslim", "completed": "teslim",
-                  "cancelled": "iptal", "returned": "iptal"}
-    return harita.get(d, "yeni")
-
-
-def siparis_normalle_ty(p):
-    adr = p.get("shipmentAddress") or {}
-    satirlar = p.get("lines") or []
-    return {
-        "pid": "trendyol", "id": str(p.get("id", "")), "no": str(p.get("orderNumber", "")),
-        "tarih": tr_tarih(p.get("orderDate")),
-        "durum": durum_kodu("trendyol", p.get("status") or p.get("shipmentPackageStatus")),
-        "alici": adr.get("fullName") or f"{adr.get('firstName', '')} {adr.get('lastName', '')}".strip(),
-        "adres": adr.get("fullAddress") or metin(adr.get("address1")),
-        "urunler": [{"ad": l.get("productName", ""), "sku": l.get("merchantSku") or l.get("barcode", ""),
-                     "adet": l.get("quantity", 1)} for l in satirlar],
-        "tutar": p.get("totalPrice"), "teslim": tr_tarih(p.get("agreedDeliveryDate")),
-        "kargo": p.get("cargoProviderName", ""), "barkod": str(p.get("cargoTrackingNumber", "") or ""),
-        "link": p.get("cargoTrackingLink", "") or "",
-        "satirlar": [{"lineId": l.get("id"), "quantity": l.get("quantity", 1)} for l in satirlar],
-        "ham": p,
-    }
-
-
-def siparis_normalle_tr(o):
-    ogid = getp(o, "ogid", "order_group_id", "id", "_id")
-    ham_urun = getp(o, "items", "order_group_items", "products", "lines") or []
-    urunler = []
-    for u in ham_urun:
-        if isinstance(u, dict):
-            urunler.append({"ad": metin(getp(u, "name", "product_name", "title")),
-                            "sku": metin(getp(u, "barcode", "stock_code", "sku")),
-                            "adet": getp(u, "quantity", "qty") or 1})
-    return {
-        "pid": "trendruum", "id": str(ogid or ""),
-        "no": str(getp(o, "order_number", "orderNumber", "ogid", "id", "_id") or ""),
-        "tarih": tr_tarih(getp(o, "created_at", "createdAt", "order_date", "date")),
-        "durum": durum_kodu("trendruum", getp(o, "status", "shipment_status")),
-        "alici": metin(getp(o, "customer.name", "customer.full_name", "shipping_address.full_name",
-                            "shipping_address.name", "buyer_name", "name")),
-        "adres": metin(getp(o, "shipping_address.full_address", "shipping_address.address",
-                            "address.full_address", "address")),
-        "urunler": urunler, "tutar": getp(o, "total_price", "total", "grand_total"),
-        "teslim": tr_tarih(getp(o, "estimated_delivery_date", "delivery_date")),
-        "kargo": metin(getp(o, "cargo_company", "shipment.cargo_company")),
-        "barkod": metin(getp(o, "tracking_number", "shipment.tracking_number")), "link": "", "ham": o,
-    }
-
-
-def siparis_normalle_n11(p):
-    adr = p.get("shippingAddress") or {}
-    satirlar = p.get("lines") or []
-    gecmis = p.get("packageHistories") or []
-    ilk = gecmis[0].get("createdDate") if gecmis else p.get("lastModifiedDate")
-    return {
-        "pid": "n11", "id": str(p.get("id", "")), "no": str(p.get("orderNumber", "")),
-        "tarih": tr_tarih(ilk), "durum": durum_kodu("n11", p.get("shipmentPackageStatus")),
-        "alici": adr.get("fullName") or p.get("customerfullName") or "",
-        "adres": ", ".join(x for x in (adr.get("address"), adr.get("district"), adr.get("city")) if x),
-        "urunler": [{"ad": l.get("productName", ""), "sku": l.get("stockCode") or l.get("barcode") or "",
-                     "adet": l.get("quantity", 1)} for l in satirlar],
-        "tutar": p.get("totalAmount"), "teslim": tr_tarih(p.get("agreedDeliveryDate")),
-        "kargo": p.get("cargoProviderName", "") or "", "barkod": str(p.get("cargoTrackingNumber", "") or ""),
-        "link": p.get("cargoTrackingLink", "") or "",
-        # N11 güncelleme uç noktası "lineId" bekler; paket satırında bu alan orderLineId olarak gelir
-        "satirlar": [{"lineId": l.get("orderLineId") or l.get("id")} for l in satirlar], "ham": p,
-    }
+from orders import (DURUM_ETIKET, durum_kodu, getp, metin, siparis_normalle_n11,  # noqa: E402
+                    siparis_normalle_tr, siparis_normalle_ty, tr_tarih)
 
 
 def siparis_cek(ayarlar, pid):
@@ -2240,4 +1977,46 @@ elif sayfa == "Urunler":
 
 elif sayfa == "Kritik":
     st.title("🔄 Oto Kritik Stok")
-    st.caption("Eşik ve altı stoklar sen
+    st.caption("Eşik ve altı stoklar senkronda 0 sayılır. 0 = kapalı.")
+    esik = st.number_input("Kritik stok eşiği", 0, 50, kritik_esik_ayari(), key="kr_esik")
+    if int(esik) != kritik_esik_ayari():
+        ayarlar["kritik_esik"] = int(esik)
+        ayar_yaz(ayarlar)
+        st.success("Eşik kaydedildi (bir sonraki senkronda uygulanır).")
+    if esik > 0:
+        with closing(baglan()) as c:
+            df_k = pd.read_sql("SELECT gorsel, barkod, urun_adi, stok, satis_fiyati FROM urunler WHERE stok > 0 AND stok <= ?",
+                               c, params=(int(esik),))
+        st.metric("Eşik altındaki ürün", f"{len(df_k):,}")
+        for _, row in df_k.head(100).iterrows():
+            with st.container(border=True):
+                c_img, c_det = st.columns([1, 3])
+                with c_img:
+                    if str(row["gorsel"]).startswith("http"):
+                        st.markdown(f'<div style="display:flex;justify-content:center;"><img src="{esc(str(row["gorsel"]), quote=True)}" style="max-height:80px;border-radius:6px;object-fit:contain;"></div>', unsafe_allow_html=True)
+                with c_det:
+                    st.markdown(f"<div style='font-size:14px;font-weight:700;color:#1e3a8a;'>{esc(str(row['urun_adi']))}</div>", unsafe_allow_html=True)
+                    st.markdown(f"<div style='font-size:12px;color:#475569;'>Barkod: {esc(str(row['barkod']))} | Stok: <b>{int(row['stok'])}</b> | Fiyat: <b>{row['satis_fiyati']:.2f} ₺</b></div>", unsafe_allow_html=True)
+        if len(df_k) > 100:
+            st.caption(f"İlk 100 ürün gösteriliyor ({len(df_k):,} ürün var).")
+
+elif sayfa == "Ayarlar":
+    st.title("⚙️ Ayarlar")
+    t1, t2, t3 = st.tabs(["Tedarikçiler & XML", "Genel", "Senkron Günlüğü"])
+    with t1:
+        tedarikci_sayfasi()
+    with t2:
+        genel_ayarlar()
+    with t3:
+        gunluk_sayfasi()
+
+elif ":" in sayfa:
+    pid_, alt_ = sayfa.split(":", 1)
+    if pid_ in PAZAR:
+        {"siparis": pazar_siparis, "islemler": pazar_islemler, "ayar": pazar_ayar, "ai": pazar_ai}.get(alt_, pazar_islemler)(pid_)
+    else:
+        git("Anasayfa")
+        st.rerun()
+else:
+    git("Anasayfa")
+    st.rerun()
