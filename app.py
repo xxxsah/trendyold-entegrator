@@ -1359,7 +1359,14 @@ def genel_ayarlar():
                        json.dumps(yedek, ensure_ascii=False, indent=2).encode("utf-8"),
                        "sahentegre_ayarlar.json", "application/json", use_container_width=True)
     st.caption("Bu yedeğin içeriğini Streamlit Secrets'ta AYARLAR_JSON olarak saklarsanız ayarlarınız geri gelir.")
+    tam = {k: v for k, v in ayarlar.items()}
+    st.download_button("🔐 TAM Yedek (API anahtarları DAHİL)",
+                       json.dumps(tam, ensure_ascii=False, indent=2).encode("utf-8"),
+                       "sahentegre_tam_yedek.json", "application/json", use_container_width=True)
+    st.warning("Tam yedek API anahtarlarınızı düz metin içerir. Kimseyle paylaşmayın, "
+               "herkese açık bir yere (GitHub vb.) yüklemeyin.")
     yuklenen = st.file_uploader("♻️ Yedek dosyasını geri yükle (.json)", type="json", key="yedek_yukle")
+    anahtar_da = st.checkbox("Yedekteki API anahtarlarını da geri yükle", value=True, key="yedek_anahtar")
     if yuklenen is not None and st.button("Geri Yükle", key="yedek_btn"):
         try:
             veri_y = json.loads(yuklenen.getvalue().decode("utf-8"))
@@ -1367,6 +1374,8 @@ def genel_ayarlar():
                 raise ValueError("Geçersiz yedek biçimi.")
             for k, v in veri_y.items():
                 if k == "kimlik":
+                    if anahtar_da and isinstance(v, dict):
+                        ayarlar.setdefault("kimlik", {}).update({a_: b_ for a_, b_ in v.items() if b_})
                     continue
                 if k == "tedarikciler" and not v and ayarlar.get("tedarikciler"):
                     continue  # boş yedek mevcut tedarikçileri silmesin
