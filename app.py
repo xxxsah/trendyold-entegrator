@@ -868,12 +868,20 @@ def idefix_urun_listesi(df, ayarlar):
         gorsel = str(r["gorsel"]).strip()
         kod = str(r["barkod"]).strip()
         bk = idefix_barkod(kod, ayarlar)
-        if not gorsel.startswith("https") or r["satis_fiyati"] <= 0 or not bk:
+                if not gorsel.startswith("https") or r["satis_fiyati"] is None:
             atlanan += 1
-            continue Hk
+            continue
         ad = str(r["urun_adi"]).strip()
         liste.append({
-            "barcode": bk, "title": ad[:250], "productMainId": kod,
+            "barcode": bk, "title": ad[:250],
+            "brandId": int(brand) if brand else 0, "categoryId": int(cat) if cat else 0,
+            "inventoryQuantity": int(max(r["stok"], 0)),
+            "description": ad, "price": round(float(r["satis_fiyati"]), 2),
+            "comparePrice": round(float(r["satis_fiyati"]), 2),
+            "deliveryDuration": sure, "deliveryType": "regular",
+            "images": [{"url": gorsel}], "attributes": atr,
+        })
+           "barcode": bk, "title": ad[:250], "productMainId": kod,
             "brandId": int(brand) if brand else 0, "categoryId": int(cat) if cat else 0, 
             "inventoryQuantity": int(max(r["stok"], 0)), "vendorStockCode": kod,
             "description": ad, "price": round(float(r["satis_fiyati"]), 2),
