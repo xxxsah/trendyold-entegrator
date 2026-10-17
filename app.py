@@ -2240,4 +2240,4 @@ elif sayfa == "Urunler":
 
 elif sayfa == "Kritik":
     st.title("🔄 Oto Kritik Stok")
-    st.caption("Eşik ve altındaki stokla
+    st.caption("Eşik ve altı stoklar sen
