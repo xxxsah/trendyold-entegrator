@@ -1264,7 +1264,7 @@ def ac_kapa(pid):
     st.session_state["acik_pazar"] = None if st.session_state.get("acik_pazar") == pid else pid
 
 st.sidebar.title("👑 ŞahEntegre")
-st.sidebar.caption("Sürüm: v30 - Kesintisiz Tam Sürüm")
+st.sidebar.caption("Sürüm: v31 - Kesintisiz ve Eksiksiz")
 for kid, etiket_m, _ in ANA_MENU:
     st.sidebar.button(etiket_m, key=f"nav_{kid}", use_container_width=True,
                       type="primary" if st.session_state["sayfa"] == kid else "secondary",
@@ -1395,6 +1395,48 @@ def hepsiburada_toplu_panel():
         ok, top, loglar = hepsiburada_gonder(
             ayarlar, liste, lambda p, l: (bar.progress(p), kutu.code("\n".join(l[-10:]))))
         (st.success if ok else st.error)(f"{ok}/{top} paket başarıyla gönderildi.")
+
+def trendruum_toplu_panel():
+    key, secret = kimlik(ayarlar, "trendruum_key"), kimlik(ayarlar, "trendruum_secret")
+    brand, cat = kimlik(ayarlar, "trendruum_brand"), kimlik(ayarlar, "trendruum_category")
+    miktar = st.selectbox("Gönderilecek ürün", ["Güncellemede bulunamayanlar", "Tek ürün (test)", "İlk 100", "İlk 500", "Tümü"], key="tp_miktar")
+    tek_stok = st.checkbox("Sadece stokta olanları gönder", value=True, key="tp_stok")
+    if st.button("📤 Trendruum'a Gönder", type="primary", key="tp_gonder"):
+        eksik = [ad for ad, v in (("API Key", key), ("API Secret", secret),
+                                  ("Brand ID", brand), ("Varsayılan Kategori ID", cat)) if not v]
+        if eksik:
+            st.error("Eksik alan: " + ", ".join(eksik) + ". Genel Ayarları sayfasından doldurun.")
+            return
+        df = urunleri_oku()
+        if miktar == "Güncellemede bulunamayanlar":
+            with closing(baglan()) as c:
+                hatali = {r[0] for r in c.execute(
+                    "SELECT barkod FROM pazar_durum WHERE pazar='trendruum' AND durum='hata'").fetchall()}
+            df = df[df["barkod"].astype(str).isin(hatali)]
+            if df.empty:
+                st.info("Hatalı ürün kaydı yok.")
+                return
+        if tek_stok:
+            df = df[df["stok"] > 0]
+        df = df.head({"Tek ürün (test)": 1, "İlk 100": 100, "İlk 500": 500}.get(miktar, len(df)))
+        if df.empty:
+            st.warning("Gönderilecek ürün yok.")
+            return
+        try:
+            token = trendruum_token(key, secret)
+            df = fiyat_artis_uygula(ayarlar, "trendruum", df)
+            liste, atlanan = trendruum_urun_listesi(df, ayarlar, brand, cat)
+            if atlanan:
+                st.info(f"{atlanan} ürün atlandı.")
+            if not liste:
+                st.warning("Gönderilecek geçerli ürün kalmadı.")
+                return
+            bar, kutu = st.progress(0), st.empty()
+            ok, top, loglar = trendruum_gonder(
+                liste, token, lambda p, l: (bar.progress(min(p, 1.0)), kutu.code("\n".join(l[-15:]))))
+            st.success(f"Tamamlandı: {ok}/{top} paket başarılı.")
+        except Exception as e:
+            st.error(f"Hata: {e}")
 
 def tam_senkron(pid):
     with st.spinner("Tedarikçi XML'leri çekiliyor..."):
