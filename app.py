@@ -1351,6 +1351,9 @@ def tedarikci_sayfasi():
 
 
 def genel_ayarlar():
+    _m = st.session_state.pop("yedek_mesaj", None)
+    if _m:
+        (st.success if _m[0] else st.warning)(_m[1])
     yedek = {k: v for k, v in ayarlar.items() if k != "kimlik"}
     st.download_button("⬇️ Ayar Yedeği (.json, gizlisiz)",
                        json.dumps(yedek, ensure_ascii=False, indent=2).encode("utf-8"),
@@ -1360,11 +1363,22 @@ def genel_ayarlar():
     if yuklenen is not None and st.button("Geri Yükle", key="yedek_btn"):
         try:
             veri_y = json.loads(yuklenen.getvalue().decode("utf-8"))
+            if not isinstance(veri_y, dict):
+                raise ValueError("Geçersiz yedek biçimi.")
             for k, v in veri_y.items():
-                if k != "kimlik":
-                    ayarlar[k] = v
+                if k == "kimlik":
+                    continue
+                if k == "tedarikciler" and not v and ayarlar.get("tedarikciler"):
+                    continue  # boş yedek mevcut tedarikçileri silmesin
+                ayarlar[k] = v
             ayarlar.setdefault("tedarikciler", {})
             ayar_yaz(ayarlar)
+            n_ = len(ayarlar["tedarikciler"])
+            if n_:
+                st.session_state["yedek_mesaj"] = (True, f"Yedek yüklendi. {n_} tedarikçi var.")
+            else:
+                st.session_state["yedek_mesaj"] = (False, "Yedek yüklendi ama içinde tedarikçi yok. "
+                                                   "Tedarikçi XML'ini Tedarikçiler & XML sekmesinden yeniden ekleyin.")
             st.rerun()
         except Exception as e:
             st.error(f"Yüklenemedi: {e}")
@@ -1382,7 +1396,7 @@ def gunluk_sayfasi():
 def trendruum_toplu_panel():
     key, secret = kimlik(ayarlar, "trendruum_key"), kimlik(ayarlar, "trendruum_secret")
     brand, cat = kimlik(ayarlar, "trendruum_brand"), kimlik(ayarlar, "trendruum_category")
-    miktar = st.selectbox("Gönderilecek ürün", ["Tek ürün (test)", "İlk 100", "İlk 500", "Tümü"], key="tp_miktar")
+    miktar = st.selectbox("Gönderilecek ürün", ["Güncellemede bulunamayanlar", "Tek ürün (test)", "İlk 100", "İlk 500", "Tümü"], key="tp_miktar")
     tek_stok = st.checkbox("Sadece stokta olanları gönder", value=True, key="tp_stok")
     if st.button("📤 Trendruum'a Gönder", type="primary", key="tp_gonder"):
         eksik = [ad for ad, v in (("API Key", key), ("API Secret", secret),
@@ -1396,6 +1410,15 @@ def trendruum_toplu_panel():
                      "Genel Ayarları'ndaki arama ile yeniden seçin.")
             return
         df = urunleri_oku()
+        if miktar == "Güncellemede bulunamayanlar":
+            with closing(baglan()) as c:
+                hatali = {r[0] for r in c.execute(
+                    "SELECT barkod FROM pazar_durum WHERE pazar='trendruum' AND durum='hata'").fetchall()}
+            df = df[df["barkod"].astype(str).isin(hatali)]
+            if df.empty:
+                st.info("Hatalı ürün kaydı yok. Önce 'Tüm Stok/Fiyatları Güncelle' çalıştırın.")
+                return
+            st.caption(f"{len(df)} ürün gönderilecek.")
         if tek_stok:
             df = df[df["stok"] > 0]
         df = df.head({"Tek ürün (test)": 1, "İlk 100": 100, "İlk 500": 500}.get(miktar, len(df)))
