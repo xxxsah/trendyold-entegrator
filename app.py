@@ -1016,16 +1016,25 @@ def baglanti_testi(ayarlar, pid):
             r = http("GET", f"{TY_BASE}/order/sellers/{s_}/orders", params={"size": 1},
                      headers=trendyol_header(s_, k_, x_), timeout=30)
         elif pid == "hb":
-            m_, u_, p_ = kimlik(ayarlar, "hb_merchant_id"), kimlik(ayarlar, "hb_user"), kimlik(ayarlar, "hb_pass")
-            # Hepsiburada güncel endpoint testi
-            r = requests.post(f"{HB_BASE}/listings/merchantid/{m_}/price-and-inventory",
-                              json={"items": []}, headers=hepsiburada_header(u_, p_), timeout=30)
+            m_ = kimlik(ayarlar, "hb_merchant_id")
+            u_ = kimlik(ayarlar, "hb_user")
+            p_ = kimlik(ayarlar, "hb_pass")
+            
+            if not m_ or not u_ or not p_:
+                return False, "Eksik bilgi: Merchant ID, Kullanıcı Adı veya Şifre boş bırakılamaz."
+            
+            # Yenilenmiş, kararlı Hepsiburada Bağlantı Testi
+            url = f"{HB_BASE}/listings/merchantid/{m_}/price-and-inventory"
+            headers = hepsiburada_header(u_, p_)
+            
+            r = requests.post(url, json={"items": []}, headers=headers, timeout=20)
+            
             if r.status_code in (200, 201, 202, 400):
-                return True, f"Hepsiburada API Bağlantısı Başarılı! (HTTP {r.status_code})"
+                return True, f"✅ Hepsiburada API Bağlantısı Başarılı! (HTTP {r.status_code})"
             elif r.status_code == 401:
-                return False, "Hatalı Giriş (HTTP 401): Kullanıcı adı veya Servis Anahtarı (şifre) yanlış."
+                return False, "❌ Hatalı Giriş (HTTP 401): Kullanıcı adı veya Servis Anahtarı (şifre) Hepsiburada tarafından reddedildi."
             else:
-                return False, f"HTTP {r.status_code}: {r.text[:300]}"
+                return False, f"⚠️ HTTP {r.status_code} Yanıtı Alındı: {r.text[:200]}"
         elif pid == "n11":
             r = http("GET", f"{N11_BASE}/rest/delivery/v1/shipmentPackages",
                      params={"status": "Created", "page": 0, "size": 1},
@@ -1348,7 +1357,7 @@ def ac_kapa(pid):
     st.session_state["acik_pazar"] = None if st.session_state.get("acik_pazar") == pid else pid
 
 st.sidebar.title("👑 ŞahEntegre")
-st.sidebar.caption("Sürüm: v34 - HB API Güncellendi")
+st.sidebar.caption("Sürüm: v35 - HB Bağlantı Mekanizması Yenilendi")
 for kid, etiket_m, _ in ANA_MENU:
     st.sidebar.button(etiket_m, key=f"nav_{kid}", use_container_width=True,
                       type="primary" if st.session_state["sayfa"] == kid else "secondary",
@@ -1786,8 +1795,9 @@ def pazar_ayar(pid):
         gizli_input(etk, anahtar, parola)
     if pid in CAP:
         if st.button("🔌 Bağlantı Testi", key=f"bt_{pid}"):
-            ok_, msg_ = baglanti_testi(ayarlar, pid)
-            (st.success if ok_ else st.error)(msg_)
+            with st.spinner("Bağlantı kontrol ediliyor..."):
+                ok_, msg_ = baglanti_testi(ayarlar, pid)
+                (st.success if ok_ else st.error)(msg_)
         st.markdown("### 💰 Fiyat Kuralları")
         pa = ayarlar.setdefault("pazar_ayarlari", {}).setdefault(pid, {})
         kar = st.number_input("Kâr marjı (%) (0 = tedarikçi marjı)", 0.0, 500.0, float(pa.get("kar_marji", 0.0)), 1.0, key=f"kar_{pid}")
