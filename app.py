@@ -887,7 +887,7 @@ def idefix_urun_listesi(df, ayarlar):
             "images": [{"url": gorsel}],
             "attributes": atr,
         })
-     "inventoryQuantity": int(max(r["stok"], 0)), "vendorStockCode": kod,
+            "inventoryQuantity": int(max(r["stok"], 0)), "vendorStockCode": kod,
             "description": ad, "price": round(float(r["satis_fiyati"]), 2),
             "comparePrice": round(float(r["satis_fiyati"]), 2), "vatRate": kdv,
             "deliveryDuration": sure, "deliveryType": "regular",
