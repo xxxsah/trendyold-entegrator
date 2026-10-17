@@ -890,7 +890,7 @@ def ac_kapa(pid):
     st.session_state["acik_pazar"] = None if st.session_state.get("acik_pazar") == pid else pid
 
 st.sidebar.title("👑 ŞahEntegre")
-st.sidebar.caption("Sürüm: v32 (Orjinal Uyumlu)")
+st.sidebar.caption("Sürüm: v34 (Kusursuz & Tam)")
 if not sifre:
     st.sidebar.warning("⚠️ APP_PASSWORD tanımlı değil!")
 for kid, etiket_m, _ in ANA_MENU:
