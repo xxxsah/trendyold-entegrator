@@ -697,8 +697,9 @@ def hepsiburada_stok_fiyat(merchant_id, user, password, df, ayarlar=None):
         grup = items[i:i + 500]
         no = i // 500 + 1
         try:
-            r = http("POST", f"{HB_BASE}/listings/merchantid/{merchant_id}/price-and-inventory",
-                     json={"items": grup}, headers=hepsiburada_header(user, password), timeout=60)
+            url = f"{HB_BASE}/listings/merchantid/{merchant_id}/price-and-inventory"
+            headers = hepsiburada_header(user, password)
+            r = requests.post(url, json={"items": grup}, headers=headers, timeout=60)
         except Exception as e:
             hata_b += [x["merchantSku"] for x in grup]
             log.append(f"⚠️ Paket {no}: {e}")
@@ -709,7 +710,7 @@ def hepsiburada_stok_fiyat(merchant_id, user, password, df, ayarlar=None):
             log.append(f"✅ Paket {no}: {len(grup)} kalem Hepsiburada'ya iletildi")
         else:
             hata_b += [x["merchantSku"] for x in grup]
-            log.append(f"❌ Paket {no}: HTTP {r.status_code} {r.text[:200]}")
+            log.append(f"❌ Paket {no}: HTTP {r.status_code} - Detay: {r.text[:400]}")
     try:
         pazar_isaretle("hb", ok_b, hata_b)
     except Exception:
@@ -833,7 +834,7 @@ def idefix_stok_fiyat(ayarlar, df):
                           "inventoryQuantity": int(max(r["stok"], 0))})
     ok, log, ok_b, hata_b = 0, [], [], []
     if len(df) and not items:
-        log.append("ℹ️ Geçerli barkodu olan ürün yok (Genel Ayarları'nda 'stok kodunu barkod kullan' seçeneğine bakın).")
+        log.append("ℹ️ Geçerli barkodu olmayan ürün yok (Genel Ayarları'nda 'stok kodunu barkod kullan' seçeneğine bakın).")
     for i in range(0, len(items), 500):
         grup = items[i:i + 500]
         no = i // 500 + 1
@@ -1038,9 +1039,9 @@ def baglanti_testi(ayarlar, pid):
             if r.status_code in (200, 201, 202, 400):
                 return True, f"✅ Hepsiburada API Bağlantısı Başarılı! (HTTP {r.status_code})"
             elif r.status_code == 401:
-                return False, "❌ Hatalı Giriş (HTTP 401): Kullanıcı adı veya Servis Anahtarı (şifre) Hepsiburada tarafından reddedildi."
+                return False, f"❌ 401 Hatası Detayı: Kullanıcı({u_}) veya Şifre reddedildi. Servis Yanıtı: {r.text[:200]}"
             else:
-                return False, f"⚠️ HTTP {r.status_code} Yanıtı Alındı: {r.text[:200]}"
+                return False, f"⚠️ HTTP {r.status_code} Yanıtı: {r.text[:300]}"
         elif pid == "n11":
             r = http("GET", f"{N11_BASE}/rest/delivery/v1/shipmentPackages",
                      params={"status": "Created", "page": 0, "size": 1},
@@ -1363,7 +1364,7 @@ def ac_kapa(pid):
     st.session_state["acik_pazar"] = None if st.session_state.get("acik_pazar") == pid else pid
 
 st.sidebar.title("👑 ŞahEntegre")
-st.sidebar.caption("Sürüm: v36 - İdefix Hatası Giderildi")
+st.sidebar.caption("Sürüm: v37 - HB Debug Güncellemesi")
 for kid, etiket_m, _ in ANA_MENU:
     st.sidebar.button(etiket_m, key=f"nav_{kid}", use_container_width=True,
                       type="primary" if st.session_state["sayfa"] == kid else "secondary",
