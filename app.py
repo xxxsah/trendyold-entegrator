@@ -1826,6 +1826,7 @@ def idefix_toplu_panel():
        "Katalogda olmayan ürünleri açar. Zorunlu özellikler İdefix Genel Ayarları'nda kaydedilmiş olmalı.")
   miktar = st.selectbox("Gönderilecek ürün", ["Tek ürün (test)", "İlk 100", "İlk 500", "Tümü"], key="idp_miktar")
   tek_stok = st.checkbox("Sadece stokta olanları gönder", value=True, key="idp_stok")
+  kat = kategori_sec("idp_kat")
   ara = st.text_input("Ürün adında/barkodda ara (isteğe bağlı)", key="idp_ara").strip().lower()
   if st.button("📤 İdefix'e Gönder", type="primary", key="idp_gonder"):
     if not hizli:
@@ -1838,6 +1839,8 @@ def idefix_toplu_panel():
     df = urunleri_oku()
     if tek_stok:
       df = df[df["stok"] > 0]
+    if kat:
+      df = df[ana_kat(df) == kat]
     if ara:
       df = df[df["urun_adi"].str.lower().str.contains(ara, regex=False) | df["barkod"].str.lower().str.contains(ara, regex=False)]
     df = df.head({"Tek ürün (test)": 1, "İlk 100": 100, "İlk 500": 500}.get(miktar, len(df)))
@@ -1918,12 +1921,21 @@ def n11_ayar_paneli():
     ayar_yaz(ayarlar)
 
 
+def ana_kat(df):
+  return df["kategori"].astype(str).str.split(">>>").str[0].str.strip()
+
+def kategori_sec(anahtar):
+  sayim = ana_kat(urunleri_oku()).value_counts()
+  sec = st.selectbox("Tedarikçi kategorisine göre süz", ["(Tümü)"] + [f"{k} ({n})" for k, n in sayim.items()], key=anahtar)
+  return None if sec == "(Tümü)" else sec.rsplit(" (", 1)[0]
+
 def n11_toplu_panel():
   pa = (ayarlar.get("pazar_ayarlari", {}) or {}).get("n11", {}) or {}
   st.caption("N11'de yeni ürün oluşturur. Mevcut ürünlerin fiyat/stoğu için 'Tüm Stok/Fiyatları Güncelle'yi kullanın.")
   miktar = st.selectbox("Gönderilecek ürün", ["Tek ürün (test)", "İlk 100", "İlk 500", "Tümü"], key="n11p_miktar")
   tek_stok = st.checkbox("Sadece stokta olanları gönder", value=True, key="n11p_stok")
-  ara = st.text_input("Ürün adında/barkodda ara (isteğe bağlı, seçtiğiniz kategoriye uyan ürünleri süzün)", key="n11p_ara").strip().lower()
+  kat = kategori_sec("n11p_kat")
+  ara = st.text_input("Ürün adında/barkodda ara (isteğe bağlı)", key="n11p_ara").strip().lower()
   if st.button("📤 N11'e Ürün Oluştur", type="primary", key="n11p_gonder"):
     eksik = [ad for ad, v in (("Kategori", pa.get("category_id")), ("Kargo şablon adı", pa.get("shipment_template"))) if not v]
     if eksik:
@@ -1934,6 +1946,8 @@ def n11_toplu_panel():
     df = urunleri_oku()
     if tek_stok:
       df = df[df["stok"] > 0]
+    if kat:
+      df = df[ana_kat(df) == kat]
     if ara:
       df = df[df["urun_adi"].str.lower().str.contains(ara, regex=False) | df["barkod"].str.lower().str.contains(ara, regex=False)]
     df = df.head({"Tek ürün (test)": 1, "İlk 100": 100, "İlk 500": 500}.get(miktar, len(df)))
