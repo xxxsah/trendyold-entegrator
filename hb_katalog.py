@@ -1,6 +1,6 @@
 import json
 import re
-import time
+
 import requests
 import streamlit as st
 
@@ -38,6 +38,13 @@ def kategoriler(h):
   return sonuc
 
 
+def degerler(h, cid, aid):
+  r = requests.get(f"{MPOP}/product/api/categories/{cid}/attribute/{aid}/values", headers=_h(h), timeout=60,
+                   params={"page": 0, "size": 1000, "version": 1})
+  r.raise_for_status()
+  return [str(x.get("value") or x.get("name")) for x in (r.json().get("data") or []) if isinstance(x, dict)]
+
+
 def _n(t):
   t = str(t)
   for x, y in (("İ", "i"), ("I", "ı"), ("ı", "i"), ("ç", "c"), ("Ç", "c"), ("ş", "s"), ("Ş", "s"),
@@ -61,87 +68,75 @@ def ara_kat(kats, q):
   return [c for c, y in ad if p in y][:50], f"'{q}' bulunamadı, '{p}' içerenler:"
 
 
+def ozellikler(h, cid):
+  r = requests.get(f"{MPOP}/product/api/categories/{cid}/attributes", headers=_h(h), timeout=60)
+  r.raise_for_status()
+  d = r.json().get("data") or {}
+  tum = (d.get("baseAttributes") or []) + (d.get("attributes") or []) + (d.get("variantAttributes") or [])
+  zor = []
+  for a in tum:
+    aid = str(a.get("id", ""))
+    if not a.get("mandatory") or aid.lower() in TEMEL or re.fullmatch(r"image\d+", aid.lower()):
+      continue
+    if "enum" in str(a.get("type", "")).lower():
+      try:
+        a["_v"] = degerler(h, cid, aid)
+      except Exception:
+        a["_v"] = []
+    zor.append(a)
+  return zor, d
+
+
+def gecerli_barkod(kod):
+  return kod if kod.isdigit() and 8 <= len(kod) <= 14 else None
+
+
 def urun_listesi(df, pa, merchant):
   pre = pa.get("sku_prefix", "")
   ek = pa.get("ozellikler") or {}
   liste, atlanan = [], 0
-  zaman_eki = str(int(time.time()))[-4:]
-  
   for _, r in df.iterrows():
-    gorsel = str(r["gorsel"]).strip()
-    kod = str(r["barkod"]).strip()
-    fiyat = float(r["satis_fiyati"]) if "satis_fiyati" in r and r["satis_fiyati"] else 0.0
-    stok = int(r["stok"]) if "stok" in r and r["stok"] else 0
-    
-    if not gorsel.startswith("https") or fiyat <= 0 or not kod:
+    gorsel, kod = str(r["gorsel"]).strip(), str(r["barkod"]).strip()
+    if not gorsel.startswith("https") or r["satis_fiyati"] <= 0 or not kod:
       atlanan += 1
       continue
     ad = str(r["urun_adi"]).strip()
-    sku = f"{pre}{kod}_{zaman_eki}"
-    
-    # Hepsiburada'nın katalog servisi için zorunlu temel ve ek güvenlik parametreleri
-    a = {
-        "merchantSku": sku,
-        "VaryantGroupID": sku,
-        "Barcode": kod,
-        "UrunAdi": ad[:255],
-        "UrunAciklamasi": ad,
-        "Marka": str(pa.get("marka", "")).strip(),
-        "GarantiSuresi": str(int(pa.get("garanti", 24))),
-        "kg": str(pa.get("kg", "1")),
-        "tax_vat_rate": str(int(pa.get("kdv", 20))),
-        "price": f"{fiyat:.2f}",
-        "stock": str(max(stok, 0)),
-        "Image1": gorsel,
-        "KullanimTipi": "Standart"
-    }
-    
-    if isinstance(ek, dict) and ek:
-      a.update(ek)
-      
-    liste.append({
-        "categoryId": int(pa["kat_id"]),
-        "merchant": str(merchant).strip(),
-        "attributes": a
-    })
+    a = {"merchantSku": pre + kod, "VaryantGroupID": pre + kod, "UrunAdi": ad[:255], "UrunAciklamasi": ad,
+         "Marka": pa.get("marka", ""), "GarantiSuresi": str(int(pa.get("garanti", 24))),
+         "kg": str(pa.get("kg", "1")), "tax_vat_rate": str(int(pa.get("kdv", 20))),
+         "price": (lambda f: f if pa.get("fiyat_nokta") else f.replace(".", ","))(f"{float(r['satis_fiyati']):.2f}"),
+         "stock": str(int(max(r["stok"], 0))), "Image1": gorsel}
+    a["Barcode"] = kod
+    a.update(ek)
+    liste.append({"categoryId": int(pa["kat_id"]), "merchant": merchant, "attributes": a})
   return liste, atlanan
 
 
 def gonder(h, liste, ilerleme=None, paket=100):
   toplam = max(1, (len(liste) + paket - 1) // paket)
   ok, idler, loglar = 0, [], []
-  url = f"{MPOP}/product/api/products/import"
-  
   for i in range(0, len(liste), paket):
     no, grup = i // paket + 1, liste[i:i + paket]
     try:
-      json_bytes = json.dumps(grup, ensure_ascii=False).encode("utf-8")
-      r = requests.post(
-          url,
-          headers={
-              **_h(h),
-              "Content-Type": "application/json"
-          },
-          data=json_bytes,
-          timeout=120
-      )
+      r = requests.post(f"{MPOP}/product/api/products/import", headers=_h(h), timeout=120,
+                        files={"integrationFile": ("urunler.json", json.dumps(grup, ensure_ascii=False).encode("utf-8"),
+                                                   "application/json")})
     except Exception as e:
-      loglar.append(f"⚠️ Paket {no}: Bağlantı hatası -> {e}")
+      loglar.append(f"⚠️ Paket {no}: {e}")
       continue
-      
     if r.status_code in (200, 201, 202):
       try:
-        resp_json = r.json()
-        tid = (resp_json.get("data") or {}).get("trackingId") or resp_json.get("trackingId")
+        tid = ((r.json() or {}).get("data") or {}).get("trackingId")
       except Exception:
         tid = None
-      ok += 1
       if tid:
-        idler.append(str(tid))
-      loglar.append(f"✅ Paket {no}: {len(grup)} ürün Hepsiburada'ya iletildi (Takip ID: {tid})")
+        ok += 1
+        idler.append(tid)
+        loglar.append(f"✅ Paket {no}: {len(grup)} ürün gönderildi (takip: {tid})")
+      else:
+        loglar.append(f"⚠️ Paket {no}: HTTP {r.status_code} ama takip numarası yok: {r.text[:400]}")
     else:
-      loglar.append(f"❌ Paket {no}: HTTP {r.status_code} - {r.text[:300]}")
-      
+      loglar.append(f"❌ Paket {no}: HTTP {r.status_code} {r.text[:500]}")
     if ilerleme:
       ilerleme(min(no / toplam, 1.0), loglar)
   return ok, toplam, idler, loglar
@@ -156,14 +151,15 @@ def durum(h, tid):
 def panel(g):
   ayarlar, kaydet = g["ayarlar"], g["ayar_yaz"]
   h, merchant = g["hb_header"](ayarlar), g["kimlik"](ayarlar, "hb_merchant_id")
+  kayit = g["_kayit"]().setdefault("hbk", [])
   pa = ayarlar.setdefault("pazar_ayarlari", {}).setdefault("hb", {})
-  
-  st.subheader("🚀 Hepsiburada Kesin Çözüm Paneli")
-  st.caption("Katalog aktarım servisi ve eksik alan koruması aktif.")
+  st.caption("Hepsiburada'da YENİ ürün oluşturur. Ürünler Hepsiburada katalog onayına gider. "
+             "Önce tek ürünle deneyin, sonra 'durumunu sorgula' ile hata nedenine bakın.")
 
-  with st.expander("⚙️ Kategori ve Marka Seçimi", expanded=not pa.get("kat_id")):
-    st.caption(f"Seçili Kategori ID: {pa.get('kat_id') or '—'} · Marka: {pa.get('marka') or '—'}")
-    if st.button("📥 Kategorileri Yükle", key="hbk_kat_btn"):
+  with st.expander("⚙️ Kategori / marka / zorunlu özellikler", expanded=not pa.get("kat_id")):
+    st.caption(f"Kategori: {pa.get('kat_id') or '—'} · Marka: {pa.get('marka') or '—'} · "
+               f"Özellik: {len(pa.get('ozellikler') or {})}")
+    if st.button("📥 Kategorileri yükle", key="hbk_kat_btn"):
       try:
         st.session_state["hbk_kat"] = kategoriler(h)
         st.success(f"{len(st.session_state['hbk_kat'])} kategori yüklendi.")
@@ -175,35 +171,67 @@ def panel(g):
       if q.strip():
         bul, not_ = ara_kat(kats, q)
         if not bul:
-          st.warning("Sonuç yok.")
+          st.warning("Sonuç yok. Daha kısa bir kelime deneyin.")
         else:
           if not_:
             st.info(not_)
+          st.caption(f"{len(bul)} sonuç")
           k = st.selectbox("Sonuçlar", bul, format_func=lambda x: x["yol"], key="hbk_sec")
           if st.button("Bu kategoriyi kullan", key="hbk_kullan"):
             pa["kat_id"], pa["ozellikler"] = k["id"], {}
+            st.session_state.pop("hbk_oz", None)
             kaydet(ayarlar)
             st.rerun()
-            
     st.session_state.setdefault("hbk_marka", pa.get("marka", ""))
-    marka = st.text_input("Marka adı (Hepsiburada'daki tam yazılışıyla)", key="hbk_marka").strip()
+    marka = st.text_input("Marka adı (Hepsiburada'daki yazılışıyla)", key="hbk_marka").strip()
     c1, c2, c3 = st.columns(3)
     kdv = c1.selectbox("KDV %", [0, 1, 10, 20], index=3, key="hbk_kdv")
     garanti = c2.number_input("Garanti (ay)", 0, 120, int(pa.get("garanti", 24)), key="hbk_gar")
     kg = c3.text_input("Ağırlık (kg)", value=str(pa.get("kg", "1")), key="hbk_kg").strip() or "1"
-    
-    yeni_tuple = (marka, int(kdv), int(garanti), kg)
-    if yeni_tuple != (pa.get("marka", ""), pa.get("kdv", 20), pa.get("garanti", 24), pa.get("kg", "1")):
-      pa["marka"], pa["kdv"], pa["garanti"], pa["kg"] = yeni_tuple
+    nokta = st.checkbox("Fiyatı noktalı yaz (149.90). Kapalıyken virgüllü (149,90)",
+                        value=bool(pa.get("fiyat_nokta", False)), key="hbk_nokta")
+    yeni = (marka, int(kdv), int(garanti), kg, nokta)
+    if yeni != (pa.get("marka", ""), pa.get("kdv", 20), pa.get("garanti", 24), pa.get("kg", "1"),
+                bool(pa.get("fiyat_nokta", False))):
+      pa["marka"], pa["kdv"], pa["garanti"], pa["kg"], pa["fiyat_nokta"] = yeni
       kaydet(ayarlar)
+    if pa.get("kat_id") and st.button("📋 Zorunlu özellikleri yükle", key="hbk_oz_btn"):
+      try:
+        st.session_state["hbk_oz"] = ozellikler(h, pa["kat_id"])
+      except Exception as e:
+        st.error(f"Hata: {e}")
+    oz = st.session_state.get("hbk_oz")
+    if oz:
+      zor, ham = oz
+      secim, eksik = {}, 0
+      for a in zor:
+        aid, ad = str(a.get("id")), a.get("name", a.get("id"))
+        if a.get("_v"):
+          secim[aid] = st.selectbox(f"{ad} (zorunlu)", a["_v"], key=f"hbk_a_{aid}")
+        else:
+          v = st.text_input(f"{ad} (zorunlu)", key=f"hbk_a_{aid}").strip()
+          secim[aid] = v
+          eksik += 0 if v else 1
+      if not zor:
+        st.info("Bu kategoride ek zorunlu özellik görünmüyor.")
+      if st.button("Özellikleri kaydet", key="hbk_oz_kaydet", disabled=bool(eksik)):
+        pa["ozellikler"] = secim
+        kaydet(ayarlar)
+        st.success("Özellikler kaydedildi.")
+      if eksik:
+        st.warning(f"{eksik} zorunlu özellik boş.")
+      st.caption("Seçtiğiniz özellikler bu kategorideki TÜM ürünlere uygulanır.")
+      with st.expander("Ham yanıt (hata ayıklama)"):
+        ozet = [f"{a.get('id')} | {a.get('name')} | zorunlu={a.get('mandatory')} | {a.get('type')}"
+                for a in (ham.get("attributes") or []) + (ham.get("variantAttributes") or [])]
+        st.code("\n".join(ozet[:40]) or "Kategoriye özel özellik listesi boş.")
 
-  miktar = st.selectbox("Gönderilecek Ürün Adedi", ["Tek ürün (test)", "İlk 50", "İlk 100"], key="hbk_miktar")
+  miktar = st.selectbox("Gönderilecek ürün", ["Tek ürün (test)", "İlk 100", "İlk 500", "Tümü"], key="hbk_miktar")
   tek_stok = st.checkbox("Sadece stokta olanları gönder", value=True, key="hbk_stok")
   kat = g["kategori_sec"]("hbk_tkat")
-  ara = st.text_input("Ürün adında veya barkodda ara (isteğe bağlı)", key="hbk_urun_ara").strip().lower()
-  
-  if st.button("📤 Hepsiburada'ya Ürün Fırlat (Kesin Çözüm)", type="primary", key="hbk_gonder"):
-    eksik = [ad for ad, v in (("Kategori ID", pa.get("kat_id")), ("Marka", pa.get("marka"))) if not v]
+  ara = st.text_input("Ürün adında/barkodda ara (isteğe bağlı)", key="hbk_urun_ara").strip().lower()
+  if st.button("📤 Hepsiburada'ya Ürün Oluştur", type="primary", key="hbk_gonder"):
+    eksik = [ad for ad, v in (("Kategori", pa.get("kat_id")), ("Marka", pa.get("marka"))) if not v]
     if eksik:
       st.error("Eksik: " + ", ".join(eksik) + ". Yukarıdaki ayarlardan doldurun.")
       return
@@ -214,36 +242,25 @@ def panel(g):
       df = df[g["ana_kat"](df) == kat]
     if ara:
       df = df[df["urun_adi"].str.lower().str.contains(ara, regex=False) | df["barkod"].str.lower().str.contains(ara, regex=False)]
-      
-    limit_sayi = {"Tek ürün (test)": 1, "İlk 50": 50, "İlk 100": 100}.get(miktar, 1)
-    df = df.head(limit_sayi)
+    df = df.head({"Tek ürün (test)": 1, "İlk 100": 100, "İlk 500": 500}.get(miktar, len(df)))
     df = g["fiyat_artis_uygula"](ayarlar, "hb", df)
-    
     liste, atlanan = urun_listesi(df, pa, merchant)
     if atlanan:
-      st.info(f"{atlanan} ürün atlandı.")
+      st.info(f"{atlanan} ürün atlandı (https görsel yok ya da fiyat 0).")
     if not liste:
       st.warning("Gönderilecek geçerli ürün kalmadı.")
       return
-      
     bar, kutu = st.progress(0), st.empty()
     ok, top, idler, loglar = gonder(h, liste, lambda p, l: (bar.progress(p), kutu.code("\n".join(l[-10:]))))
-    
-    st.session_state["hb_son_tid"] = idler[-1] if idler else None
-    
-    g["log_yaz"]("Hepsiburada", "OK" if ok else "HATA", f"{ok}/{top} paket gönderildi. {len(liste)} ürün.")
-    if idler:
-      st.success(f"✅ İletildi! Takip Numarası: {idler[-1]}")
-    else:
-      st.error("Gönderim başarısız.")
-
-  son_tid = st.session_state.get("hb_son_tid")
-  if son_tid:
-    st.info(f"Aktif İşlem Takip ID: {son_tid}")
-    if st.button("🔍 Sonucu Sorgula", key="hbk_durum_yeni"):
+    kayit.extend(idler)
+    del kayit[:-20]
+    g["log_yaz"]("Hepsiburada", "OK" if ok else "HATA", f"{ok}/{top} paket gönderildi. {len(liste)} ürün (katalog).")
+    (st.success if ok else st.error)(f"{ok}/{top} paket kabul edildi. Sonucu aşağıdan sorgulayın.")
+  if kayit and st.button("🔍 Son gönderimlerin durumunu sorgula", key="hbk_durum"):
+    for tid in kayit[-3:]:
       try:
-        kod, metin = durum(h, son_tid)
-        st.caption(f"HTTP Kodu: {kod}")
+        kod, metin = durum(h, tid)
+        st.caption(f"{tid} · HTTP {kod}")
         st.code(metin[:1800])
       except Exception as e:
-        st.error(f"Sorgulama hatası: {e}")
+        st.error(f"{tid}: {e}")
