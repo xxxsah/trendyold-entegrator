@@ -136,17 +136,20 @@ def urun_listesi(df, pa, merchant):
 def gonder(h, liste, ilerleme=None, paket=100):
   toplam = max(1, (len(liste) + paket - 1) // paket)
   ok, idler, loglar = 0, [], []
+  url = f"{MPOP}/product/api/products/import"
+  
   for i in range(0, len(liste), paket):
     no, grup = i // paket + 1, liste[i:i + paket]
     try:
       json_bytes = json.dumps(grup, ensure_ascii=False).encode("utf-8")
       r = requests.post(
-          f"{MPOP}/product/api/products/import",
-          headers=_h(h),
-          timeout=120,
-          files={
-              "integrationFile": ("urunler.json", json_bytes, "application/json")
-          }
+          url,
+          headers={
+              **_h(h),
+              "Content-Type": "application/json"
+          },
+          data=json_bytes,
+          timeout=120
       )
     except Exception as e:
       loglar.append(f"⚠️ Paket {no}: Bağlantı hatası -> {e}")
@@ -161,7 +164,7 @@ def gonder(h, liste, ilerleme=None, paket=100):
       ok += 1
       if tid:
         idler.append(str(tid))
-      loglar.append(f"✅ Paket {no}: {len(grup)} ürün Hepsiburada kataloğuna iletildi (YENİ Takip ID: {tid})")
+      loglar.append(f"✅ Paket {no}: {len(grup)} ürün Hepsiburada'ya iletildi (Takip ID: {tid})")
     else:
       loglar.append(f"❌ Paket {no}: HTTP {r.status_code} - {r.text[:300]}")
       
@@ -279,20 +282,18 @@ def panel(g):
     bar, kutu = st.progress(0), st.empty()
     ok, top, idler, loglar = gonder(h, liste, lambda p, l: (bar.progress(p), kutu.code("\n".join(l[-10:]))))
     
-    # ESKİ KAYITLARI SİL, SADECE YENİ DÖNEN ID'Yİ TUT
     st.session_state["hb_son_tid"] = idler[-1] if idler else None
     
     g["log_yaz"]("Hepsiburada", "OK" if ok else "HATA", f"{ok}/{top} paket gönderildi. {len(liste)} ürün (katalog).")
     if idler:
-      st.success(f"✅ Başarıyla iletildi! YENİ Takip Numarası: {idler[-1]}")
+      st.success(f"✅ Başarıyla iletildi! Takip Numarası: {idler[-1]}")
     else:
       st.error("Gönderim başarısız oldu.")
 
-  # YENİ TAKİP NUMARASINI SORGU BUTONU
   son_tid = st.session_state.get("hb_son_tid")
   if son_tid:
     st.info(f"Aktif Sorgulanacak İşlem ID: {son_tid}")
-    if st.button("🔍 YENİ Gönderimin Durumunu Sorgula", key="hbk_durum_yeni"):
+    if st.button("🔍 Gönderimin Durumunu Sorgula", key="hbk_durum_yeni"):
       try:
         kod, metin = durum(h, son_tid)
         st.caption(f"İşlem ID: {son_tid} · HTTP {kod}")
