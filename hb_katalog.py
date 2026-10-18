@@ -1,4 +1,3 @@
-
 import json
 import re
 
@@ -44,6 +43,26 @@ def degerler(h, cid, aid):
                    params={"page": 0, "size": 1000, "version": 1})
   r.raise_for_status()
   return [str(x.get("value") or x.get("name")) for x in (r.json().get("data") or []) if isinstance(x, dict)]
+
+
+def markalar(h, cid, ara):
+  q, bul, sayfa = ara.lower().strip(), [], 0
+  while sayfa < 40 and len(bul) < 30:
+    r = requests.get(f"{MPOP}/product/api/categories/{cid}/attribute/Marka/values", headers=_h(h), timeout=60,
+                     params={"page": sayfa, "size": 1000, "version": 1, "name": ara})
+    r.raise_for_status()
+    j = r.json()
+    veri = j.get("data") or []
+    if not veri:
+      break
+    for x in veri:
+      v = str(x.get("value") or x.get("name") or "") if isinstance(x, dict) else ""
+      if v and q in v.lower() and v not in bul:
+        bul.append(v)
+    if not isinstance(j, dict) or sayfa + 1 >= int(j.get("totalPages", 1) or 1):
+      break
+    sayfa += 1
+  return bul[:30]
 
 
 def ozellikler(h, cid):
@@ -156,7 +175,27 @@ def panel(g):
             st.session_state.pop("hbk_oz", None)
             kaydet(ayarlar)
             st.rerun()
-    marka = st.text_input("Marka adı (Hepsiburada'daki yazılışıyla)", value=pa.get("marka", ""), key="hbk_marka").strip()
+    if pa.get("kat_id"):
+      ma = st.text_input("🔎 Marka ara (seçili kategoride)", key="hbk_marka_ara").strip()
+      if st.button("Markayı Ara", key="hbk_marka_btn") and ma:
+        try:
+          st.session_state["hbk_mk"] = markalar(h, pa["kat_id"], ma)
+          if not st.session_state["hbk_mk"]:
+            st.warning("Marka bulunamadı. Başka yazılış deneyin ya da aşağıya elle yazın.")
+        except Exception as e:
+          st.error(f"Marka aranamadı: {e}")
+      mk = st.session_state.get("hbk_mk")
+      if mk:
+        sec_m = st.selectbox("Bulunan markalar", mk, key="hbk_mk_sec")
+        if st.button("Bu markayı kullan", key="hbk_mk_kullan"):
+          st.session_state["hbk_marka"] = sec_m
+          pa["marka"] = sec_m
+          kaydet(ayarlar)
+          st.rerun()
+    else:
+      st.info("Marka aramak için önce kategori seçin.")
+    st.session_state.setdefault("hbk_marka", pa.get("marka", ""))
+    marka = st.text_input("Marka adı (Hepsiburada'daki yazılışıyla)", key="hbk_marka").strip()
     c1, c2, c3 = st.columns(3)
     kdv = c1.selectbox("KDV %", [0, 1, 10, 20], index=3, key="hbk_kdv")
     garanti = c2.number_input("Garanti (ay)", 0, 120, int(pa.get("garanti", 24)), key="hbk_gar")
