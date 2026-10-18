@@ -29,6 +29,10 @@ SENKRON_ARALIK = 6 * 3600
 KILIT = threading.Lock()
 SENKRON_KILIDI = threading.Lock()
 
+@st.cache_resource
+def _kayit():
+  return {"hb": [], "idefix": [], "n11": []}
+
 KIMLIK_ALANLARI = [
   "trendruum_key", "trendruum_secret", "trendruum_brand", "trendruum_category",
   "trendyol_seller_id", "trendyol_key", "trendyol_secret",
@@ -662,7 +666,7 @@ def trendyol_stok_fiyat(seller, key, secret, df):
   return ok, log
 
 N11_BASE = "https://api.n11.com"
-N11_GOREVLER = []
+N11_GOREVLER = _kayit()["n11"]
 
 def n11_header(key, secret):
   return {"appKey": key, "appSecret": secret, "Content-Type": "application/json"}
@@ -861,7 +865,7 @@ def idefix_marka_ara(ayarlar, ad):
     j = j.get("data", [j]) if "id" not in j else [j]
   return [m for m in (j or []) if isinstance(m, dict) and m.get("id")]
 
-IDEFIX_ISLER = []
+IDEFIX_ISLER = _kayit()["idefix"]
 
 def idefix_isle(tur, r):
   try:
@@ -1018,7 +1022,7 @@ def idefix_sonuc_paneli():
         st.error(f"{ad_[tur]} {bid}: {e}")
 
 HB_BASE = "https://listing-external.hepsiburada.com"
-HB_SON = []
+HB_SON = _kayit()["hb"]
 
 def hb_kombiler(ayarlar):
   m, u, p = (kimlik(ayarlar, k) for k in ("hb_merchant_id", "hb_user", "hb_pass"))
