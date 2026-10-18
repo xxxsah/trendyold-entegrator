@@ -1826,6 +1826,7 @@ def idefix_toplu_panel():
        "Katalogda olmayan ürünleri açar. Zorunlu özellikler İdefix Genel Ayarları'nda kaydedilmiş olmalı.")
   miktar = st.selectbox("Gönderilecek ürün", ["Tek ürün (test)", "İlk 100", "İlk 500", "Tümü"], key="idp_miktar")
   tek_stok = st.checkbox("Sadece stokta olanları gönder", value=True, key="idp_stok")
+  ara = st.text_input("Ürün adında/barkodda ara (isteğe bağlı)", key="idp_ara").strip().lower()
   if st.button("📤 İdefix'e Gönder", type="primary", key="idp_gonder"):
     if not hizli:
       eksik = [ad for ad, v in (("Marka", pa.get("brand_id")), ("Kategori", pa.get("category_id"))) if not v]
@@ -1837,6 +1838,8 @@ def idefix_toplu_panel():
     df = urunleri_oku()
     if tek_stok:
       df = df[df["stok"] > 0]
+    if ara:
+      df = df[df["urun_adi"].str.lower().str.contains(ara, regex=False) | df["barkod"].str.lower().str.contains(ara, regex=False)]
     df = df.head({"Tek ürün (test)": 1, "İlk 100": 100, "İlk 500": 500}.get(miktar, len(df)))
     df = fiyat_artis_uygula(ayarlar, "idefix", df)
     liste, atlanan = (idefix_hizli_liste if hizli else idefix_urun_listesi)(df, ayarlar)
@@ -1920,6 +1923,7 @@ def n11_toplu_panel():
   st.caption("N11'de yeni ürün oluşturur. Mevcut ürünlerin fiyat/stoğu için 'Tüm Stok/Fiyatları Güncelle'yi kullanın.")
   miktar = st.selectbox("Gönderilecek ürün", ["Tek ürün (test)", "İlk 100", "İlk 500", "Tümü"], key="n11p_miktar")
   tek_stok = st.checkbox("Sadece stokta olanları gönder", value=True, key="n11p_stok")
+  ara = st.text_input("Ürün adında/barkodda ara (isteğe bağlı, seçtiğiniz kategoriye uyan ürünleri süzün)", key="n11p_ara").strip().lower()
   if st.button("📤 N11'e Ürün Oluştur", type="primary", key="n11p_gonder"):
     eksik = [ad for ad, v in (("Kategori", pa.get("category_id")), ("Kargo şablon adı", pa.get("shipment_template"))) if not v]
     if eksik:
@@ -1930,6 +1934,8 @@ def n11_toplu_panel():
     df = urunleri_oku()
     if tek_stok:
       df = df[df["stok"] > 0]
+    if ara:
+      df = df[df["urun_adi"].str.lower().str.contains(ara, regex=False) | df["barkod"].str.lower().str.contains(ara, regex=False)]
     df = df.head({"Tek ürün (test)": 1, "İlk 100": 100, "İlk 500": 500}.get(miktar, len(df)))
     df = fiyat_artis_uygula(ayarlar, "n11", df)
     liste, atlanan = n11_urun_listesi(df, ayarlar)
