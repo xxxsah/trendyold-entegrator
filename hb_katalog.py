@@ -118,9 +118,16 @@ def gonder(h, liste, ilerleme=None, paket=100):
   for i in range(0, len(liste), paket):
     no, grup = i // paket + 1, liste[i:i + paket]
     try:
-      r = requests.post(f"{MPOP}/product/api/products/import", headers=_h(h), timeout=120,
-                        files={"integrationFile": ("urunler.json", json.dumps(grup, ensure_ascii=False).encode("utf-8"),
-                                                   "application/json")})
+      icerik = json.dumps(grup, ensure_ascii=False).encode("utf-8")
+      for alan in ("integrationFile", "file", "files"):
+        r = requests.post(f"{MPOP}/product/api/products/import", headers=_h(h), timeout=120,
+                          files={alan: ("urunler.json", icerik, "application/json")})
+        try:
+          kod = (r.json() or {}).get("code")
+        except Exception:
+          kod = None
+        if kod != 3003:
+          break
     except Exception as e:
       loglar.append(f"⚠️ Paket {no}: {e}")
       continue
@@ -132,9 +139,9 @@ def gonder(h, liste, ilerleme=None, paket=100):
       if tid:
         ok += 1
         idler.append(tid)
-        loglar.append(f"✅ Paket {no}: {len(grup)} ürün gönderildi (takip: {tid})")
+        loglar.append(f"✅ Paket {no}: {len(grup)} ürün gönderildi (takip: {tid}, alan: {alan})")
       else:
-        loglar.append(f"⚠️ Paket {no}: HTTP {r.status_code} ama takip numarası yok: {r.text[:400]}")
+        loglar.append(f"⚠️ Paket {no}: HTTP {r.status_code} ama takip numarası yok (alan: {alan}): {r.text[:400]}")
     else:
       loglar.append(f"❌ Paket {no}: HTTP {r.status_code} {r.text[:500]}")
     if ilerleme:
@@ -153,7 +160,7 @@ def panel(g):
   h, merchant = g["hb_header"](ayarlar), g["kimlik"](ayarlar, "hb_merchant_id")
   kayit = g["_kayit"]().setdefault("hbk", [])
   pa = ayarlar.setdefault("pazar_ayarlari", {}).setdefault("hb", {})
-  st.caption("✅ hb_katalog SÜRÜM 5 · Hepsiburada'da YENİ ürün oluşturur, ürünler katalog onayına gider. "
+  st.caption("✅ hb_katalog SÜRÜM 6 · Hepsiburada'da YENİ ürün oluşturur, ürünler katalog onayına gider. "
              "Önce tek ürünle deneyin, sonra 'durumunu sorgula' ile hata nedenine bakın.")
 
   with st.expander("⚙️ Kategori / marka / zorunlu özellikler", expanded=not pa.get("kat_id")):
