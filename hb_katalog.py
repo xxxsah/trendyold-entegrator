@@ -96,31 +96,42 @@ def urun_listesi(df, pa, merchant):
   ek = pa.get("ozellikler") or {}
   liste, atlanan = [], 0
   for _, r in df.iterrows():
-    gorsel, kod = str(r["gorsel"]).strip(), str(r["barkod"]).strip()
-    if not gorsel.startswith("https") or r["satis_fiyati"] <= 0 or not kod:
+    gorsel = str(r["gorsel"]).strip()
+    kod = str(r["barkod"]).strip()
+    fiyat = float(r["satis_fiyati"]) if "satis_fiyati" in r and r["satis_fiyati"] else 0.0
+    stok = int(r["stok"]) if "stok" in r and r["stok"] else 0
+    
+    if not gorsel.startswith("https") or fiyat <= 0 or not kod:
       atlanan += 1
       continue
     ad = str(r["urun_adi"]).strip()
+    sku = pre + kod
     
-    # Fiyat JSON API için nokta (.) ayracı ile düzeltildi
-    fiyat_str = f"{float(r['satis_fiyati']):.2f}"
-    
+    # Hepsiburada Yeni Ürün Oluşturma (Import API) Şablonu
     a = {
-        "merchantSku": pre + kod,
-        "VaryantGroupID": pre + kod,
+        "merchantSku": sku,
+        "VaryantGroupID": sku,
+        "Barcode": kod,
         "UrunAdi": ad[:255],
         "UrunAciklamasi": ad,
-        "Marka": pa.get("marka", ""),
+        "Marka": str(pa.get("marka", "")).strip(),
         "GarantiSuresi": str(int(pa.get("garanti", 24))),
         "kg": str(pa.get("kg", "1")),
         "tax_vat_rate": str(int(pa.get("kdv", 20))),
-        "price": fiyat_str,
-        "stock": str(int(max(r["stok"], 0))),
+        "price": f"{fiyat:.2f}",
+        "stock": str(max(stok, 0)),
         "Image1": gorsel
     }
-    a["Barcode"] = kod
-    a.update(ek)
-    liste.append({"categoryId": int(pa["kat_id"]), "merchant": merchant, "attributes": a})
+    
+    # Kategoriye özel ek zorunlu nitelikler
+    if isinstance(ek, dict):
+      a.update(ek)
+      
+    liste.append({
+        "categoryId": int(pa["kat_id"]),
+        "merchant": str(merchant).strip(),
+        "attributes": a
+    })
   return liste, atlanan
 
 
@@ -130,16 +141,13 @@ def gonder(h, liste, ilerleme=None, paket=100):
   for i in range(0, len(liste), paket):
     no, grup = i // paket + 1, liste[i:i + paket]
     try:
+      json_bytes = json.dumps(grup, ensure_ascii=False).encode("utf-8")
       r = requests.post(
           f"{MPOP}/product/api/products/import",
           headers=_h(h),
           timeout=120,
           files={
-              "integrationFile": (
-                  "urunler.json",
-                  json.dumps(grup, ensure_ascii=False).encode("utf-8"),
-                  "application/json"
-              )
+              "integrationFile": ("urunler.json", json_bytes, "application/json")
           }
       )
     except Exception as e:
@@ -155,7 +163,7 @@ def gonder(h, liste, ilerleme=None, paket=100):
       ok += 1
       if tid:
         idler.append(tid)
-      loglar.append(f"✅ Paket {no}: {len(grup)} ürün iletildi (takip ID: {tid})")
+      loglar.append(f"✅ Paket {no}: {len(grup)} ürün Hepsiburada kataloğuna iletildi (Takip ID: {tid})")
     else:
       loglar.append(f"❌ Paket {no}: HTTP {r.status_code} - {r.text[:300]}")
       
@@ -279,7 +287,7 @@ def panel(g):
     for tid in kayit[-3:]:
       try:
         kod, metin = durum(h, tid)
-        st.caption(tid + " · HTTP " + str(kod))
+        st.caption(f"{tid} · HTTP {kod}")
         st.code(metin[:1800])
       except Exception as e:
-        st.error(tid + ": " + str(e))
+        st.error(f"{tid}: {e}")
