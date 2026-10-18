@@ -356,7 +356,6 @@ def fiyat_artis_uygula(ayarlar, pid, df):
   kargo = float(pa.get("sabit_kargo", 0) or 0)
   artis = float(pa.get("fiyat_artis", 0) or 0)
   if not (marj > 0 or kargo > 0 or artis > 0) or "satis_fiyati" not in df.columns:
-    # Veritabanındaki güncel stokları dataframe'e tam olarak senkronize et
     with closing(baglan()) as c:
       ref_stok = pd.read_sql("SELECT barkod, stok FROM urunler", c)
     if not ref_stok.empty:
@@ -371,7 +370,6 @@ def fiyat_artis_uygula(ayarlar, pid, df):
   ted = ayarlar.get("tedarikciler", {})
   alis = df["barkod"].astype(str).map(ref["alis_fiyati"])
   tadi = df["barkod"].astype(str).map(ref["tedarikci"])
-  # Veritabanındaki güncel stok miktarını garantile
   db_stok = df["barkod"].astype(str).map(ref["stok"])
   if "stok" in df.columns and db_stok.notna().any():
     df["stok"] = db_stok.fillna(df["stok"]).astype(int)
@@ -1359,27 +1357,65 @@ def sifre_al():
 
 sifre = sifre_al()
 if sifre and not st.session_state.get("giris_ok"):
-  st.markdown("<h1 style='text-align:center'>👑 ŞahEntegre</h1>"
-        "<p style='text-align:center'>Yönetim Paneli Girişi</p>", unsafe_allow_html=True)
+  st.markdown("""
+    <style>
+      [data-testid="stAppViewContainer"] {
+        background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
+      }
+      .login-card {
+        background: rgba(30, 41, 59, 0.7);
+        backdrop-filter: blur(12px);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        border-radius: 20px;
+        padding: 40px;
+        box-shadow: 0 20px 40px rgba(0,0,0,0.4);
+        text-align: center;
+      }
+      .login-title {
+        color: #f8fafc;
+        font-size: 28px;
+        font-weight: 800;
+        margin-bottom: 8px;
+      }
+      .login-sub {
+        color: #94a3b8;
+        font-size: 14px;
+        margin-bottom: 30px;
+      }
+    </style>
+  """, unsafe_allow_html=True)
+  
   _, orta, _ = st.columns([1, 1.2, 1])
   with orta:
-    deneme = st.session_state.get("deneme", 0)
+    st.markdown("""
+      <div class="login-card">
+        <div class="login-title">👑 ŞahEntegre</div>
+        <div class="login-sub">E-Ticaret Yönetim Paneli Girişi</div>
+      </div>
+    """, unsafe_allow_html=True)
+    
     kilit_bitis = st.session_state.get("kilit_bitis", 0)
+    deneme = st.session_state.get("deneme", 0)
+    
     if time.time() < kilit_bitis:
-      st.error(f"Çok fazla hatalı deneme. {int(kilit_bitis - time.time())} sn bekleyin.")
+      st.error(f"⚠️ Çok fazla hatalı deneme. Lütfen {int(kilit_bitis - time.time())} saniye bekleyin.")
     else:
-      girilen = st.text_input("🔑 Yönetici Şifresi", type="password")
-      if st.button("Giriş Yap", type="primary", use_container_width=True):
-        if hmac.compare_digest(girilen.encode(), str(sifre).encode()):
-          st.session_state.giris_ok = True
-          st.session_state.deneme = 0
-          st.rerun()
-        else:
-          st.session_state.deneme = deneme + 1
-          if st.session_state.deneme >= 5:
-            st.session_state.kilit_bitis = time.time() + 60
+      with st.form("giris_formu"):
+        kullanici = st.text_input("👤 Kullanıcı Adı", placeholder="admin")
+        girilen = st.text_input("🔑 Yönetici Şifresi", type="password", placeholder="••••••••")
+        buton = st.form_submit_button("Giriş Yap", type="primary", use_container_width=True)
+        
+        if buton:
+          if hmac.compare_digest(girilen.encode(), str(sifre).encode()):
+            st.session_state.giris_ok = True
             st.session_state.deneme = 0
-          st.error("❌ Hatalı şifre.")
+            st.rerun()
+          else:
+            st.session_state.deneme = deneme + 1
+            if st.session_state.deneme >= 5:
+              st.session_state.kilit_bitis = time.time() + 60
+              st.session_state.deneme = 0
+            st.error("❌ Hatalı kullanıcı adı veya şifre.")
   st.stop()
 
 if "ayarlar" not in st.session_state:
@@ -1475,7 +1511,7 @@ def ac_kapa(pid):
   st.session_state["acik_pazar"] = None if st.session_state.get("acik_pazar") == pid else pid
 
 st.sidebar.title("👑 ŞahEntegre")
-st.sidebar.caption("Sürüm: v41 - Stok Senkronizasyon Kararlılığı")
+st.sidebar.caption("Sürüm: v42 - Kurumsal Giriş Ekranı Desteği")
 if not sifre:
   st.sidebar.warning("⚠️ APP_PASSWORD tanımlı değil: panel (ve API anahtarları) herkese açık!")
 for kid, etiket_m, _ in ANA_MENU:
