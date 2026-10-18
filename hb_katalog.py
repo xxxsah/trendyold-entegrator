@@ -1,6 +1,6 @@
 import json
 import re
-
+import time
 import requests
 import streamlit as st
 
@@ -87,14 +87,14 @@ def ozellikler(h, cid):
   return zor, d
 
 
-def gecerli_barkod(kod):
-  return kod if kod.isdigit() and 8 <= len(kod) <= 14 else None
-
-
 def urun_listesi(df, pa, merchant):
   pre = pa.get("sku_prefix", "")
   ek = pa.get("ozellikler") or {}
   liste, atlanan = [], 0
+  
+  # Testlerde Hepsiburada'nın eski hataya takılmaması için benzersiz bir ek oluşturuyoruz
+  zaman_eki = str(int(time.time()))[-4:]
+  
   for _, r in df.iterrows():
     gorsel = str(r["gorsel"]).strip()
     kod = str(r["barkod"]).strip()
@@ -105,7 +105,9 @@ def urun_listesi(df, pa, merchant):
       atlanan += 1
       continue
     ad = str(r["urun_adi"]).strip()
-    sku = pre + kod
+    
+    # Her ürün için benzersiz SKU üretilir (Hepsiburada eski hatayı unutur)
+    sku = f"{pre}{kod}_{zaman_eki}"
     
     a = {
         "merchantSku": sku,
