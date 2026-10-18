@@ -107,7 +107,6 @@ def urun_listesi(df, pa, merchant):
     ad = str(r["urun_adi"]).strip()
     sku = pre + kod
     
-    # Hepsiburada Yeni Ürün Oluşturma (Import API) Şablonu
     a = {
         "merchantSku": sku,
         "VaryantGroupID": sku,
@@ -123,7 +122,6 @@ def urun_listesi(df, pa, merchant):
         "Image1": gorsel
     }
     
-    # Kategoriye özel ek zorunlu nitelikler
     if isinstance(ek, dict):
       a.update(ek)
       
@@ -162,8 +160,8 @@ def gonder(h, liste, ilerleme=None, paket=100):
         tid = None
       ok += 1
       if tid:
-        idler.append(tid)
-      loglar.append(f"✅ Paket {no}: {len(grup)} ürün Hepsiburada kataloğuna iletildi (Takip ID: {tid})")
+        idler.append(str(tid))
+      loglar.append(f"✅ Paket {no}: {len(grup)} ürün Hepsiburada kataloğuna iletildi (YENİ Takip ID: {tid})")
     else:
       loglar.append(f"❌ Paket {no}: HTTP {r.status_code} - {r.text[:300]}")
       
@@ -181,8 +179,8 @@ def durum(h, tid):
 def panel(g):
   ayarlar, kaydet = g["ayarlar"], g["ayar_yaz"]
   h, merchant = g["hb_header"](ayarlar), g["kimlik"](ayarlar, "hb_merchant_id")
-  kayit = g["_kayit"]().setdefault("hbk", [])
   pa = ayarlar.setdefault("pazar_ayarlari", {}).setdefault("hb", {})
+  
   st.caption("Hepsiburada'da YENİ ürün oluşturur. Ürünler Hepsiburada katalog onayına gider. "
              "Önce tek ürünle deneyin, sonra 'durumunu sorgula' ile hata nedenine bakın.")
 
@@ -257,6 +255,7 @@ def panel(g):
   tek_stok = st.checkbox("Sadece stokta olanları gönder", value=True, key="hbk_stok")
   kat = g["kategori_sec"]("hbk_tkat")
   ara = st.text_input("Ürün adında/barkodda ara (isteğe bağlı)", key="hbk_urun_ara").strip().lower()
+  
   if st.button("📤 Hepsiburada'ya Ürün Oluştur", type="primary", key="hbk_gonder"):
     eksik = [ad for ad, v in (("Kategori", pa.get("kat_id")), ("Marka", pa.get("marka"))) if not v]
     if eksik:
@@ -279,15 +278,24 @@ def panel(g):
       return
     bar, kutu = st.progress(0), st.empty()
     ok, top, idler, loglar = gonder(h, liste, lambda p, l: (bar.progress(p), kutu.code("\n".join(l[-10:]))))
-    kayit.extend(idler)
-    del kayit[:-20]
+    
+    # ESKİ KAYITLARI SİL, SADECE YENİ DÖNEN ID'Yİ TUT
+    st.session_state["hb_son_tid"] = idler[-1] if idler else None
+    
     g["log_yaz"]("Hepsiburada", "OK" if ok else "HATA", f"{ok}/{top} paket gönderildi. {len(liste)} ürün (katalog).")
-    (st.success if ok else st.error)(f"{ok}/{top} paket kabul edildi. Sonucu aşağıdan sorgulayın.")
-  if kayit and st.button("🔍 Son gönderimlerin durumunu sorgula", key="hbk_durum"):
-    for tid in kayit[-3:]:
+    if idler:
+      st.success(f"✅ Başarıyla iletildi! YENİ Takip Numarası: {idler[-1]}")
+    else:
+      st.error("Gönderim başarısız oldu.")
+
+  # YENİ TAKİP NUMARASINI SORGU BUTONU
+  son_tid = st.session_state.get("hb_son_tid")
+  if son_tid:
+    st.info(f"Aktif Sorgulanacak İşlem ID: {son_tid}")
+    if st.button("🔍 YENİ Gönderimin Durumunu Sorgula", key="hbk_durum_yeni"):
       try:
-        kod, metin = durum(h, tid)
-        st.caption(f"{tid} · HTTP {kod}")
+        kod, metin = durum(h, son_tid)
+        st.caption(f"İşlem ID: {son_tid} · HTTP {kod}")
         st.code(metin[:1800])
       except Exception as e:
-        st.error(f"{tid}: {e}")
+        st.error(f"{son_tid}: {e}")
