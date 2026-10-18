@@ -45,24 +45,50 @@ def degerler(h, cid, aid):
   return [str(x.get("value") or x.get("name")) for x in (r.json().get("data") or []) if isinstance(x, dict)]
 
 
+def marka_attr(h, cid):
+  r = requests.get(f"{MPOP}/product/api/categories/{cid}/attributes", headers=_h(h), timeout=60)
+  r.raise_for_status()
+  d = r.json().get("data") or {}
+  for a in (d.get("baseAttributes") or []) + (d.get("attributes") or []) + (d.get("variantAttributes") or []):
+    t = f"{a.get('id', '')} {a.get('name', '')}".lower()
+    if "marka" in t or "brand" in t:
+      return str(a.get("id"))
+  return "Marka"
+
+
 def markalar(h, cid, ara):
-  q, bul, sayfa = ara.lower().strip(), [], 0
-  while sayfa < 40 and len(bul) < 30:
-    r = requests.get(f"{MPOP}/product/api/categories/{cid}/attribute/Marka/values", headers=_h(h), timeout=60,
-                     params={"page": sayfa, "size": 1000, "version": 1, "name": ara})
-    r.raise_for_status()
-    j = r.json()
-    veri = j.get("data") or []
-    if not veri:
+  q, bul, tani, aid = ara.lower().strip(), [], [], "Marka"
+  try:
+    aid = marka_attr(h, cid)
+  except Exception as e:
+    tani.append(f"özellik listesi alınamadı: {e}")
+  for filtreli in (True, False):
+    sayfa = 0
+    while sayfa < 40 and len(bul) < 30:
+      p = {"page": sayfa, "size": 1000, "version": 1}
+      if filtreli:
+        p["name"] = ara
+      r = requests.get(f"{MPOP}/product/api/categories/{cid}/attribute/{aid}/values", headers=_h(h), timeout=60, params=p)
+      if r.status_code >= 400:
+        tani.append(f"HTTP {r.status_code}: {r.text[:200]}")
+        break
+      j = r.json()
+      veri = (j.get("data") if isinstance(j, dict) else j) or []
+      if sayfa == 0:
+        ornek = [str(x.get("value") or x.get("name")) for x in veri[:3] if isinstance(x, dict)]
+        tani.append(f"{'filtreli' if filtreli else 'tüm liste'}: {len(veri)} kayıt, örnek {ornek}")
+      if not veri:
+        break
+      for x in veri:
+        v = str(x.get("value") or x.get("name") or "") if isinstance(x, dict) else ""
+        if v and q in v.lower() and v not in bul:
+          bul.append(v)
+      if not isinstance(j, dict) or sayfa + 1 >= int(j.get("totalPages", 1) or 1):
+        break
+      sayfa += 1
+    if bul:
       break
-    for x in veri:
-      v = str(x.get("value") or x.get("name") or "") if isinstance(x, dict) else ""
-      if v and q in v.lower() and v not in bul:
-        bul.append(v)
-    if not isinstance(j, dict) or sayfa + 1 >= int(j.get("totalPages", 1) or 1):
-      break
-    sayfa += 1
-  return bul[:30]
+  return bul[:30], f"Marka özelliği: {aid} | " + " | ".join(tani[:4])
 
 
 def ozellikler(h, cid):
@@ -179,9 +205,10 @@ def panel(g):
       ma = st.text_input("🔎 Marka ara (seçili kategoride)", key="hbk_marka_ara").strip()
       if st.button("Markayı Ara", key="hbk_marka_btn") and ma:
         try:
-          st.session_state["hbk_mk"] = markalar(h, pa["kat_id"], ma)
+          st.session_state["hbk_mk"], tani = markalar(h, pa["kat_id"], ma)
           if not st.session_state["hbk_mk"]:
-            st.warning("Marka bulunamadı. Başka yazılış deneyin ya da aşağıya elle yazın.")
+            st.warning("Marka bulunamadı. Başka yazılış deneyin ya da aşağıya elle yazın. Tanı bilgisi:")
+            st.code(tani)
         except Exception as e:
           st.error(f"Marka aranamadı: {e}")
       mk = st.session_state.get("hbk_mk")
