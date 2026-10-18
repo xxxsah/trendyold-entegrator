@@ -153,7 +153,7 @@ def panel(g):
   h, merchant = g["hb_header"](ayarlar), g["kimlik"](ayarlar, "hb_merchant_id")
   kayit = g["_kayit"]().setdefault("hbk", [])
   pa = ayarlar.setdefault("pazar_ayarlari", {}).setdefault("hb", {})
-  st.caption("Hepsiburada'da YENİ ürün oluşturur. Ürünler Hepsiburada katalog onayına gider. "
+  st.caption("✅ hb_katalog SÜRÜM 5 · Hepsiburada'da YENİ ürün oluşturur, ürünler katalog onayına gider. "
              "Önce tek ürünle deneyin, sonra 'durumunu sorgula' ile hata nedenine bakın.")
 
   with st.expander("⚙️ Kategori / marka / zorunlu özellikler", expanded=not pa.get("kat_id")):
@@ -250,6 +250,8 @@ def panel(g):
     if not liste:
       st.warning("Gönderilecek geçerli ürün kalmadı.")
       return
+    with st.expander("Gönderilen ilk ürün (kontrol)"):
+      st.code(json.dumps(liste[0], ensure_ascii=False, indent=1)[:1500])
     bar, kutu = st.progress(0), st.empty()
     ok, top, idler, loglar = gonder(h, liste, lambda p, l: (bar.progress(p), kutu.code("\n".join(l[-10:]))))
     kayit.extend(idler)
