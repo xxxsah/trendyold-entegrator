@@ -20,6 +20,11 @@ import pandas as pd
 import requests
 import streamlit as st
 
+try:
+  import hb_katalog
+except ImportError:
+  hb_katalog = None
+
 st.set_page_config(page_title="ŞahEntegre - E-Ticaret Yönetim Paneli", page_icon="👑", layout="wide")
 
 BASE = Path(__file__).parent
@@ -356,24 +361,15 @@ def fiyat_artis_uygula(ayarlar, pid, df):
   kargo = float(pa.get("sabit_kargo", 0) or 0)
   artis = float(pa.get("fiyat_artis", 0) or 0)
   if not (marj > 0 or kargo > 0 or artis > 0) or "satis_fiyati" not in df.columns:
-    with closing(baglan()) as c:
-      ref_stok = pd.read_sql("SELECT barkod, stok FROM urunler", c)
-    if not ref_stok.empty:
-      ref_stok = ref_stok.drop_duplicates("barkod").set_index("barkod")
-      df = df.copy()
-      df["stok"] = df["barkod"].astype(str).map(ref_stok["stok"]).fillna(df["stok"]).astype(int)
     return df
   df = df.copy()
-  with closing(baglan()) as c:
-    ref = pd.read_sql("SELECT barkod, tedarikci, alis_fiyati, stok FROM urunler", c)
-  ref = ref.drop_duplicates("barkod").set_index("barkod")
-  ted = ayarlar.get("tedarikciler", {})
-  alis = df["barkod"].astype(str).map(ref["alis_fiyati"])
-  tadi = df["barkod"].astype(str).map(ref["tedarikci"])
-  db_stok = df["barkod"].astype(str).map(ref["stok"])
-  if "stok" in df.columns and db_stok.notna().any():
-    df["stok"] = db_stok.fillna(df["stok"]).astype(int)
   if marj > 0 or kargo > 0:
+    with closing(baglan()) as c:
+      ref = pd.read_sql("SELECT barkod, tedarikci, alis_fiyati FROM urunler", c)
+    ref = ref.drop_duplicates("barkod").set_index("barkod")
+    ted = ayarlar.get("tedarikciler", {})
+    alis = df["barkod"].astype(str).map(ref["alis_fiyati"])
+    tadi = df["barkod"].astype(str).map(ref["tedarikci"])
     m_s = tadi.map(lambda t: float((ted.get(t) or {}).get("marj", 30.0)))
     k_s = tadi.map(lambda t: float((ted.get(t) or {}).get("sabit_ek", 0.0)))
     m_son = marj if marj > 0 else m_s
@@ -1357,65 +1353,35 @@ def sifre_al():
 
 sifre = sifre_al()
 if sifre and not st.session_state.get("giris_ok"):
-  st.markdown("""
-    <style>
-      [data-testid="stAppViewContainer"] {
-        background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
-      }
-      .login-card {
-        background: rgba(30, 41, 59, 0.7);
-        backdrop-filter: blur(12px);
-        border: 1px solid rgba(255, 255, 255, 0.1);
-        border-radius: 20px;
-        padding: 40px;
-        box-shadow: 0 20px 40px rgba(0,0,0,0.4);
-        text-align: center;
-      }
-      .login-title {
-        color: #f8fafc;
-        font-size: 28px;
-        font-weight: 800;
-        margin-bottom: 8px;
-      }
-      .login-sub {
-        color: #94a3b8;
-        font-size: 14px;
-        margin-bottom: 30px;
-      }
-    </style>
-  """, unsafe_allow_html=True)
-  
+  st.markdown("""<style>
+[data-testid="stAppViewContainer"]{background:linear-gradient(135deg,#0f172a 0%,#1e293b 100%);}
+.login-card{background:rgba(30,41,59,.7);border:1px solid rgba(255,255,255,.1);border-radius:20px;padding:40px;box-shadow:0 20px 40px rgba(0,0,0,.4);text-align:center;}
+.login-title{color:#f8fafc;font-size:28px;font-weight:800;margin-bottom:8px;}
+.login-sub{color:#94a3b8;font-size:14px;}
+</style>""", unsafe_allow_html=True)
   _, orta, _ = st.columns([1, 1.2, 1])
   with orta:
-    st.markdown("""
-      <div class="login-card">
-        <div class="login-title">👑 ŞahEntegre</div>
-        <div class="login-sub">E-Ticaret Yönetim Paneli Girişi</div>
-      </div>
-    """, unsafe_allow_html=True)
-    
-    kilit_bitis = st.session_state.get("kilit_bitis", 0)
+    st.markdown('<div class="login-card"><div class="login-title">👑 ŞahEntegre</div>'
+          '<div class="login-sub">E-Ticaret Yönetim Paneli Girişi</div></div>', unsafe_allow_html=True)
     deneme = st.session_state.get("deneme", 0)
-    
+    kilit_bitis = st.session_state.get("kilit_bitis", 0)
     if time.time() < kilit_bitis:
-      st.error(f"⚠️ Çok fazla hatalı deneme. Lütfen {int(kilit_bitis - time.time())} saniye bekleyin.")
+      st.error(f"⚠️ Çok fazla hatalı deneme. {int(kilit_bitis - time.time())} sn bekleyin.")
     else:
       with st.form("giris_formu"):
-        kullanici = st.text_input("👤 Kullanıcı Adı", placeholder="admin")
         girilen = st.text_input("🔑 Yönetici Şifresi", type="password", placeholder="••••••••")
         buton = st.form_submit_button("Giriş Yap", type="primary", use_container_width=True)
-        
-        if buton:
-          if hmac.compare_digest(girilen.encode(), str(sifre).encode()):
-            st.session_state.giris_ok = True
+      if buton:
+        if hmac.compare_digest(girilen.encode(), str(sifre).encode()):
+          st.session_state.giris_ok = True
+          st.session_state.deneme = 0
+          st.rerun()
+        else:
+          st.session_state.deneme = deneme + 1
+          if st.session_state.deneme >= 5:
+            st.session_state.kilit_bitis = time.time() + 60
             st.session_state.deneme = 0
-            st.rerun()
-          else:
-            st.session_state.deneme = deneme + 1
-            if st.session_state.deneme >= 5:
-              st.session_state.kilit_bitis = time.time() + 60
-              st.session_state.deneme = 0
-            st.error("❌ Hatalı kullanıcı adı veya şifre.")
+          st.error("❌ Hatalı şifre.")
   st.stop()
 
 if "ayarlar" not in st.session_state:
@@ -1457,7 +1423,7 @@ PAZAR = {
 CAP = {
   "trendruum": {"sync", "kritik", "barkod", "toplu", "durum"},
   "trendyol": {"sync", "kritik", "barkod"},
-  "hb": {"sync", "kritik", "barkod"},
+  "hb": {"sync", "kritik", "barkod", "toplu"},
   "n11": {"sync", "kritik", "barkod", "toplu"},
   "idefix": {"sync", "kritik", "barkod", "toplu"},
 }
@@ -1511,7 +1477,7 @@ def ac_kapa(pid):
   st.session_state["acik_pazar"] = None if st.session_state.get("acik_pazar") == pid else pid
 
 st.sidebar.title("👑 ŞahEntegre")
-st.sidebar.caption("Sürüm: v42 - Kurumsal Giriş Ekranı Desteği")
+st.sidebar.caption("Sürüm: v43 - Hepsiburada ürün oluşturma")
 if not sifre:
   st.sidebar.warning("⚠️ APP_PASSWORD tanımlı değil: panel (ve API anahtarları) herkese açık!")
 for kid, etiket_m, _ in ANA_MENU:
@@ -2053,9 +2019,7 @@ def pazar_islemler(pid):
   ad = p["ad"]
   cap = CAP.get(pid, set())
   bagli = pazar_bagli(ayarlar, pid)
-  yok_mesaj = (f"Bu işlem {ad} için desteklenmiyor." if pid != "hb" else
-        "Hepsiburada'da yeni ürün oluşturma (katalog/özellik onayı) yok. Bu entegrasyon, Hepsiburada'da "
-        "zaten listelenmiş ürünlerin stok ve fiyatını günceller.")
+  yok_mesaj = f"Bu işlem {ad} için desteklenmiyor."
 
   st.title(f"{p['ikon']} {ad} Tüm İşlemler")
   if not cap:
@@ -2127,6 +2091,11 @@ def pazar_islemler(pid):
             idefix_toplu_panel()
           elif pid == "n11":
             n11_toplu_panel()
+          elif pid == "hb":
+            if hb_katalog:
+              hb_katalog.panel(globals())
+            else:
+              st.error("hb_katalog.py dosyası GitHub'da app.py ile aynı klasörde olmalı.")
         else:
           st.info(yok_mesaj if bagli else "Önce API bilgilerini girin.")
       elif islem == "durum":
