@@ -356,15 +356,26 @@ def fiyat_artis_uygula(ayarlar, pid, df):
   kargo = float(pa.get("sabit_kargo", 0) or 0)
   artis = float(pa.get("fiyat_artis", 0) or 0)
   if not (marj > 0 or kargo > 0 or artis > 0) or "satis_fiyati" not in df.columns:
+    # Veritabanındaki güncel stokları dataframe'e tam olarak senkronize et
+    with closing(baglan()) as c:
+      ref_stok = pd.read_sql("SELECT barkod, stok FROM urunler", c)
+    if not ref_stok.empty:
+      ref_stok = ref_stok.drop_duplicates("barkod").set_index("barkod")
+      df = df.copy()
+      df["stok"] = df["barkod"].astype(str).map(ref_stok["stok"]).fillna(df["stok"]).astype(int)
     return df
   df = df.copy()
+  with closing(baglan()) as c:
+    ref = pd.read_sql("SELECT barkod, tedarikci, alis_fiyati, stok FROM urunler", c)
+  ref = ref.drop_duplicates("barkod").set_index("barkod")
+  ted = ayarlar.get("tedarikciler", {})
+  alis = df["barkod"].astype(str).map(ref["alis_fiyati"])
+  tadi = df["barkod"].astype(str).map(ref["tedarikci"])
+  # Veritabanındaki güncel stok miktarını garantile
+  db_stok = df["barkod"].astype(str).map(ref["stok"])
+  if "stok" in df.columns and db_stok.notna().any():
+    df["stok"] = db_stok.fillna(df["stok"]).astype(int)
   if marj > 0 or kargo > 0:
-    with closing(baglan()) as c:
-      ref = pd.read_sql("SELECT barkod, tedarikci, alis_fiyati FROM urunler", c)
-    ref = ref.drop_duplicates("barkod").set_index("barkod")
-    ted = ayarlar.get("tedarikciler", {})
-    alis = df["barkod"].astype(str).map(ref["alis_fiyati"])
-    tadi = df["barkod"].astype(str).map(ref["tedarikci"])
     m_s = tadi.map(lambda t: float((ted.get(t) or {}).get("marj", 30.0)))
     k_s = tadi.map(lambda t: float((ted.get(t) or {}).get("sabit_ek", 0.0)))
     m_son = marj if marj > 0 else m_s
@@ -1464,7 +1475,7 @@ def ac_kapa(pid):
   st.session_state["acik_pazar"] = None if st.session_state.get("acik_pazar") == pid else pid
 
 st.sidebar.title("👑 ŞahEntegre")
-st.sidebar.caption("Sürüm: v40 - Hepsiburada/İdefix düzeltmeleri")
+st.sidebar.caption("Sürüm: v41 - Stok Senkronizasyon Kararlılığı")
 if not sifre:
   st.sidebar.warning("⚠️ APP_PASSWORD tanımlı değil: panel (ve API anahtarları) herkese açık!")
 for kid, etiket_m, _ in ANA_MENU:
