@@ -877,8 +877,10 @@ def idefix_urun_listesi(df, ayarlar):
             atlanan += 1
             continue
         ad = str(r["urun_adi"]).strip()
+        # İdefix'in zorunlu istediği productMainId alanını barkod veya stok kodu olarak ekliyoruz
         liste.append({
             "barcode": bk,
+            "productMainId": kod,
             "title": ad[:250],
             "brandId": int(brand) if brand else 0,
             "categoryId": int(cat) if cat else 0,
@@ -1368,7 +1370,7 @@ def ac_kapa(pid):
     st.session_state["acik_pazar"] = None if st.session_state.get("acik_pazar") == pid else pid
 
 st.sidebar.title("👑 ŞahEntegre")
-st.sidebar.caption("Sürüm: v38 - Header Base64 Strip Düzeltmesi")
+st.sidebar.caption("Sürüm: v39 - İdefix ProductMainId Düzeltmesi")
 for kid, etiket_m, _ in ANA_MENU:
     st.sidebar.button(etiket_m, key=f"nav_{kid}", use_container_width=True,
                       type="primary" if st.session_state["sayfa"] == kid else "secondary",
