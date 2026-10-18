@@ -162,7 +162,7 @@ def gonder(h, liste, ilerleme=None, paket=100):
       ok += 1
       if tid:
         idler.append(str(tid))
-      loglar.append(f"✅ Paket {no}: {len(grup)} ürün Hepsiburada'ya iletildi (Takip ID: {tid})")
+      loglar.append(f"✅ Paket {no}: {len(grup)} ürün Hepsiburada Katalog İçe Aktarımına iletildi (Takip ID: {tid})")
     else:
       loglar.append(f"❌ Paket {no}: HTTP {r.status_code} - {r.text[:300]}")
       
@@ -182,12 +182,12 @@ def panel(g):
   h, merchant = g["hb_header"](ayarlar), g["kimlik"](ayarlar, "hb_merchant_id")
   pa = ayarlar.setdefault("pazar_ayarlari", {}).setdefault("hb", {})
   
-  st.caption("Hepsiburada'da YENİ ürün oluşturur. Ürünler Hepsiburada katalog onayına gider. "
-             "Önce tek ürünle deneyin, sonra 'durumunu sorgula' ile hata nedenine bakın.")
+  st.subheader("📦 Hepsiburada Saf Katalog Ürün Oluşturma Paneli")
+  st.caption("Bu panel sadece Hepsiburada'ya YENİ katalog ürünü gönderir. Fiyat/stok güncellemesi karıştırılmamıştır.")
 
-  with st.expander("⚙️ Kategori / marka / zorunlu özellikler", expanded=not pa.get("kat_id")):
-    st.caption(f"Kategori ID: {pa.get('kat_id') or '—'} · Marka: {pa.get('marka') or '—'}")
-    if st.button("📥 Kategorileri yükle", key="hbk_kat_btn"):
+  with st.expander("⚙️ Kategori ve Marka Ayarları", expanded=not pa.get("kat_id")):
+    st.caption(f"Seçili Kategori ID: {pa.get('kat_id') or '—'} · Marka: {pa.get('marka') or '—'}")
+    if st.button("📥 Hepsiburada Kategorilerini Yükle", key="hbk_kat_btn"):
       try:
         st.session_state["hbk_kat"] = kategoriler(h)
         st.success(f"{len(st.session_state['hbk_kat'])} kategori yüklendi.")
@@ -212,46 +212,23 @@ def panel(g):
             st.rerun()
             
     st.session_state.setdefault("hbk_marka", pa.get("marka", ""))
-    marka = st.text_input("Marka adı (Hepsiburada'daki yazılışıyla)", key="hbk_marka").strip()
+    marka = st.text_input("Marka adı (Hepsiburada'daki tam yazılışıyla)", key="hbk_marka").strip()
     c1, c2, c3 = st.columns(3)
     kdv = c1.selectbox("KDV %", [0, 1, 10, 20], index=3, key="hbk_kdv")
     garanti = c2.number_input("Garanti (ay)", 0, 120, int(pa.get("garanti", 24)), key="hbk_gar")
     kg = c3.text_input("Ağırlık (kg)", value=str(pa.get("kg", "1")), key="hbk_kg").strip() or "1"
-    yeni = (marka, int(kdv), int(garanti), kg)
+    
     yeni_tuple = (marka, int(kdv), int(garanti), kg)
     if yeni_tuple != (pa.get("marka", ""), pa.get("kdv", 20), pa.get("garanti", 24), pa.get("kg", "1")):
       pa["marka"], pa["kdv"], pa["garanti"], pa["kg"] = yeni_tuple
       kaydet(ayarlar)
-      
-    if pa.get("kat_id") and st.button("📋 Zorunlu özellikleri kontrol et", key="hbk_oz_btn"):
-      try:
-        st.session_state["hbk_oz"] = ozellikler(h, pa["kat_id"])
-        st.success("Kontrol edildi. Ek zorunlu özellik yok veya yüklendi.")
-      except Exception as e:
-        st.error(f"Hata: {e}")
 
-  miktar = st.selectbox("Gönderilecek ürün adedi", ["Tek ürün (test)", "İlk 50", "İlk 100", "Tümü"], key="hbk_miktar")
+  miktar = st.selectbox("Gönderilecek Ürün Adedi", ["Tek ürün (test)", "İlk 50", "İlk 100"], key="hbk_miktar")
   tek_stok = st.checkbox("Sadece stokta olanları gönder", value=True, key="hbk_stok")
   kat = g["kategori_sec"]("hbk_tkat")
-  ara = st.text_input("Ürün adında/barkodda ara (isteğe bağlı)", key="hbk_urun_ara").strip().lower()
+  ara = st.text_input("Ürün adında veya barkodda ara (isteğe bağlı)", key="hbk_urun_ara").strip().lower()
   
-  # ÖNİZLEME: Hangi ürünlerin gideceğini kullanıcıya net gösterelim
-  if st.button("🔍 Gidecek Ürünleri Önizle", key="hbk_onizle"):
-    df_n = g["urunleri_oku"]()
-    if tek_stok:
-      df_n = df_n[df_n["stok"] > 0]
-    if kat:
-      df_n = df_n[g["ana_kat"](df_n) == kat]
-    if ara:
-      df_n = df_n[df_n["urun_adi"].str.lower().str.contains(ara, regex=False) | df_n["barkod"].str.lower().str.contains(ara, regex=False)]
-    
-    limit = 1 if miktar == "Tek ürün (test)" else (50 if miktar == "İlk 50" else (100 if miktar == "İlk 100" else len(df_n)))
-    df_n = df_n.head(limit)
-    st.info(f"Seçilen kriterlere uyan ve gönderilecek toplam ürün sayısı: {len(df_n)}")
-    if not df_n.empty:
-      st.dataframe(df_n[["barkod", "urun_adi", "satis_fiyati", "stok"]].head(5))
-
-  if st.button("📤 Hepsiburada'ya Ürün Oluştur", type="primary", key="hbk_gonder"):
+  if st.button("📤 Hepsiburada Kataloguna Ürün Fırlat", type="primary", key="hbk_gonder"):
     eksik = [ad for ad, v in (("Kategori ID", pa.get("kat_id")), ("Marka", pa.get("marka"))) if not v]
     if eksik:
       st.error("Eksik: " + ", ".join(eksik) + ". Yukarıdaki ayarlardan doldurun.")
@@ -264,13 +241,13 @@ def panel(g):
     if ara:
       df = df[df["urun_adi"].str.lower().str.contains(ara, regex=False) | df["barkod"].str.lower().str.contains(ara, regex=False)]
       
-    limit_sayi = {"Tek ürün (test)": 1, "İlk 50": 50, "İlk 100": 100}.get(miktar, len(df))
+    limit_sayi = {"Tek ürün (test)": 1, "İlk 50": 50, "İlk 100": 100}.get(miktar, 1)
     df = df.head(limit_sayi)
     df = g["fiyat_artis_uygula"](ayarlar, "hb", df)
     
     liste, atlanan = urun_listesi(df, pa, merchant)
     if atlanan:
-      st.info(f"{atlanan} ürün atlandı (https görsel yok ya da fiyat 0).")
+      st.info(f"{atlanan} ürün atlandı (görsel eksik veya fiyat 0).")
     if not liste:
       st.warning("Gönderilecek geçerli ürün kalmadı.")
       return
@@ -282,17 +259,17 @@ def panel(g):
     
     g["log_yaz"]("Hepsiburada", "OK" if ok else "HATA", f"{ok}/{top} paket gönderildi. {len(liste)} ürün.")
     if idler:
-      st.success(f"✅ Başarıyla iletildi! İşlem ID: {idler[-1]}")
+      st.success(f"✅ İletildi! Takip Numarası: {idler[-1]}")
     else:
-      st.error("Gönderim başarısız oldu.")
+      st.error("Gönderim başarısız.")
 
   son_tid = st.session_state.get("hb_son_tid")
   if son_tid:
-    st.info(f"Aktif Sorgulanacak İşlem ID: {son_tid}")
-    if st.button("🔍 Gönderimin Durumunu Sorgula", key="hbk_durum_yeni"):
+    st.info(f"Aktif İşlem Takip ID: {son_tid}")
+    if st.button("🔍 Bu İşlemin Sonucunu Sorgula", key="hbk_durum_yeni"):
       try:
         kod, metin = durum(h, son_tid)
-        st.caption(f"İşlem ID: {son_tid} · HTTP {kod}")
+        st.caption(f"HTTP Kodu: {kod}")
         st.code(metin[:1800])
       except Exception as e:
-        st.error(f"{son_tid}: {e}")
+        st.error(f"Sorgulama hatası: {e}")
