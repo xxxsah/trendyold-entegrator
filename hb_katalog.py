@@ -45,50 +45,27 @@ def degerler(h, cid, aid):
   return [str(x.get("value") or x.get("name")) for x in (r.json().get("data") or []) if isinstance(x, dict)]
 
 
-def marka_attr(h, cid):
-  r = requests.get(f"{MPOP}/product/api/categories/{cid}/attributes", headers=_h(h), timeout=60)
-  r.raise_for_status()
-  d = r.json().get("data") or {}
-  for a in (d.get("baseAttributes") or []) + (d.get("attributes") or []) + (d.get("variantAttributes") or []):
-    t = f"{a.get('id', '')} {a.get('name', '')}".lower()
-    if "marka" in t or "brand" in t:
-      return str(a.get("id"))
-  return "Marka"
+def _n(t):
+  t = str(t)
+  for x, y in (("İ", "i"), ("I", "ı"), ("ı", "i"), ("ç", "c"), ("Ç", "c"), ("ş", "s"), ("Ş", "s"),
+               ("ğ", "g"), ("Ğ", "g"), ("ö", "o"), ("Ö", "o"), ("ü", "u"), ("Ü", "u")):
+    t = t.replace(x, y)
+  return t.lower()
 
 
-def markalar(h, cid, ara):
-  q, bul, tani, aid = ara.lower().strip(), [], [], "Marka"
-  try:
-    aid = marka_attr(h, cid)
-  except Exception as e:
-    tani.append(f"özellik listesi alınamadı: {e}")
-  for filtreli in (True, False):
-    sayfa = 0
-    while sayfa < 40 and len(bul) < 30:
-      p = {"page": sayfa, "size": 1000, "version": 1}
-      if filtreli:
-        p["name"] = ara
-      r = requests.get(f"{MPOP}/product/api/categories/{cid}/attribute/{aid}/values", headers=_h(h), timeout=60, params=p)
-      if r.status_code >= 400:
-        tani.append(f"HTTP {r.status_code}: {r.text[:200]}")
-        break
-      j = r.json()
-      veri = (j.get("data") if isinstance(j, dict) else j) or []
-      if sayfa == 0:
-        ornek = [str(x.get("value") or x.get("name")) for x in veri[:3] if isinstance(x, dict)]
-        tani.append(f"{'filtreli' if filtreli else 'tüm liste'}: {len(veri)} kayıt, örnek {ornek}")
-      if not veri:
-        break
-      for x in veri:
-        v = str(x.get("value") or x.get("name") or "") if isinstance(x, dict) else ""
-        if v and q in v.lower() and v not in bul:
-          bul.append(v)
-      if not isinstance(j, dict) or sayfa + 1 >= int(j.get("totalPages", 1) or 1):
-        break
-      sayfa += 1
-    if bul:
-      break
-  return bul[:30], f"Marka özelliği: {aid} | " + " | ".join(tani[:4])
+def ara_kat(kats, q):
+  k = _n(q).split()
+  if not k:
+    return [], ""
+  ad = [(c, _n(c["yol"])) for c in kats]
+  bul = [c for c, y in ad if all(w in y for w in k)]
+  if bul:
+    return bul[:50], ""
+  bul = [c for c, y in ad if any(w in y for w in k if len(w) >= 3)]
+  if bul:
+    return bul[:50], "Tam eşleşme yok, benzer sonuçlar:"
+  p = k[0][:3]
+  return [c for c, y in ad if p in y][:50], f"'{q}' bulunamadı, '{p}' içerenler:"
 
 
 def ozellikler(h, cid):
@@ -129,8 +106,7 @@ def urun_listesi(df, pa, merchant):
          "kg": str(pa.get("kg", "1")), "tax_vat_rate": str(int(pa.get("kdv", 20))),
          "price": f"{float(r['satis_fiyati']):.2f}".replace(".", ","),
          "stock": str(int(max(r["stok"], 0))), "Image1": gorsel}
-    if gecerli_barkod(kod):
-      a["Barcode"] = kod
+    a["Barcode"] = kod
     a.update(ek)
     liste.append({"categoryId": int(pa["kat_id"]), "merchant": merchant, "attributes": a})
   return liste, atlanan
@@ -189,38 +165,21 @@ def panel(g):
         st.error(f"Hata: {e}")
     kats = st.session_state.get("hbk_kat", [])
     if kats:
-      q = g["tr_kucuk"](st.text_input("Kategori ara", key="hbk_ara"))
-      if q:
-        bul = [k for k in kats if q in g["tr_kucuk"](k["yol"])][:50]
+      q = st.text_input("Kategori ara (yazıp Enter'a basın)", key="hbk_ara")
+      if q.strip():
+        bul, not_ = ara_kat(kats, q)
         if not bul:
           st.warning("Sonuç yok. Daha kısa bir kelime deneyin.")
         else:
+          if not_:
+            st.info(not_)
+          st.caption(f"{len(bul)} sonuç")
           k = st.selectbox("Sonuçlar", bul, format_func=lambda x: x["yol"], key="hbk_sec")
           if st.button("Bu kategoriyi kullan", key="hbk_kullan"):
             pa["kat_id"], pa["ozellikler"] = k["id"], {}
             st.session_state.pop("hbk_oz", None)
             kaydet(ayarlar)
             st.rerun()
-    if pa.get("kat_id"):
-      ma = st.text_input("🔎 Marka ara (seçili kategoride)", key="hbk_marka_ara").strip()
-      if st.button("Markayı Ara", key="hbk_marka_btn") and ma:
-        try:
-          st.session_state["hbk_mk"], tani = markalar(h, pa["kat_id"], ma)
-          if not st.session_state["hbk_mk"]:
-            st.warning("Marka bulunamadı. Başka yazılış deneyin ya da aşağıya elle yazın. Tanı bilgisi:")
-            st.code(tani)
-        except Exception as e:
-          st.error(f"Marka aranamadı: {e}")
-      mk = st.session_state.get("hbk_mk")
-      if mk:
-        sec_m = st.selectbox("Bulunan markalar", mk, key="hbk_mk_sec")
-        if st.button("Bu markayı kullan", key="hbk_mk_kullan"):
-          st.session_state["hbk_marka"] = sec_m
-          pa["marka"] = sec_m
-          kaydet(ayarlar)
-          st.rerun()
-    else:
-      st.info("Marka aramak için önce kategori seçin.")
     st.session_state.setdefault("hbk_marka", pa.get("marka", ""))
     marka = st.text_input("Marka adı (Hepsiburada'daki yazılışıyla)", key="hbk_marka").strip()
     c1, c2, c3 = st.columns(3)
@@ -258,7 +217,9 @@ def panel(g):
         st.warning(f"{eksik} zorunlu özellik boş.")
       st.caption("Seçtiğiniz özellikler bu kategorideki TÜM ürünlere uygulanır.")
       with st.expander("Ham yanıt (hata ayıklama)"):
-        st.code(json.dumps(ham, ensure_ascii=False)[:1500])
+        ozet = [f"{a.get('id')} | {a.get('name')} | zorunlu={a.get('mandatory')} | {a.get('type')}"
+                for a in (ham.get("attributes") or []) + (ham.get("variantAttributes") or [])]
+        st.code("\n".join(ozet[:40]) or "Kategoriye özel özellik listesi boş.")
 
   miktar = st.selectbox("Gönderilecek ürün", ["Tek ürün (test)", "İlk 100", "İlk 500", "Tümü"], key="hbk_miktar")
   tek_stok = st.checkbox("Sadece stokta olanları gönder", value=True, key="hbk_stok")
