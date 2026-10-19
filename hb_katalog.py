@@ -91,13 +91,34 @@ def gecerli_barkod(kod):
   return kod if kod.isdigit() and 8 <= len(kod) <= 14 else None
 
 
-def urun_listesi(df, pa, merchant):
+def _on(df, n):
+  return df["kategori"].astype(str).map(lambda x: " >>> ".join(p.strip() for p in x.split(">>>")[:n]))
+
+
+def _bul(esle, kategori):
+  p = [x.strip() for x in str(kategori).split(">>>")]
+  for n in range(len(p), 0, -1):
+    k = " >>> ".join(p[:n])
+    if k in esle:
+      return esle[k]
+  return None
+
+
+def urun_listesi(df, pa, merchant, sadece=False):
   pre = pa.get("sku_prefix", "")
-  ek = pa.get("ozellikler") or {}
+  esle = pa.get("esle") or {}
   liste, atlanan = [], 0
   for _, r in df.iterrows():
     gorsel, kod = str(r["gorsel"]).strip(), str(r["barkod"]).strip()
     if not gorsel.startswith("https") or r["satis_fiyati"] <= 0 or not kod:
+      atlanan += 1
+      continue
+    e = _bul(esle, r.get("kategori", ""))
+    if e:
+      cid, ek = e["id"], e.get("oz") or {}
+    elif pa.get("kat_id") and not sadece:
+      cid, ek = pa["kat_id"], pa.get("ozellikler") or {}
+    else:
       atlanan += 1
       continue
     ad = str(r["urun_adi"]).strip()
@@ -108,7 +129,7 @@ def urun_listesi(df, pa, merchant):
          "stock": str(int(max(r["stok"], 0))), "Image1": gorsel}
     a["Barcode"] = kod
     a.update(ek)
-    liste.append({"categoryId": int(pa["kat_id"]), "merchant": merchant, "attributes": a})
+    liste.append({"categoryId": int(cid), "merchant": merchant, "attributes": a})
   return liste, atlanan
 
 
@@ -160,7 +181,7 @@ def panel(g):
   h, merchant = g["hb_header"](ayarlar), g["kimlik"](ayarlar, "hb_merchant_id")
   kayit = g["_kayit"]().setdefault("hbk", [])
   pa = ayarlar.setdefault("pazar_ayarlari", {}).setdefault("hb", {})
-  st.caption("✅ hb_katalog SÜRÜM 6 · Hepsiburada'da YENİ ürün oluşturur, ürünler katalog onayına gider. "
+  st.caption("✅ hb_katalog SÜRÜM 8 · Hepsiburada'da YENİ ürün oluşturur, ürünler katalog onayına gider. "
              "Önce tek ürünle deneyin, sonra 'durumunu sorgula' ile hata nedenine bakın.")
 
   with st.expander("⚙️ Kategori / marka / zorunlu özellikler", expanded=not pa.get("kat_id")):
@@ -233,12 +254,67 @@ def panel(g):
                 for a in (ham.get("attributes") or []) + (ham.get("variantAttributes") or [])]
         st.code("\n".join(ozet[:40]) or "Kategoriye özel özellik listesi boş.")
 
+  esle = pa.setdefault("esle", {})
+  with st.expander(f"📂 Kategori eşleme ({len(esle)} eşleşti)"):
+    st.caption("Her tedarikçi kategorisini bir kez Hepsiburada kategorisine eşleyin. 'Tümü' gönderimi her ürünü kendi kategorisine yollar. Geniş gruplarda (örn. ELEKTRONİK) düzeyi 2 ya da 3 yapıp alt kategorileri ayrı eşleyin; en özel eşleme geçerli olur.")
+    duz = st.selectbox("Kategori düzeyi (1 = ana kategori, 2 = alt kategori, ...)", [1, 2, 3, 4], key="hbk_e_duz")
+    sayim = _on(g["urunleri_oku"](), duz).value_counts()
+    etk = {f"{'✅ ' if k in esle else ''}{k} ({n})": k for k, n in sayim.items()}
+    kats2 = st.session_state.get("hbk_kat", [])
+    if not etk:
+      st.info("Önce tedarikçi ürünlerini senkronlayın.")
+    elif not kats2:
+      st.info("Önce yukarıdaki bölümden '📥 Kategorileri yükle'ye basın.")
+    else:
+      ted = etk[st.selectbox("Tedarikçi kategorisi", list(etk), key=f"hbk_e_ted_{duz}")]
+      if ted in esle:
+        st.caption(f"Şu an: {esle[ted]['yol']}")
+      q2 = st.text_input("Hepsiburada kategorisi ara (Enter)", value=ted.split(">>>")[-1].strip(), key=f"hbk_e_ara_{ted}")
+      bul2, not2 = ara_kat(kats2, q2) if q2.strip() else ([], "")
+      if not bul2:
+        st.warning("Sonuç yok, farklı bir kelime deneyin.")
+      else:
+        if not2:
+          st.info(not2)
+        k2 = st.selectbox("Sonuçlar", bul2, format_func=lambda x: x["yol"], key=f"hbk_e_sec_{ted}")
+        if st.button("📋 Zorunlu özellikleri yükle", key="hbk_e_oz_btn"):
+          try:
+            st.session_state["hbk_e_oz"] = (k2["id"], ozellikler(h, k2["id"])[0])
+          except Exception as e:
+            st.error(f"Hata: {e}")
+        oz2 = st.session_state.get("hbk_e_oz")
+        yuklendi = bool(oz2 and oz2[0] == k2["id"])
+        secim2, eksik2 = {}, 0
+        if yuklendi:
+          for a in oz2[1]:
+            aid, ad = str(a.get("id")), a.get("name", a.get("id"))
+            if a.get("_v"):
+              secim2[aid] = st.selectbox(f"{ad} (zorunlu)", a["_v"], key=f"hbk_e_a_{aid}")
+            else:
+              v = st.text_input(f"{ad} (zorunlu)", key=f"hbk_e_a_{aid}").strip()
+              secim2[aid] = v
+              eksik2 += 0 if v else 1
+          if not oz2[1]:
+            st.info("Bu kategoride ek zorunlu özellik yok.")
+        else:
+          st.caption("Kaydetmeden önce zorunlu özellikleri yükleyin.")
+        if st.button("💾 Eşlemeyi kaydet", key="hbk_e_kaydet", disabled=bool(eksik2) or not yuklendi):
+          esle[ted] = {"id": k2["id"], "yol": k2["yol"], "oz": secim2}
+          kaydet(ayarlar)
+          st.success("Eşleme kaydedildi.")
+          st.rerun()
+      if ted in esle and st.button("🗑️ Bu eşlemeyi sil", key="hbk_e_sil"):
+        esle.pop(ted)
+        kaydet(ayarlar)
+        st.rerun()
+
   miktar = st.selectbox("Gönderilecek ürün", ["Tek ürün (test)", "İlk 100", "İlk 500", "Tümü"], key="hbk_miktar")
   tek_stok = st.checkbox("Sadece stokta olanları gönder", value=True, key="hbk_stok")
   kat = g["kategori_sec"]("hbk_tkat")
   ara = st.text_input("Ürün adında/barkodda ara (isteğe bağlı)", key="hbk_urun_ara").strip().lower()
+  sadece = st.checkbox("Kategorisi eşlenmemiş ürünleri atla", value=bool(esle), key="hbk_sadece")
   if st.button("📤 Hepsiburada'ya Ürün Oluştur", type="primary", key="hbk_gonder"):
-    eksik = [ad for ad, v in (("Kategori", pa.get("kat_id")), ("Marka", pa.get("marka"))) if not v]
+    eksik = [ad for ad, v in (("Kategori (ya da kategori eşleme)", pa.get("kat_id") or esle), ("Marka", pa.get("marka"))) if not v]
     if eksik:
       st.error("Eksik: " + ", ".join(eksik) + ". Yukarıdaki ayarlardan doldurun.")
       return
@@ -251,9 +327,9 @@ def panel(g):
       df = df[df["urun_adi"].str.lower().str.contains(ara, regex=False) | df["barkod"].str.lower().str.contains(ara, regex=False)]
     df = df.head({"Tek ürün (test)": 1, "İlk 100": 100, "İlk 500": 500}.get(miktar, len(df)))
     df = g["fiyat_artis_uygula"](ayarlar, "hb", df)
-    liste, atlanan = urun_listesi(df, pa, merchant)
+    liste, atlanan = urun_listesi(df, pa, merchant, sadece)
     if atlanan:
-      st.info(f"{atlanan} ürün atlandı (https görsel yok ya da fiyat 0).")
+      st.info(f"{atlanan} ürün atlandı (https görsel yok, fiyat 0 ya da kategorisi eşlenmemiş).")
     if not liste:
       st.warning("Gönderilecek geçerli ürün kalmadı.")
       return
