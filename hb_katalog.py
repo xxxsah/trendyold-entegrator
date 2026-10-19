@@ -125,7 +125,7 @@ def urun_listesi(df, pa, merchant, sadece=False):
     a = {"merchantSku": pre + kod, "VaryantGroupID": pre + kod, "UrunAdi": ad[:255], "UrunAciklamasi": ad,
          "Marka": pa.get("marka", ""), "GarantiSuresi": str(int(pa.get("garanti", 24))),
          "kg": str(pa.get("kg", "1")), "tax_vat_rate": str(int(pa.get("kdv", 20))),
-         "price": (lambda f: f if pa.get("fiyat_nokta") else f.replace(".", ","))(f"{float(r['satis_fiyati']):.2f}"),
+         "price": f"{float(r['satis_fiyati']):.2f}".replace(".", ","),
          "stock": str(int(max(r["stok"], 0))), "Image1": gorsel}
     a["Barcode"] = kod
     a.update(ek)
@@ -176,12 +176,44 @@ def durum(h, tid):
   return r.status_code, r.text
 
 
+def ozet(metin):
+  try:
+    j = json.loads(metin)
+    d = j.get("data")
+    assert isinstance(d, list)
+  except Exception:
+    return metin[:800]
+  sayim, nedenler = {}, {}
+  for x in d:
+    k = str(x.get("importStatus") or x.get("productStatus") or "?")
+    sayim[k] = sayim.get(k, 0) + 1
+    r = x.get("rejectReasonsMessages") or x.get("validationResults") or x.get("importMessages")
+    if r:
+      t = json.dumps(r, ensure_ascii=False)[:160]
+      nedenler[t] = nedenler.get(t, 0) + 1
+  satir = [f"Toplam: {j.get('totalElements', len(d))} kayıt (bu sayfada {len(d)})",
+           "Durumlar: " + (", ".join(f"{k}: {v}" for k, v in sayim.items()) or "—")]
+  satir += [f"{n}× {t}" for t, n in sorted(nedenler.items(), key=lambda a: -a[1])[:6]]
+  return "\n".join(satir)
+
+
+def goster(h, tid):
+  try:
+    kod, metin = durum(h, tid)
+    st.caption(f"{tid} · HTTP {kod}")
+    st.code(ozet(metin))
+    with st.expander("Ham yanıt"):
+      st.code(metin[:1800])
+  except Exception as e:
+    st.error(f"{tid}: {e}")
+
+
 def panel(g):
   ayarlar, kaydet = g["ayarlar"], g["ayar_yaz"]
   h, merchant = g["hb_header"](ayarlar), g["kimlik"](ayarlar, "hb_merchant_id")
   kayit = g["_kayit"]().setdefault("hbk", [])
   pa = ayarlar.setdefault("pazar_ayarlari", {}).setdefault("hb", {})
-  st.caption("✅ hb_katalog SÜRÜM 8 · Hepsiburada'da YENİ ürün oluşturur, ürünler katalog onayına gider. "
+  st.caption("✅ hb_katalog SÜRÜM 10 · Hepsiburada'da YENİ ürün oluşturur, ürünler katalog onayına gider. "
              "Önce tek ürünle deneyin, sonra 'durumunu sorgula' ile hata nedenine bakın.")
 
   with st.expander("⚙️ Kategori / marka / zorunlu özellikler", expanded=not pa.get("kat_id")):
@@ -216,12 +248,9 @@ def panel(g):
     kdv = c1.selectbox("KDV %", [0, 1, 10, 20], index=3, key="hbk_kdv")
     garanti = c2.number_input("Garanti (ay)", 0, 120, int(pa.get("garanti", 24)), key="hbk_gar")
     kg = c3.text_input("Ağırlık (kg)", value=str(pa.get("kg", "1")), key="hbk_kg").strip() or "1"
-    nokta = st.checkbox("Fiyatı noktalı yaz (149.90). Kapalıyken virgüllü (149,90)",
-                        value=bool(pa.get("fiyat_nokta", False)), key="hbk_nokta")
-    yeni = (marka, int(kdv), int(garanti), kg, nokta)
-    if yeni != (pa.get("marka", ""), pa.get("kdv", 20), pa.get("garanti", 24), pa.get("kg", "1"),
-                bool(pa.get("fiyat_nokta", False))):
-      pa["marka"], pa["kdv"], pa["garanti"], pa["kg"], pa["fiyat_nokta"] = yeni
+    yeni = (marka, int(kdv), int(garanti), kg)
+    if yeni != (pa.get("marka", ""), pa.get("kdv", 20), pa.get("garanti", 24), pa.get("kg", "1")):
+      pa["marka"], pa["kdv"], pa["garanti"], pa["kg"] = yeni
       kaydet(ayarlar)
     if pa.get("kat_id") and st.button("📋 Zorunlu özellikleri yükle", key="hbk_oz_btn"):
       try:
@@ -343,9 +372,7 @@ def panel(g):
     (st.success if ok else st.error)(f"{ok}/{top} paket kabul edildi. Sonucu aşağıdan sorgulayın.")
   if kayit and st.button("🔍 Son gönderimlerin durumunu sorgula", key="hbk_durum"):
     for tid in kayit[-3:]:
-      try:
-        kod, metin = durum(h, tid)
-        st.caption(f"{tid} · HTTP {kod}")
-        st.code(metin[:1800])
-      except Exception as e:
-        st.error(f"{tid}: {e}")
+      goster(h, tid)
+  tid_el = st.text_input("Takip numarasıyla sorgula (uygulama yeniden başladıysa)", key="hbk_tid").strip()
+  if tid_el and st.button("🔍 Bu takip numarasını sorgula", key="hbk_tid_btn"):
+    goster(h, tid_el)
