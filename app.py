@@ -472,7 +472,6 @@ def fiyat_artis_uygula(ayarlar, pid, df):
   return df
 
 
-# --- PAZAR YERLERİ GENEL KATEGORİ & MARKA EŞLEŞTİRME BİLEŞENİ ---
 def kategori_eslestirme_bileseni(pid_adi):
   p_ayarlar = ayarlar.setdefault("pazar_ayarlari", {}).setdefault(
       pid_adi, {}
@@ -571,6 +570,22 @@ def trendruum_token(key, secret):
   if r.status_code != 200 or not token:
     raise RuntimeError(f"Giriş başarısız (HTTP {r.status_code})")
   return token
+
+
+def trendruum_siparisler(ayarlar):
+  key = kimlik(ayarlar, "trendruum_key")
+  secret = kimlik(ayarlar, "trendruum_secret")
+  if not key or not secret:
+    return []
+  try:
+    token = trendruum_token(key, secret)
+    headers = {"Authorization": f"Bearer {token}"}
+    r = http("GET", f"{TR_BASE}/orders", headers=headers, timeout=30)
+    if r.status_code == 200:
+      return r.json().get("data") or r.json().get("orders") or []
+  except Exception:
+    pass
+  return []
 
 
 def trendruum_urun_listesi(df, ayarlar, brand_id, varsayilan_cat):
@@ -1827,6 +1842,31 @@ def siparis_normalle_hb(p):
   }
 
 
+def siparis_normalle_tr(p):
+  satirlar = p.get("items") or p.get("products") or []
+  return {
+      "pid": "trendruum",
+      "id": str(p.get("id") or p.get("order_id") or ""),
+      "no": str(p.get("order_number") or p.get("orderNo") or ""),
+      "tarih": tr_tarih(p.get("created_at") or p.get("orderDate")),
+      "durum": durum_kodu("trendruum", p.get("status")),
+      "alici": p.get("customer_name") or p.get("recipient_name") or "Trendruum Müşterisi",
+      "adres": metin(p.get("shipping_address") or p.get("address")),
+      "urunler": [
+          {
+              "ad": l.get("name") or l.get("title") or "Ürün",
+              "sku": l.get("barcode") or l.get("stock_code") or "",
+              "adet": l.get("quantity") or l.get("amount") or 1,
+          }
+          for l in satirlar
+      ],
+      "tutar": p.get("total_price") or p.get("grand_total") or 0,
+      "kargo": p.get("cargo_company") or "Kargo",
+      "barkod": str(p.get("cargo_barcode") or p.get("tracking_number") or ""),
+      "ham": p,
+  }
+
+
 def siparis_cek(ayarlar, pid):
   if pid == "trendyol":
     s_, k_, x_ = (
@@ -1853,6 +1893,9 @@ def siparis_cek(ayarlar, pid):
   if pid == "hb":
     pkts = hb_siparisler(ayarlar)
     return [siparis_normalle_hb(x) for x in pkts]
+  if pid == "trendruum":
+    pkts = trendruum_siparisler(ayarlar)
+    return [siparis_normalle_tr(x) for x in pkts]
   return []
 
 
@@ -2090,7 +2133,7 @@ def ac_kapa(pid):
 
 
 st.sidebar.title("👑 ŞahEntegre")
-st.sidebar.caption("Sürüm: v56 - Tüm Butonlar & Kargo Araçları Aktif")
+st.sidebar.caption("Sürüm: v57 - Gerçek Canlı Sipariş Modu")
 if not sifre:
   st.sidebar.warning("⚠️ Şifre tanımlı değil!")
 
@@ -2489,18 +2532,18 @@ def pazar_ayar(pid):
       st.success("Kaydedildi.")
 
 
-# --- SİPARİŞ YÖNETİMİ VE TÜM AKSİYON BUTONLARI ---
+# --- CANLI SİPARİŞ YÖNETİMİ ---
 def pazar_siparis(pid):
   p = PAZAR[pid]
   st.title(f"{p['ikon']} {p['ad']} Sipariş Yönetimi")
 
-  st.markdown("Siparişlerinizi yönetin, kargo değiştirin, etiket yazdırın veya iptal edin.")
+  st.markdown("Siparişlerinizi canlı API üzerinden çekin, kargo değiştirin, etiket yazdırın veya yönetin.")
   
-  c_ust1, c_ust2 = st.columns([2, 1])
+  c_ust1, _ = st.columns([2, 1])
   with c_ust1:
     if st.button("🔄 Siparişleri Yeniden Çek", type="primary", key=f"sp_cek_{pid}", use_container_width=True):
       try:
-        with st.spinner(f"{p['ad']} siparişleri çekiliyor..."):
+        with st.spinner(f"{p['ad']} canlı siparişleri çekiliyor..."):
           st.session_state[f"sip_{pid}"] = siparis_cek(ayarlar, pid)
           st.success("Siparişler başarıyla güncellendi.")
       except Exception as e:
@@ -2508,27 +2551,10 @@ def pazar_siparis(pid):
 
   liste = st.session_state.get(f"sip_{pid}")
   
-  # Eğer listeleme henüz yapılmadıysa örnek yapı ve aksiyon butonlarını aktif tutuyoruz
+  # Hiç veri çekilmediyse veya sipariş bulunamadıysa
   if liste is None or len(liste) == 0:
-    liste = [
-        {
-            "id": "5531167964",
-            "no": "5531167964",
-            "tarih": "20.10.2026 12:12",
-            "durum": "hazir",
-            "alici": "Fatih SUNGUR",
-            "adres": "Bozyaka, Konak / İzmir",
-            "urunler": [{
-                "ad": "Baseus GAMO D05 Gaming Kulaklık",
-                "sku": "8692810810669",
-                "hb_sku": "HBCV0000I9PV9S",
-                "adet": 4
-            }],
-            "tutar": 1618.20,
-            "kargo": "Sürat Kargo",
-            "barkod": "62955311679648"
-        }
-    ]
+    st.info("Henüz çekilmiş sipariş bulunamadı. Gerçek siparişleri listelemek için yukarıdaki 'Siparişleri Yeniden Çek' butonuna basabilirsiniz.")
+    return
 
   # Sipariş Durum Filtreleri
   sayi_tumu = len(liste)
@@ -2563,11 +2589,15 @@ def pazar_siparis(pid):
   hedef_kod = kod_map[f_secim]
   süzülen_liste = [x for x in liste if hedef_kod is None or x["durum"] == hedef_kod]
 
+  if not süzülen_liste:
+    st.warning("Seçilen filtrede sipariş bulunmuyor.")
+    return
+
   for i, o in enumerate(süzülen_liste, 1):
     with st.container(border=True):
       c_h1, c_h2 = st.columns([3, 1])
       with c_h1:
-        st.markdown(f"### 📦 {o['no']}  ·  {o['tarih']}")
+        st.markdown(f"### 📦 Sipariş No: {o['no']}  ·  {o['tarih']}")
         st.markdown(f"**Alıcı:** {o['alici']}")
       with c_h2:
         st.markdown(f"**Durum:** {DURUM_ETIKET.get(o['durum'], o['durum'])}")
@@ -2576,15 +2606,14 @@ def pazar_siparis(pid):
 
       st.markdown(f"**📍 Adres:** {o['adres']}")
       if o.get("kargo"):
-        st.markdown(f"🚚 **{o['kargo']}** | **BARKOD:** `{o['barkod']}`")
+        st.markdown(f"🚚 **Kargo:** {o['kargo']} | **BARKOD:** `{o['barkod']}`")
 
-      st.markdown("**Ürünler:**")
+      st.markdown("**Sipariş İçi Ürünler:**")
       for u in o["urunler"]:
-        hb_sku_str = f" | HB SKU: `{u['hb_sku']}`" if u.get("hb_sku") else ""
-        st.markdown(f"> **SKU:** `{u['sku']}` | **Adet:** {u['adet']}{hb_sku_str}  \n> {u['ad']}")
+        st.markdown(f"> **SKU/Barkod:** `{u['sku']}` | **Adet:** {u['adet']}  \n> Ürün Adı: **{u['ad']}**")
 
       st.markdown("---")
-      # Fotoğraflardaki Butonlar (Kargo Etiketi, Kargo Değiştir, Paketi Böl, İptal, Siparişi Aktar)
+      # Gerçek Siparişe Özel İşlem Butonları
       b1, b2, b3, b4 = st.columns(4)
       with b1:
         if st.button("🖨️ Kargo Etiketi", key=f"btn_etiket_{pid}_{o['id']}", use_container_width=True):
@@ -2600,7 +2629,7 @@ def pazar_siparis(pid):
           st.warning(f"Sipariş {o['no']} için paket bölme modülü tetiklendi.")
 
       with b4:
-        if st.button("❌ İptal", key=f"btn_iptal_{pid}_{o['id']}", use_container_width=True):
+        if st.button("❌ İptal Et", key=f"btn_iptal_{pid}_{o['id']}", use_container_width=True):
           st.error(f"Sipariş {o['no']} için pazar yeri iptal talebi oluşturuldu.")
 
       if st.session_state.get(f"kargo_degis_{o['id']}"):
