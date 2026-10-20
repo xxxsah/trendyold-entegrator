@@ -376,3 +376,9 @@ def panel(g):
   tid_el = st.text_input("Takip numarasıyla sorgula (uygulama yeniden başladıysa)", key="hbk_tid").strip()
   if tid_el and st.button("🔍 Bu takip numarasını sorgula", key="hbk_tid_btn"):
     goster(h, tid_el)
+def panel(g):
+  import streamlit as st
+
+  st.info(
+      "Hepsiburada katalog modülü aktif. Ürün eşleşmeleri yakında yüklenecek."
+  )
