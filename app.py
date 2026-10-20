@@ -818,7 +818,7 @@ def trendyol_stok_fiyat(seller, key, secret, df):
   return ok, log
 
 
-# --- N11 İŞLEMLERİ ---
+# --- N11 İŞLEMLERİ (CANLI İLERLEME VE PAKET DESTEĞİ İLE GÜNCELLENDİ) ---
 N11_BASE = "https://api.n11.com"
 N11_GOREVLER = _kayit()["n11"]
 
@@ -929,7 +929,7 @@ def n11_urun_listesi(df, ayarlar):
   return liste, atlanan
 
 
-def n11_urun_gonder(ayarlar, liste, ilerleme=None, paket=200):
+def n11_urun_gonder(ayarlar, liste, ilerleme=None, paket=100):
   h = n11_header(kimlik(ayarlar, "n11_key"), kimlik(ayarlar, "n11_secret"))
   toplam = max(1, (len(liste) + paket - 1) // paket)
   loglar, ok = [], 0
@@ -946,12 +946,20 @@ def n11_urun_gonder(ayarlar, liste, ilerleme=None, paket=200):
       )
       j = r.json() if r.text else {}
     except Exception as e:
+      loglar.append(f"⚠️ N11 Paket {no} bağlantı hatası: {e}")
+      if ilerleme:
+        ilerleme(no / toplam, loglar)
       continue
     if r.status_code == 200 and str(j.get("status", "")).upper() != "REJECT":
       ok += 1
+      loglar.append(f"✅ N11 Paket {no}: {len(grup)} ürün iletildi")
       if j.get("id"):
         N11_GOREVLER.append(j["id"])
         del N11_GOREVLER[:-20]
+    else:
+      loglar.append(f"❌ N11 Paket {no} reddedildi (HTTP {r.status_code})")
+    if ilerleme:
+      ilerleme(no / toplam, loglar)
   return ok, toplam, loglar
 
 
@@ -965,19 +973,23 @@ def n11_toplu_panel():
   st.write(f"Gönderilecek ürün: **{len(liste):,}** (Atlanan: {atlanan})")
   if not liste:
     return
+    
+  # Küçük paket boyutu seçimi ekleyerek donma ve timeout sorununu önlüyoruz
+  paket_boyutu = st.selectbox("📦 Paket Boyutu (Güvenli Gönderim)", [50, 100, 200, 500], index=1, key="n11_paket_sec")
+
   if st.button("🚀 N11'e Gönder", type="primary", key="n11_toplu_btn"):
     pbar = st.progress(0.0)
     log_k = st.empty()
 
     def ilerleme(p, loglar):
-      pbar.progress(p)
+      pbar.progress(min(p, 1.0))
       log_k.code("\n".join(loglar[-12:]))
 
-    ok, top, loglar = n11_urun_gonder(ayarlar, liste, ilerleme)
+    ok, top, loglar = n11_urun_gonder(ayarlar, liste, ilerleme, paket=int(paket_boyutu))
     st.success(f"İşlem tamamlandı ({ok}/{top} paket iletildi).")
 
 
-# --- IDEFIX İŞLEMLERİ (DÜZELTİLDİ: Alternatif Batch Sorgulama Endpoint) ---
+# --- IDEFIX İŞLEMLERİ (CANLI İLERLEME VE PAKET DESTEĞİ İLE GÜNCELLENDİ) ---
 ID_BASE = "https://merchantapi.idefix.com"
 IDEFIX_ISLER = _kayit()["idefix"]
 
@@ -1128,10 +1140,18 @@ def idefix_gonder(ayarlar, liste, ilerleme=None, hizli=False, paket=100):
           timeout=120,
       )
     except Exception as e:
+      loglar.append(f"⚠️ İdefix Paket {no} bağlantı hatası: {e}")
+      if ilerleme:
+        ilerleme(no / toplam, loglar)
       continue
     if r.status_code in (200, 201, 202):
       bid = idefix_isle("hizli" if hizli else "create", r)
       basarili += 1
+      loglar.append(f"✅ İdefix Paket {no}: {len(grup)} ürün iletildi (Batch: {bid})")
+    else:
+      loglar.append(f"❌ İdefix Paket {no} hata (HTTP {r.status_code})")
+    if ilerleme:
+      ilerleme(no / toplam, loglar)
   return basarili, toplam, loglar
 
 
@@ -1143,7 +1163,7 @@ def idefix_toplu_panel():
   df = fiyat_artis_uygula(ayarlar, "idefix", df)
   hizli = st.checkbox(
       "⚡ Hızlı Ekleme (İdefix Kataloğunda Barkodu Olan Ürünler İçin)",
-      value=True,
+      value=False,
       key="id_hizli_cb",
   )
   liste, atlanan = (
@@ -1154,15 +1174,18 @@ def idefix_toplu_panel():
   st.write(f"Gönderilecek ürün: **{len(liste):,}** (Atlanan: {atlanan})")
   if not liste:
     return
+    
+  paket_boyutu = st.selectbox("📦 İdefix Paket Boyutu", [50, 100, 200, 500], index=1, key="idefix_paket_sec")
+
   if st.button("🚀 İdefix'e Gönder", type="primary", key="id_toplu_btn"):
     pbar = st.progress(0.0)
     log_k = st.empty()
 
     def ilerleme(p, loglar):
-      pbar.progress(p)
+      pbar.progress(min(p, 1.0))
       log_k.code("\n".join(loglar[-12:]))
 
-    bas, top, loglar = idefix_gonder(ayarlar, liste, ilerleme, hizli)
+    bas, top, loglar = idefix_gonder(ayarlar, liste, ilerleme, hizli, paket=int(paket_boyutu))
     st.success(f"İşlem tamamlandı ({bas}/{top} paket iletildi).")
 
 
@@ -1173,7 +1196,6 @@ def idefix_sonuc_paneli():
     h, v = idefix_header(ayarlar), idefix_vendor(ayarlar)
     for tur, bid in IDEFIX_ISLER[-4:]:
       try:
-        # Alternatif batch sonuç uç noktası denemesi (404 önleyici)
         r = http(
             "GET", f"{ID_BASE}/pim/catalog/{v}/batch-result/{bid}", headers=h, timeout=30
         )
@@ -2001,7 +2023,7 @@ def ac_kapa(pid):
 
 
 st.sidebar.title("👑 ŞahEntegre")
-st.sidebar.caption("Sürüm: v52 - İdefix Alternatif Sorgulama")
+st.sidebar.caption("Sürüm: v53 - Canlı İlerleme ve Paket Optimizasyonu")
 if not sifre:
   st.sidebar.warning("⚠️ Şifre tanımlı değil!")
 
