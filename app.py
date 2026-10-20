@@ -1611,15 +1611,10 @@ def hb_sonuc_paneli():
     }
     for tur, uid in HB_SON[-4:]:
       try:
-        r = http(
-            "GET",
-            (
-                f"{HB_BASE}/listings/merchantid/{kimlik(ayarlar,"
-                f" 'hb_merchant_id')}/{yol[tur]}/id/{uid}"
-            ),
-            headers=hb_header(ayarlar),
-            timeout=60,
-        )
+        merchant_id = kimlik(ayarlar, "hb_merchant_id")
+        hedef_yol = yol[tur]
+        url = f"{HB_BASE}/listings/merchantid/{merchant_id}/{hedef_yol}/id/{uid}"
+        r = http("GET", url, headers=hb_header(ayarlar), timeout=60)
         st.caption(f"{tur} {uid} · HTTP {r.status_code}")
       except Exception as e:
         st.error(f"{tur} {uid}: {e}")
