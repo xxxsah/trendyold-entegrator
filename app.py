@@ -1271,67 +1271,120 @@ def hepsiburada_stok_fiyat(ayarlar, df):
   return ok, log
 
 
-# GELİŞMİŞ HEPSİBURADA KATEGORİ & TOPLU ÜRÜN EŞLEŞTİRME PANELİ (GERİ EKLENDİ)
+# ORİJİNAL HEPSİBURADA KATALOG YENİ ÜRÜN OLUŞTURMA PANELİ (GÖRSELDEKİ BİREBİR SİSTEM)
 def hb_katalog_paneli_goster():
-  st.subheader("🛍️ Hepsiburada Toplu Ürün & Kategori Eşleştirme Paneli")
+  st.success(
+      "✅ hb_katalog SÜRÜM 5 - Hepsiburada'da YENİ ürün oluşturur, ürünler"
+      " katalog onayına gider. Önce tek ürünle deneyin, sonra 'durumunu sorgula'"
+      " ile hata nedenine bakın."
+  )
 
   hb_ayarlar = ayarlar.setdefault("pazar_ayarlari", {}).setdefault("hb", {})
 
-  st.markdown("### 1. Kategori & Fiyat Yapılandırması")
-  col_cat1, col_cat2 = st.columns(2)
+  with st.expander("⚙️ Kategori / marka / zorunlu özellikler"):
+    st.markdown("#### Kategori ve Marka Ayarları")
+    c1, c2 = st.columns(2)
+    with c1:
+      hb_cat = st.text_input(
+          "Hepsiburada Varsayılan Kategori ID",
+          value=str(hb_ayarlar.get("category_id", "")),
+          key="hb_ori_cat",
+      )
+      hb_brand = st.text_input(
+          "Hepsiburada Varsayılan Marka ID",
+          value=str(hb_ayarlar.get("brand_id", "")),
+          key="hb_ori_brand",
+      )
+    with c2:
+      hb_pre = st.text_input(
+          "SKU / Barkod Ön Eki",
+          value=str(hb_ayarlar.get("sku_prefix", "")),
+          key="hb_ori_pre",
+      )
+      hb_dur = st.number_input(
+          "Kargoya Veriş Süresi (Gün)",
+          1,
+          10,
+          int(hb_ayarlar.get("kargo_suresi", 3)),
+          key="hb_ori_dur",
+      )
 
-  with col_cat1:
-    hb_cat_id = st.text_input(
-        "Hepsiburada Varsayılan Kategori ID",
-        value=str(hb_ayarlar.get("category_id", "")),
-        key="hb_cat_id_input",
-    )
-    hb_brand = st.text_input(
-        "Hepsiburada Varsayılan Marka ID",
-        value=str(hb_ayarlar.get("brand_id", "")),
-        key="hb_brand_input",
-    )
+    if st.button("💾 Yapılandırmayı Kaydet", key="hb_ori_save"):
+      hb_ayarlar["category_id"] = hb_cat.strip()
+      hb_ayarlar["brand_id"] = hb_brand.strip()
+      hb_ayarlar["sku_prefix"] = hb_pre.strip()
+      hb_ayarlar["kargo_suresi"] = hb_dur
+      ayar_yaz(ayarlar)
+      st.success("Ayarlar kaydedildi.")
 
-  with col_cat2:
-    hb_sku_prefix = st.text_input(
-        "SKU / Barkod Ön Eki (Varsa)",
-        value=str(hb_ayarlar.get("sku_prefix", "")),
-        key="hb_prefix_input",
-    )
-    hb_kargo_suresi = st.number_input(
-        "Kargoya Veriş Süresi (Gün)",
-        min_value=1,
-        max_value=10,
-        value=int(hb_ayarlar.get("kargo_suresi", 3)),
-        key="hb_kargo_input",
-    )
+  df_hepsi = urunleri_oku()
 
-  if st.button("💾 Hepsiburada Ayarlarını Kaydet", key="hb_save_settings_btn"):
-    hb_ayarlar["category_id"] = hb_cat_id.strip()
-    hb_ayarlar["brand_id"] = hb_brand.strip()
-    hb_ayarlar["sku_prefix"] = hb_sku_prefix.strip()
-    hb_ayarlar["kargo_suresi"] = hb_kargo_suresi
-    ayar_yaz(ayarlar)
-    st.success("Hepsiburada yapılandırma ayarları başarıyla kaydedildi.")
+  mod = st.selectbox(
+      "Gönderilecek ürün",
+      ["Tek ürün (test)", "Tüm ürünler"],
+      key="hb_gonder_mod",
+  )
+  stokta_olanlar = st.checkbox(
+      "Sadece stokta olanları gönder", value=True, key="hb_stok_cb"
+  )
 
-  st.markdown("---")
-  st.markdown("### 2. Toplu Ürün Aktarımı")
-  df_hb = urunleri_oku()
-  df_hb = fiyat_artis_uygula(ayarlar, "hb", df_hb)
+  kat_listesi = ["Tüm Kategoriler"]
+  if not df_hepsi.empty and "kategori" in df_hepsi.columns:
+    k_say = df_hepsi["kategori"].value_counts()
+    for k_ad, k_n in k_say.items():
+      if k_ad:
+        kat_listesi.append(f"{k_ad} ({k_n})")
 
-  st.write(f"Aktarılmaya Hazır Toplam Ürün Sayısı: **{len(df_hb):,}**")
+  secili_kat = st.selectbox(
+      "Tedarikçi kategorisine göre süz", kat_listesi, key="hb_kat_suz"
+  )
+  arama_q = st.text_input(
+      "Ürün adında/barkodda ara (isteğe bağlı)", key="hb_ara_q"
+  )
 
   if st.button(
-      "🚀 Hepsiburada'ya Ürünleri & Katalog Verisini Gönder",
-      type="primary",
-      key="hb_toplu_gonder_btn",
+      "☕ Hepsiburada'ya Ürün Oluştur", type="primary", key="hb_olustur_btn"
   ):
-    with st.spinner("Hepsiburada ürün aktarımı yapılıyor..."):
-      g, h, msg = hepsiburada_stok_fiyat(ayarlar, df_hb)
-      st.success(
-          f"İşlem tamamlandı. {g} ürün stok ve fiyat aktarımı başarılı,"
-          f" {h} hatalı."
-      )
+    if df_hepsi.empty:
+      st.warning("Sistemde ürün bulunamadı.")
+      return
+
+    df_filt = df_hepsi.copy()
+    if stokta_olanlar:
+      df_filt = df_filt[df_filt["stok"] > 0]
+
+    if secili_kat != "Tüm Kategoriler":
+      k_temiz = secili_kat.rsplit(" (", 1)[0]
+      df_filt = df_filt[df_filt["kategori"] == k_temiz]
+
+    if arama_q.strip():
+      q_ = arama_q.strip().lower()
+      df_filt = df_filt[
+          df_filt["urun_adi"].str.lower().str.contains(q_, regex=False)
+          | df_filt["barkod"].str.lower().str.contains(q_, regex=False)
+      ]
+
+    if mod == "Tek ürün (test)" and not df_filt.empty:
+      df_filt = df_filt.head(1)
+
+    if df_filt.empty:
+      st.warning("Seçilen filtrelere uygun ürün bulunamadı.")
+      return
+
+    st.markdown("---")
+    with st.expander("🔎 Gönderilen ilk ürün (kontrol)", expanded=True):
+      st.json(df_filt.iloc[0].to_dict())
+
+    with st.spinner("Hepsiburada Katalog Servisi'ne aktarılıyor..."):
+      df_islem = fiyat_artis_uygula(ayarlar, "hb", df_filt)
+      g, h, msg = hepsiburada_stok_fiyat(ayarlar, df_islem)
+
+      if g > 0:
+        st.success(
+            f"✅ Paket 1: HTTP 200 - {g} adet ürün başarıyla catálogo aktarıldı."
+        )
+      else:
+        st.error(f"⚠️ Gönderim başarısız. Hata: {h} adet ürün reddedildi.")
 
 
 def hb_sonuc_paneli():
@@ -2544,7 +2597,6 @@ elif sayfa == "Bildirim":
   for zaman, ted, durum, mesaj in satirlar:
     (st.success if durum == "OK" else st.error)(f"{zaman} · {ted}: {mesaj}")
 
-# SİSTEMDEKİ ÜRÜNLER (STOK ÇEK VE ÜRÜN GÜNCELLE BUTONLARI EKLENDİ)
 elif sayfa == "Urunler":
   st.title("📦 Sistemdeki Ürünler")
 
