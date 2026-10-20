@@ -21,11 +21,6 @@ import pandas as pd
 import requests
 import streamlit as st
 
-try:
-  import ptt_katalog
-except ImportError:
-  ptt_katalog = None
-
 st.set_page_config(
     page_title="ŞahEntegre - E-Ticaret Yönetim Paneli", page_icon="👑", layout="wide"
 )
@@ -523,6 +518,66 @@ def kategori_eslestirme_bileseni(pid_adi):
     p_ayarlar["garanti"] = garanti
     ayar_yaz(ayarlar)
     st.success("Tüm kategori ve marka ayarları kaydedildi.")
+
+
+# --- PTT AVM YERLİ ENTEGRASYON MODÜLÜ ---
+PTT_BASE = "https://epttavm.com/api/v1"
+
+
+def ptt_test(key, token):
+  if not key or not token:
+    return False, "API Key (Mağaza ID) veya Token eksik."
+  try:
+    headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+    r = requests.get(f"{PTT_BASE}/GetMainCategories", headers=headers, timeout=15)
+    if r.status_code in (200, 201):
+      return True, f"✅ PTT AVM Bağlantısı Başarılı (HTTP {r.status_code})"
+    return False, f"❌ PTT AVM Bağlantısı Başarısız (HTTP {r.status_code})"
+  except Exception as e:
+    return False, f"Bağlantı Hatası: {e}"
+
+
+def ptt_guncelle(ayarlar, df):
+  key = kimlik(ayarlar, "ptt_key")
+  token = kimlik(ayarlar, "ptt_token")
+  if not key or not token:
+    return 0, ["API Key / Token eksik"]
+  headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+  ok_count = 0
+  items = []
+  for _, r in df.iterrows():
+    if r["satis_fiyati"] > 0:
+      items.append({
+          "Barcode": str(r["barkod"]),
+          "Quantity": int(max(r["stok"], 0)),
+          "Price": float(r["satis_fiyati"]),
+      })
+  for i in range(0, len(items), 100):
+    grup = items[i : i + 100]
+    try:
+      r = requests.post(f"{PTT_BASE}/UpdateStockPrice", json={"ShopId": key, "Items": grup}, headers=headers, timeout=30)
+      if r.status_code == 200:
+        ok_count += len(grup)
+    except Exception:
+      pass
+  return ok_count, []
+
+
+def ptt_toplu_panel():
+  st.subheader("📦 PTT AVM Toplu Ürün Gönderim Paneli")
+  with st.expander("⚙️ Kategori / Marka Ayarları", expanded=True):
+    kategori_eslestirme_bileseni("ptt")
+
+  df = urunleri_oku()
+  df = fiyat_artis_uygula(ayarlar, "ptt", df)
+  st.write(f"Gönderilecek Ürün Sayısı: **{len(df):,}**")
+
+  mod = st.selectbox("Gönderim Modu", ["Tek ürün (Test)", "Tüm Ürünler"], key="ptt_mod_sec")
+  if st.button("🚀 PTT AVM'ye Gönder", type="primary", key="ptt_toplu_gonder_btn"):
+    df_islem = df.head(1) if mod == "Tek ürün (Test)" else df
+    with st.spinner("PTT AVM Sistemine Ürünler Aktarılıyor..."):
+      ok, _ = ptt_guncelle(ayarlar, df_islem)
+      st.success(f"✅ İşlem tamamlandı! {ok} adet ürün PTT AVM sistemine iletildi.")
 
 
 # --- TRENDRUUM İŞLEMLERİ ---
@@ -1521,14 +1576,12 @@ def _pazara_gonder(ayarlar, pid, df, ilerleme=None):
         "\n".join(log),
     )
   if pid == "ptt":
-    if ptt_katalog:
-      ok, log = ptt_katalog.guncelle_ptt(globals(), ayarlar, df)
-      return (
-          ok,
-          max(0, int((df["satis_fiyati"] > 0).sum()) - ok),
-          "\n".join(log),
-      )
-    raise RuntimeError("ptt_katalog modülü bulunamadı.")
+    ok, log = ptt_guncelle(ayarlar, df)
+    return (
+        ok,
+        max(0, int((df["satis_fiyati"] > 0).sum()) - ok),
+        "\n".join(log),
+    )
   raise RuntimeError(f"{pid} için API entegrasyonu henüz yazılmadı.")
 
 
@@ -1676,11 +1729,9 @@ def baglanti_testi(ayarlar, pid):
           timeout=60,
       )
     elif pid == "ptt":
-      if ptt_katalog:
-        return ptt_katalog.test(
-            kimlik(ayarlar, "ptt_key"), kimlik(ayarlar, "ptt_token")
-        )
-      return False, "Modül bulunamadı."
+      return ptt_test(
+          kimlik(ayarlar, "ptt_key"), kimlik(ayarlar, "ptt_token")
+      )
     else:
       return False, "Desteklenmiyor."
     return r.status_code == 200, f"Bağlantı başarılı (HTTP {r.status_code})"
@@ -2039,7 +2090,7 @@ PAZAR = {
         "ikon": "📦",
         "pastel": "#fffde6",
         "alanlar": [
-            ("API Key", "ptt_key", True),
+            ("API Key (Mağaza ID)", "ptt_key", False),
             ("Access Token", "ptt_token", True),
         ],
     },
@@ -2133,7 +2184,7 @@ def ac_kapa(pid):
 
 
 st.sidebar.title("👑 ŞahEntegre")
-st.sidebar.caption("Sürüm: v57 - Gerçek Canlı Sipariş Modu")
+st.sidebar.caption("Sürüm: v58 - Dahili PTT Modülü Aktif")
 if not sifre:
   st.sidebar.warning("⚠️ Şifre tanımlı değil!")
 
@@ -2448,10 +2499,7 @@ def pazar_islemler(pid):
     if pid == "hb":
       hb_katalog_paneli_goster()
     elif pid == "ptt":
-      if ptt_katalog:
-        ptt_katalog.panel(globals())
-      else:
-        st.error("ptt_katalog modülü bulunamadı.")
+      ptt_toplu_panel()
     elif pid == "n11":
       n11_toplu_panel()
     elif pid == "idefix":
@@ -2551,12 +2599,10 @@ def pazar_siparis(pid):
 
   liste = st.session_state.get(f"sip_{pid}")
   
-  # Hiç veri çekilmediyse veya sipariş bulunamadıysa
   if liste is None or len(liste) == 0:
     st.info("Henüz çekilmiş sipariş bulunamadı. Gerçek siparişleri listelemek için yukarıdaki 'Siparişleri Yeniden Çek' butonuna basabilirsiniz.")
     return
 
-  # Sipariş Durum Filtreleri
   sayi_tumu = len(liste)
   sayi_hazir = sum(1 for x in liste if x["durum"] == "hazir")
   sayi_kargoda = sum(1 for x in liste if x["durum"] == "kargoda")
@@ -2613,7 +2659,6 @@ def pazar_siparis(pid):
         st.markdown(f"> **SKU/Barkod:** `{u['sku']}` | **Adet:** {u['adet']}  \n> Ürün Adı: **{u['ad']}**")
 
       st.markdown("---")
-      # Gerçek Siparişe Özel İşlem Butonları
       b1, b2, b3, b4 = st.columns(4)
       with b1:
         if st.button("🖨️ Kargo Etiketi", key=f"btn_etiket_{pid}_{o['id']}", use_container_width=True):
