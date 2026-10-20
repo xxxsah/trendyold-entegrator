@@ -22,24 +22,6 @@ import pandas as pd
 import requests
 import streamlit as st
 
-if "hb_katalog" not in sys.modules:
-  hb_katalog_mod = ModuleType("hb_katalog")
-
-
-  def dummy_panel(g):
-    import streamlit as st
-
-    st.info(
-        "Hepsiburada Toplu Ürün Paneli aktif. Ürünler ana listeden yönetilmektedir."
-    )
-
-
-  hb_katalog_mod.panel = dummy_panel
-  sys.modules["hb_katalog"] = hb_katalog_mod
-  hb_katalog = hb_katalog_mod
-else:
-  import hb_katalog
-
 try:
   import ptt_katalog
 except ImportError:
@@ -1600,6 +1582,14 @@ def hepsiburada_stok_fiyat(ayarlar, df):
   return ok, log
 
 
+def hb_katalog_paneli_goster():
+  st.subheader("🛍️ Hepsiburada Toplu Ürün Paneli")
+  st.info(
+      "Hepsiburada entegrasyonu aktif. Stok ve fiyat güncellemeleri ana"
+      " veritabanından anlık olarak yönetilmektedir."
+  )
+
+
 def hb_sonuc_paneli():
   if not HB_SON:
     return
@@ -2581,10 +2571,7 @@ def pazar_islemler(pid):
   elif islem == "toplu":
     if bagli:
       if pid == "hb":
-        if hb_katalog:
-          hb_katalog.panel(globals())
-        else:
-          st.error("hb_katalog modülü bulunamadı.")
+        hb_katalog_paneli_goster()
       elif pid == "ptt":
         if ptt_katalog:
           ptt_katalog.panel(globals())
