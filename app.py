@@ -977,7 +977,7 @@ def n11_toplu_panel():
     st.success(f"İşlem tamamlandı ({ok}/{top} paket iletildi).")
 
 
-# --- IDEFIX İŞLEMLERİ ---
+# --- IDEFIX İŞLEMLERİ (DÜZELTİLDİ: batch-result) ---
 ID_BASE = "https://merchantapi.idefix.com"
 IDEFIX_ISLER = _kayit()["idefix"]
 
@@ -1175,7 +1175,7 @@ def idefix_sonuc_paneli():
       try:
         r = http(
             "GET",
-            f"{ID_BASE}/pim/catalog/{v}/batch-request/{bid}",
+            f"{ID_BASE}/pim/catalog/{v}/batch-result/{bid}",
             headers=h,
             timeout=30,
         )
@@ -1999,7 +1999,7 @@ def ac_kapa(pid):
 
 
 st.sidebar.title("👑 ŞahEntegre")
-st.sidebar.caption("Sürüm: v50 - Tam Sürüm & Sıfır Hata")
+st.sidebar.caption("Sürüm: v51 - İdefix Uyum Güncellemesi")
 if not sifre:
   st.sidebar.warning("⚠️ Şifre tanımlı değil!")
 
@@ -2493,7 +2493,6 @@ elif sayfa == "Bildirim":
 elif sayfa == "Urunler":
   st.title("📦 Sistemdeki Ürünler")
 
-  # --- EKSİKSİZ STOK VE XML ÇEKME BUTONU ---
   btn_col1, btn_col2 = st.columns(2)
   with btn_col1:
     if st.button(
@@ -2548,7 +2547,6 @@ elif sayfa == "Urunler":
         use_container_width=True,
     )
 
-    # --- BARKOD İLE ÜRÜN VE STOK/FİYAT DÜZENLEME PANELİ ---
     st.markdown("---")
     st.subheader("✏️ Elle Ürün / Fiyat Güncelle")
     with st.expander("🛠️ Barkod İle Ürün Bilgisi / Stok / Fiyat Düzenle"):
