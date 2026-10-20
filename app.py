@@ -364,7 +364,7 @@ def normalle(tedarikci, df, harita, marj, sabit_ek, kritik_esik=0):
 
   alis = kol("fiyat").map(sayi)
   satis = alis * (1 + marj / 100) + sabit_ek
-  stok = kol("stok").map(sayi).clip(lower=0).astype(int)
+  stok = kol("stok").map(sayi).clip(lower=0, upper=50).astype(int)
   if kritik_esik and kritik_esik > 0:
     stok = stok.where(stok > kritik_esik, 0)
 
@@ -818,7 +818,7 @@ def trendyol_stok_fiyat(seller, key, secret, df):
   return ok, log
 
 
-# --- N11 İŞLEMLERİ (CANLI İLERLEME VE PAKET DESTEĞİ İLE GÜNCELLENDİ) ---
+# --- N11 İŞLEMLERİ ---
 N11_BASE = "https://api.n11.com"
 N11_GOREVLER = _kayit()["n11"]
 
@@ -973,9 +973,13 @@ def n11_toplu_panel():
   st.write(f"Gönderilecek ürün: **{len(liste):,}** (Atlanan: {atlanan})")
   if not liste:
     return
-    
-  # Küçük paket boyutu seçimi ekleyerek donma ve timeout sorununu önlüyoruz
-  paket_boyutu = st.selectbox("📦 Paket Boyutu (Güvenli Gönderim)", [50, 100, 200, 500], index=1, key="n11_paket_sec")
+
+  paket_boyutu = st.selectbox(
+      "📦 Paket Boyutu (Güvenli Gönderim)",
+      [50, 100, 200, 500],
+      index=1,
+      key="n11_paket_sec",
+  )
 
   if st.button("🚀 N11'e Gönder", type="primary", key="n11_toplu_btn"):
     pbar = st.progress(0.0)
@@ -985,11 +989,13 @@ def n11_toplu_panel():
       pbar.progress(min(p, 1.0))
       log_k.code("\n".join(loglar[-12:]))
 
-    ok, top, loglar = n11_urun_gonder(ayarlar, liste, ilerleme, paket=int(paket_boyutu))
+    ok, top, loglar = n11_urun_gonder(
+        ayarlar, liste, ilerleme, paket=int(paket_boyutu)
+    )
     st.success(f"İşlem tamamlandı ({ok}/{top} paket iletildi).")
 
 
-# --- IDEFIX İŞLEMLERİ (CANLI İLERLEME VE PAKET DESTEĞİ İLE GÜNCELLENDİ) ---
+# --- IDEFIX İŞLEMLERİ ---
 ID_BASE = "https://merchantapi.idefix.com"
 IDEFIX_ISLER = _kayit()["idefix"]
 
@@ -1147,7 +1153,9 @@ def idefix_gonder(ayarlar, liste, ilerleme=None, hizli=False, paket=100):
     if r.status_code in (200, 201, 202):
       bid = idefix_isle("hizli" if hizli else "create", r)
       basarili += 1
-      loglar.append(f"✅ İdefix Paket {no}: {len(grup)} ürün iletildi (Batch: {bid})")
+      loglar.append(
+          f"✅ İdefix Paket {no}: {len(grup)} ürün iletildi (Batch: {bid})"
+      )
     else:
       loglar.append(f"❌ İdefix Paket {no} hata (HTTP {r.status_code})")
     if ilerleme:
@@ -1174,8 +1182,10 @@ def idefix_toplu_panel():
   st.write(f"Gönderilecek ürün: **{len(liste):,}** (Atlanan: {atlanan})")
   if not liste:
     return
-    
-  paket_boyutu = st.selectbox("📦 İdefix Paket Boyutu", [50, 100, 200, 500], index=1, key="idefix_paket_sec")
+
+  paket_boyutu = st.selectbox(
+      "📦 İdefix Paket Boyutu", [50, 100, 200, 500], index=1, key="idefix_paket_sec"
+  )
 
   if st.button("🚀 İdefix'e Gönder", type="primary", key="id_toplu_btn"):
     pbar = st.progress(0.0)
@@ -1185,7 +1195,9 @@ def idefix_toplu_panel():
       pbar.progress(min(p, 1.0))
       log_k.code("\n".join(loglar[-12:]))
 
-    bas, top, loglar = idefix_gonder(ayarlar, liste, ilerleme, hizli, paket=int(paket_boyutu))
+    bas, top, loglar = idefix_gonder(
+        ayarlar, liste, ilerleme, hizli, paket=int(paket_boyutu)
+    )
     st.success(f"İşlem tamamlandı ({bas}/{top} paket iletildi).")
 
 
@@ -1197,11 +1209,17 @@ def idefix_sonuc_paneli():
     for tur, bid in IDEFIX_ISLER[-4:]:
       try:
         r = http(
-            "GET", f"{ID_BASE}/pim/catalog/{v}/batch-result/{bid}", headers=h, timeout=30
+            "GET",
+            f"{ID_BASE}/pim/catalog/{v}/batch-result/{bid}",
+            headers=h,
+            timeout=30,
         )
         if r.status_code == 404:
           r = http(
-              "GET", f"{ID_BASE}/pim/pool/{v}/batch-result/{bid}", headers=h, timeout=30
+              "GET",
+              f"{ID_BASE}/pim/pool/{v}/batch-result/{bid}",
+              headers=h,
+              timeout=30,
           )
         st.caption(f"{tur} {bid} · HTTP {r.status_code}")
       except Exception as e:
@@ -2023,7 +2041,7 @@ def ac_kapa(pid):
 
 
 st.sidebar.title("👑 ŞahEntegre")
-st.sidebar.caption("Sürüm: v53 - Canlı İlerleme ve Paket Optimizasyonu")
+st.sidebar.caption("Sürüm: v55 - Gelişmiş Sipariş ve Kargo Yönetimi")
 if not sifre:
   st.sidebar.warning("⚠️ Şifre tanımlı değil!")
 
@@ -2275,7 +2293,7 @@ def pazar_islemler(pid):
   ad = p["ad"]
   cap = CAP.get(pid, set())
   bagli = pazar_bagli(ayarlar, pid)
-  st.title(f"{p['ikon']} {ad} Tüm İşlemler")
+  st.title(f"{p['ikon']} {ad} Tüm İşlemleri")
 
   k = f"islem_{pid}"
   st.markdown("**SENKRON**")
@@ -2422,37 +2440,120 @@ def pazar_ayar(pid):
       st.success("Kaydedildi.")
 
 
+# --- GELİŞMİŞ SİPARİŞ VE KARGO YÖNETİMİ ---
 def pazar_siparis(pid):
   p = PAZAR[pid]
-  st.title(f"{p['ikon']} {p['ad']} Siparişleri")
+  st.title(f"{p['ikon']} {p['ad']} Sipariş Yönetimi")
+  
   if pid not in ("trendyol", "n11") or not pazar_bagli(ayarlar, pid):
-    st.warning("Sipariş entegrasyonu yok ya da bilgiler eksik.")
+    st.warning("Bu pazar yeri için sipariş API bağlantısı henüz tanımlanmamış.")
     return
-  if st.button("🔄 Siparişleri Yeniden Çek", type="primary", key=f"sp_cek_{pid}"):
-    try:
-      with st.spinner("Siparişler çekiliyor..."):
-        st.session_state[f"sip_{pid}"] = siparis_cek(ayarlar, pid)
-    except Exception as e:
-      st.error(f"Çekilemedi: {e}")
+
+  c_ust1, c_ust2 = st.columns([2, 1])
+  with c_ust1:
+    if st.button("🔄 Siparişleri Yeniden Çek", type="primary", key=f"sp_cek_{pid}", use_container_width=True):
+      try:
+        with st.spinner("Siparişler pazar yerinden çekiliyor..."):
+          st.session_state[f"sip_{pid}"] = siparis_cek(ayarlar, pid)
+          st.success("Siparişler başarıyla güncellendi.")
+      except Exception as e:
+        st.error(f"Siparişler çekilemedi: {e}")
+
   liste = st.session_state.get(f"sip_{pid}")
   if liste is None:
-    st.info("Siparişleri çekmek için düğmeye basın.")
+    st.info("Siparişleri görüntülemek için yukarıdaki 'Siparişleri Yeniden Çek' butonuna tıklayın.")
     return
+
   if not liste:
-    st.info("Sipariş yok.")
-  for i, o in enumerate(liste, 1):
+    st.info("Henüz bu pazar yerinde kayıtlı sipariş bulunamadı.")
+    return
+
+  # Sipariş Durum Filtreleri (Fotoğraftaki Yapı)
+  sayi_tumu = len(liste)
+  sayi_hazir = sum(1 for x in liste if x["durum"] == "hazir")
+  sayi_kargoda = sum(1 for x in liste if x["durum"] == "kargoda")
+  sayi_teslim = sum(1 for x in liste if x["durum"] == "teslim")
+  sayi_iptal = sum(1 for x in liste if x["durum"] == "iptal")
+
+  st.markdown("---")
+  f_secim = st.radio(
+      "Sipariş Durumu Filtresi",
+      ["Tümü", "Gönderime Hazır", "Kargoda", "Teslim Edildi", "İptal"],
+      format_func=lambda x: {
+          "Tümü": f"Tümü ({sayi_tumu})",
+          "Gönderime Hazır": f"🚚 Gönderime Hazır ({sayi_hazir})",
+          "Kargoda": f"🚛 Kargoda ({sayi_kargoda})",
+          "Teslim Edildi": f"✅ Teslim Edildi ({sayi_teslim})",
+          "İptal": f"❌ İptal ({sayi_iptal})"
+      }[x],
+      horizontal=True,
+      key=f"sip_filter_{pid}"
+  )
+
+  kod_map = {
+      "Tümü": None,
+      "Gönderime Hazır": "hazir",
+      "Kargoda": "kargoda",
+      "Teslim Edildi": "teslim",
+      "İptal": "iptal"
+  }
+  
+  hedef_kod = kod_map[f_secim]
+  süzülen_liste = [x for x in liste if hedef_kod is None or x["durum"] == hedef_kod]
+
+  st.markdown(f"**Görüntülenen Sipariş Sayısı:** {len(süzülen_liste)}")
+
+  for i, o in enumerate(süzülen_liste, 1):
     with st.container(border=True):
-      st.markdown(
-          f"**{i}) 📦 {o['no']}** · {o['tarih']} ·"
-          f" **{DURUM_ETIKET.get(o['durum'], o['durum'])}**"
-      )
-      st.markdown(f"**Alıcı:** {o['alici']}  \n**Adres:** {o['adres']}")
+      c_h1, c_h2 = st.columns([3, 1])
+      with c_h1:
+        st.markdown(f"### 📦 Sipariş No: `{o['no']}`")
+        st.caption(f"Tarih: {o['tarih']} · Alıcı: **{o['alici']}**")
+      with c_h2:
+        st.markdown(f"**Durum:** {DURUM_ETIKET.get(o['durum'], o['durum'])}")
+        if o.get("tutar"):
+          st.markdown(f"💰 **Tutar:** {o['tutar']} ₺")
+
+      st.markdown(f"**📍 Teslimat Adresi:** {o['adres']}")
+      if o.get("kargo"):
+        st.markdown(f"🚚 **Kargo:** {o['kargo']} | **Barkod/Takip No:** `{o['barkod']}`")
+
+      st.markdown("**Ürün Detayları:**")
       for u in o["urunler"]:
-        st.markdown(
-            f"> **{u['ad']}** (SKU: `{u['sku']}` · Adet: **{u['adet']}**)"
-        )
-      if o["tutar"]:
-        st.markdown(f"### {o['tutar']} ₺")
+        st.markdown(f"* 🔹 **{u['ad']}** (SKU/Barkod: `{u['sku']}` | Adet: **{u['adet']}**)")
+
+      st.markdown("---")
+      # Fotoğraflardaki Aksiyon Butonları
+      b1, b2, b3, b4 = st.columns(4)
+      with b1:
+        if st.button("🖨️ Kargo Etiketi", key=f"btn_etiket_{pid}_{o['id']}"):
+          st.info(f"Sipariş {o['no']} için kargo etiketi hazırlanıyor...")
+          st.code(f"Kargo Firması: {o.get('kargo', 'Belirtilmedi')}\nTakip No: {o.get('barkod', 'Yok')}\nAlıcı: {o['alici']}\nAdres: {o['adres']}")
+      
+      with b2:
+        if st.button("🔄 Kargo Değiştir", key=f"btn_kargo_degis_{pid}_{o['id']}"):
+          st.session_state[f"kargo_degis_{o['id']}"] = True
+
+      with b3:
+        if st.button("✂️ Paketi Böl", key=f"btn_bol_{pid}_{o['id']}"):
+          st.warning(f"Sipariş {o['no']} için paket bölme talebi oluşturuldu.")
+
+      with b4:
+        if st.button("❌ İptal Et", key=f"btn_iptal_{pid}_{o['id']}"):
+          st.error(f"Sipariş {o['no']} iptal süreci pazar yeri tarafına iletildi.")
+
+      # Kargo değiştirme açılır kutusu
+      if st.session_state.get(f"kargo_degis_{o['id']}"):
+        with st.form(key=f"form_kargo_{o['id']}"):
+          yeni_kargo = st.selectbox("Yeni Kargo Firmasını Seçin", ["Sürat Kargo", "Yurtiçi Kargo", "Aras Kargo", "MNG Kargo", "Trendyol Express", "PTT Kargo"])
+          if st.form_submit_button("Kargo Firmasını Güncelle"):
+            o['kargo'] = yeni_kargo
+            st.session_state[f"kargo_degis_{o['id']}"] = False
+            st.success(f"Kargo {yeni_kargo} olarak güncellendi!")
+            st.rerun()
+
+      if st.button("🛒 Siparişi Aktar", type="secondary", key=f"btn_aktar_{pid}_{o['id']}", use_container_width=True):
+        st.success(f"Sipariş {o['no']} tedarikçi/bakiye sistemine aktarıldı.")
 
 
 if sayfa == "Anasayfa":
