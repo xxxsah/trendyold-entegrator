@@ -977,7 +977,7 @@ def n11_toplu_panel():
     st.success(f"İşlem tamamlandı ({ok}/{top} paket iletildi).")
 
 
-# --- IDEFIX İŞLEMLERİ (DÜZELTİLDİ: batch-result) ---
+# --- IDEFIX İŞLEMLERİ (DÜZELTİLDİ: Alternatif Batch Sorgulama Endpoint) ---
 ID_BASE = "https://merchantapi.idefix.com"
 IDEFIX_ISLER = _kayit()["idefix"]
 
@@ -1173,12 +1173,14 @@ def idefix_sonuc_paneli():
     h, v = idefix_header(ayarlar), idefix_vendor(ayarlar)
     for tur, bid in IDEFIX_ISLER[-4:]:
       try:
+        # Alternatif batch sonuç uç noktası denemesi (404 önleyici)
         r = http(
-            "GET",
-            f"{ID_BASE}/pim/catalog/{v}/batch-result/{bid}",
-            headers=h,
-            timeout=30,
+            "GET", f"{ID_BASE}/pim/catalog/{v}/batch-result/{bid}", headers=h, timeout=30
         )
+        if r.status_code == 404:
+          r = http(
+              "GET", f"{ID_BASE}/pim/pool/{v}/batch-result/{bid}", headers=h, timeout=30
+          )
         st.caption(f"{tur} {bid} · HTTP {r.status_code}")
       except Exception as e:
         st.error(f"{tur} {bid}: {e}")
@@ -1999,7 +2001,7 @@ def ac_kapa(pid):
 
 
 st.sidebar.title("👑 ŞahEntegre")
-st.sidebar.caption("Sürüm: v51 - İdefix Uyum Güncellemesi")
+st.sidebar.caption("Sürüm: v52 - İdefix Alternatif Sorgulama")
 if not sifre:
   st.sidebar.warning("⚠️ Şifre tanımlı değil!")
 
