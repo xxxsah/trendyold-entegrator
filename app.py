@@ -10,6 +10,7 @@ import sys
 import threading
 import time
 import urllib.request
+import uuid
 import xml.etree.ElementTree as ET
 from collections import Counter
 from contextlib import closing
@@ -520,7 +521,7 @@ def kategori_eslestirme_bileseni(pid_adi):
     st.success("Tüm kategori ve marka ayarları kaydedildi.")
 
 
-# --- PTT AVM YERLİ ENTEGRASYON MODÜLÜ ---
+# --- PTT AVM YERLİ ENTEGRASYON MODÜLÜ (Dinamik X-Correlation-Id Destekli) ---
 PTT_BASE = "https://epttavm.com/api/v1"
 
 
@@ -528,7 +529,13 @@ def ptt_test(key, token):
   if not key or not token:
     return False, "API Key (Mağaza ID) veya Token eksik."
   try:
-    headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+    # PTT AVM'nin şart koştuğu dinamik X-Correlation-Id başlığı entegre edildi
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "ApiKey": key,
+        "Content-Type": "application/json",
+        "X-Correlation-Id": str(uuid.uuid4())
+    }
     r = requests.get(f"{PTT_BASE}/GetMainCategories", headers=headers, timeout=15)
     if r.status_code in (200, 201):
       return True, f"✅ PTT AVM Bağlantısı Başarılı (HTTP {r.status_code})"
@@ -542,7 +549,14 @@ def ptt_guncelle(ayarlar, df):
   token = kimlik(ayarlar, "ptt_token")
   if not key or not token:
     return 0, ["API Key / Token eksik"]
-  headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+  
+  headers = {
+      "Authorization": f"Bearer {token}",
+      "ApiKey": key,
+      "Content-Type": "application/json",
+      "X-Correlation-Id": str(uuid.uuid4())
+  }
+  
   ok_count = 0
   items = []
   for _, r in df.iterrows():
