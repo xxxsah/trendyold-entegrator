@@ -529,7 +529,6 @@ def ptt_test(key, token):
   if not key or not token:
     return False, "API Key (Mağaza ID) veya Token eksik."
   try:
-    # PTT AVM'nin şart koştuğu dinamik X-Correlation-Id başlığı entegre edildi
     headers = {
         "Authorization": f"Bearer {token}",
         "ApiKey": key,
@@ -2480,13 +2479,13 @@ def pazar_islemler(pid):
           "Kritik stok eşiği",
           1,
           50,
-          int(ayarlar.get("kritik_esik") or 2),
+          int(ayarlar.get("kritik_esik") or 3),
           key=f"ke_{pid}",
       )
       with closing(baglan()) as c:
+        # CAST ile güvenli sayı dönüşümlü kritik stok sorgusu
         df_k = pd.read_sql(
-            "SELECT barkod, stok, satis_fiyati FROM urunler WHERE stok > 0 AND"
-            " stok <= ?",
+            "SELECT barkod, stok, satis_fiyati FROM urunler WHERE CAST(stok AS INTEGER) > 0 AND CAST(stok AS INTEGER) <= ?",
             c,
             params=(int(esik),),
         )
@@ -2498,8 +2497,9 @@ def pazar_islemler(pid):
           disabled=not (onay and bagli and len(df_k) > 0),
       ):
         with closing(baglan()) as c:
+          # CAST ile veritabanında sayı tipine göre stok sıfırlama
           c.execute(
-              "UPDATE urunler SET stok = 0 WHERE stok > 0 AND stok <= ?",
+              "UPDATE urunler SET stok = 0 WHERE CAST(stok AS INTEGER) > 0 AND CAST(stok AS INTEGER) <= ?",
               (int(esik),),
           )
           c.commit()
@@ -2525,7 +2525,7 @@ def pazar_islemler(pid):
   with closing(baglan()) as c:
     toplam = c.execute("SELECT COUNT(*) FROM urunler").fetchone()[0]
     stokta = c.execute(
-        "SELECT COUNT(*) FROM urunler WHERE stok > 0"
+        "SELECT COUNT(*) FROM urunler WHERE CAST(stok AS INTEGER) > 0"
     ).fetchone()[0]
     ok_n = c.execute(
         "SELECT COUNT(*) FROM pazar_durum WHERE pazar=? AND durum='ok'", (pid,)
@@ -2701,24 +2701,24 @@ def pazar_siparis(pid):
             st.rerun()
 
       st.markdown(" ")
-      if st.button("🛒 Siparişi Aktar", type="primary", key=f"btn_aktar_{pid}_{o['id']}", use_container_width=True):
+      if st.button("🛒 Siparişi Aktar", type="primary", key="btn_aktar_{pid}_{o['id']}", use_container_width=True):
         st.success(f"Sipariş {o['no']} tedarikçi/bakiye sistemine başarıyla aktarıldı.")
 
 
 if sayfa == "Anasayfa":
   st.title("👑 Mağaza ve Pazar Yeri Özeti")
   df = urunleri_oku()
-  esik = kritik_esik_ayari() or 2
+  esik = kritik_esik_ayari() or 3
 
   c1, c2, c3, c4 = st.columns(4)
   c1.metric("Toplam Ürün", f"{len(df):,}")
   c2.metric(
       "Stokta Olanlar",
-      f"{(df['stok'] > 0).sum():,}" if not df.empty else "0",
+      f"{(pd.to_numeric(df['stok'], errors='coerce').fillna(0) > 0).sum():,}" if not df.empty else "0",
   )
   c3.metric(
       f"Kritik Stok (≤{esik})",
-      f"{df['stok'].between(1, esik).sum():,}" if not df.empty else "0",
+      f"{(pd.to_numeric(df['stok'], errors='coerce').fillna(0).between(1, esik)).sum():,}" if not df.empty else "0",
   )
   c4.metric("Tedarikçi", len(ayarlar["tedarikciler"]))
 
@@ -2792,7 +2792,7 @@ elif sayfa == "Urunler":
     st.info("Henüz sistemde ürün yok.")
   else:
     st.caption(
-        f"Toplam ürün: {len(df):,} · Stokta: {int((df['stok'] > 0).sum()):,}"
+        f"Toplam ürün: {len(df):,} · Stokta: {int((pd.to_numeric(df['stok'], errors='coerce').fillna(0) > 0).sum()):,}"
     )
 
     arama = st.text_input("🔍 Ürün Adı veya Barkod ile Ara", key="urun_arama")
@@ -2857,12 +2857,41 @@ elif sayfa == "Urunler":
 elif sayfa == "Kritik":
   st.title("🔄 Oto Kritik Stok")
   esik = st.number_input(
-      "Kritik stok eşiği", 0, 50, kritik_esik_ayari(), key="kr_esik"
+      "Kritik stok eşiği (ve altındakileri sıfırla):", 0, 50, kritik_esik_ayari() or 3, key="kr_esik"
   )
   if int(esik) != kritik_esik_ayari():
     ayarlar["kritik_esik"] = int(esik)
     ayar_yaz(ayarlar)
-    st.success("Kaydedildi.")
+    st.success("Kritik stok eşiği güncellendi.")
+
+  with closing(baglan()) as c:
+    # Sayısal dönüşüm kullanarak kritik stoktaki ürünleri tespiti
+    df_kritik_genel = pd.read_sql(
+        "SELECT id, gorsel, barkod, urun_adi, stok, satis_fiyati, tedarikci FROM urunler WHERE CAST(stok AS INTEGER) > 0 AND CAST(stok AS INTEGER) <= ?",
+        c,
+        params=(int(esik),),
+    )
+
+  st.subheader(f"⚠️ Eşik Değerine ({esik}) Düşen Ürün Sayısı: {len(df_kritik_genel)} Adet")
+  
+  if not df_kritik_genel.empty:
+    st.dataframe(
+        df_kritik_genel[["gorsel", "urun_adi", "barkod", "stok", "satis_fiyati", "tedarikci"]],
+        column_config={"gorsel": st.column_config.ImageColumn("Görsel")},
+        use_container_width=True,
+        hide_index=True
+    )
+    if st.button("🚨 Kritik Stoktaki Tüm Ürünlerin Stoğunu 0 Yap ve Güncelle", type="primary", key="btn_genel_kritik_sifirlla"):
+      with closing(baglan()) as c:
+        c.execute(
+            "UPDATE urunler SET stok = 0 WHERE CAST(stok AS INTEGER) > 0 AND CAST(stok AS INTEGER) <= ?",
+            (int(esik),),
+        )
+        c.commit()
+      st.success(f"✅ Toplam {len(df_kritik_genel)} adet ürünün stoğu veritabanında 0 yapıldı!")
+      st.rerun()
+  else:
+    st.info("👍 Şu an kritik eşik değerinde sıfırlanacak ürün bulunmuyor.")
 
 elif sayfa == "Ayarlar":
   st.title("⚙️ Ayarlar")
