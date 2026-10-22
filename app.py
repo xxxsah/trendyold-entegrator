@@ -1078,7 +1078,7 @@ def n11_toplu_panel():
     st.success(f"İşlem tamamlandı ({ok}/{top} paket iletildi).")
 
 
-# --- IDEFIX İŞLEMLERİ ---
+# --- İDEFİX İŞLEMLERİ ---
 ID_BASE = "https://merchantapi.idefix.com"
 IDEFIX_ISLER = _kayit()["idefix"]
 
@@ -2483,7 +2483,6 @@ def pazar_islemler(pid):
           key=f"ke_{pid}",
       )
       with closing(baglan()) as c:
-        # CAST ile güvenli sayı dönüşümlü kritik stok sorgusu
         df_k = pd.read_sql(
             "SELECT barkod, stok, satis_fiyati FROM urunler WHERE CAST(stok AS INTEGER) > 0 AND CAST(stok AS INTEGER) <= ?",
             c,
@@ -2497,7 +2496,6 @@ def pazar_islemler(pid):
           disabled=not (onay and bagli and len(df_k) > 0),
       ):
         with closing(baglan()) as c:
-          # CAST ile veritabanında sayı tipine göre stok sıfırlama
           c.execute(
               "UPDATE urunler SET stok = 0 WHERE CAST(stok AS INTEGER) > 0 AND CAST(stok AS INTEGER) <= ?",
               (int(esik),),
@@ -2791,6 +2789,13 @@ elif sayfa == "Urunler":
   if df.empty:
     st.info("Henüz sistemde ürün yok.")
   else:
+    # Tedarikçi filtresi için seçenekleri hazırla
+    tedarikci_secenekleri = ["Tüm Tedarikçiler"] + sorted(df["tedarikci"].dropna().unique().tolist())
+    secilen_tedarikci_filtre = st.selectbox("🏢 Tedarikçiye Göre Filtrele", tedarikci_secenekleri, key="urunler_tedarikci_filtre")
+
+    if secilen_tedarikci_filtre != "Tüm Tedarikçiler":
+      df = df[df["tedarikci"] == secilen_tedarikci_filtre]
+
     st.caption(
         f"Toplam ürün: {len(df):,} · Stokta: {int((pd.to_numeric(df['stok'], errors='coerce').fillna(0) > 0).sum()):,}"
     )
@@ -2805,7 +2810,9 @@ elif sayfa == "Urunler":
 
     SB = 50
     tp = max(1, (len(df) + SB - 1) // SB)
-    sn = st.number_input(f"Sayfa (1-{tp})", 1, tp, 1, key="urun_sayfa")
+    
+    # Pratik sayfa atlama kutusu
+    sn = st.number_input(f"Sayfa (1-{tp}) - Doğrudan sayfa numarası yazabilirsiniz", 1, tp, 1, key="urun_sayfa")
 
     st.dataframe(
         df.iloc[(sn - 1) * SB : sn * SB][[
@@ -2865,7 +2872,6 @@ elif sayfa == "Kritik":
     st.success("Kritik stok eşiği güncellendi.")
 
   with closing(baglan()) as c:
-    # Sayısal dönüşüm kullanarak kritik stoktaki ürünleri tespiti
     df_kritik_genel = pd.read_sql(
         "SELECT id, gorsel, barkod, urun_adi, stok, satis_fiyati, tedarikci FROM urunler WHERE CAST(stok AS INTEGER) > 0 AND CAST(stok AS INTEGER) <= ?",
         c,
