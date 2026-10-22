@@ -521,24 +521,23 @@ def kategori_eslestirme_bileseni(pid_adi):
     st.success("Tüm kategori ve marka ayarları kaydedildi.")
 
 
-# --- PTT AVM YERLİ ENTEGRASYON MODÜLÜ (Dinamik X-Correlation-Id Destekli) ---
-PTT_BASE = "https://epttavm.com/api/v1"
+# --- PTT AVM GÜNCEL RESMİ ENTEGRASYON MODÜLÜ (Ayşegül Hanım Formatı) ---
+PTT_BASE = "https://integration-api.pttavm.com/api/v1"
 
 
 def ptt_test(key, token):
   if not key or not token:
-    return False, "API Key (Mağaza ID) veya Token eksik."
+    return False, "API Key (Shop ID) veya Token eksik."
   try:
     headers = {
-        "Authorization": f"Bearer {token}",
-        "ApiKey": key,
-        "Content-Type": "application/json",
-        "X-Correlation-Id": str(uuid.uuid4())
+        "access-token": token,
+        "api-key": key,
+        "Accept": "application/json"
     }
-    r = requests.get(f"{PTT_BASE}/GetMainCategories", headers=headers, timeout=15)
+    r = requests.get(f"{PTT_BASE}/categories/main", headers=headers, timeout=15)
     if r.status_code in (200, 201):
       return True, f"✅ PTT AVM Bağlantısı Başarılı (HTTP {r.status_code})"
-    return False, f"❌ PTT AVM Bağlantısı Başarısız (HTTP {r.status_code})"
+    return False, f"❌ PTT AVM Bağlantısı Başarısız (HTTP {r.status_code}): {r.text}"
   except Exception as e:
     return False, f"Bağlantı Hatası: {e}"
 
@@ -550,10 +549,10 @@ def ptt_guncelle(ayarlar, df):
     return 0, ["API Key / Token eksik"]
   
   headers = {
-      "Authorization": f"Bearer {token}",
-      "ApiKey": key,
-      "Content-Type": "application/json",
-      "X-Correlation-Id": str(uuid.uuid4())
+      "access-token": token,
+      "api-key": key,
+      "Accept": "application/json",
+      "Content-Type": "application/json"
   }
   
   ok_count = 0
@@ -568,7 +567,7 @@ def ptt_guncelle(ayarlar, df):
   for i in range(0, len(items), 100):
     grup = items[i : i + 100]
     try:
-      r = requests.post(f"{PTT_BASE}/UpdateStockPrice", json={"ShopId": key, "Items": grup}, headers=headers, timeout=30)
+      r = requests.post(f"{PTT_BASE}/product/price-stock-update", json={"items": grup}, headers=headers, timeout=30)
       if r.status_code == 200:
         ok_count += len(grup)
     except Exception:
