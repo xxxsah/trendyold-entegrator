@@ -170,7 +170,6 @@ if aktif_sayfa == "Anasayfa":
   st.subheader("🛒 Pazar Yeri Yönetim Kutuları")
   st.write("Aşağıdaki pazar yeri kartlarına tıklayarak doğrudan mağaza ayarlarınıza ve işlemlerinize ulaşabilirsiniz:")
 
-  # Pazar yeri görsel kutuları (Grid yapısı)
   cols = st.columns(2)
   for i, (pid, p) in enumerate(PAZARLAR.items()):
     with cols[i % 2]:
@@ -183,11 +182,13 @@ if aktif_sayfa == "Anasayfa":
       
       b1, b2 = st.columns(2)
       with b1:
-        if st.button(f"⚙️ Ayarlar", key=btn_key1 := f"home_ayar_{pid}", use_container_width=True):
+        btn_key1 = f"home_ayar_{pid}"
+        if st.button("⚙️ Ayarlar", key=btn_key1, use_container_width=True):
           pazar_sayfa_degistir(pid, "ayar")
           st.rerun()
       with b2:
-        if st.button(f"🚀 İşlemler", key=btn_key2 := f"home_isl_{pid}", use_container_width=True):
+        btn_key2 = f"home_isl_{pid}"
+        if st.button("🚀 İşlemler", key=btn_key2, use_container_width=True):
           pazar_sayfa_degistir(pid, "islemler")
           st.rerun()
 
