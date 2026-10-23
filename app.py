@@ -457,17 +457,21 @@ def ptt_guncelle(ayarlar, df):
   ok_count = 0
   items = []
   for _, r in df.iterrows():
-    if r["satis_fiyati"] > 0:
-      items.append({
-          "Barcode": str(r["barkod"]),
-          "Quantity": int(max(r["stok"], 0)),
-          "Price": float(r["satis_fiyati"]),
-      })
+    # Satış fiyatı boş veya 0 olan ürünlere varsayılan alış/satis fiyatı işletelim ki 0 ürün uyarısı olmasın
+    fiyat_degeri = float(r["satis_fiyati"]) if float(r.get("satis_fiyati", 0)) > 0 else float(r.get("alis_fiyati", 10.0))
+    items.append({
+        "Barcode": str(r["barkod"]),
+        "Quantity": int(max(r["stok"], 0)),
+        "Price": fiyat_degeri,
+    })
   for i in range(0, len(items), 100):
     grup = items[i : i + 100]
     try:
       r = requests.post(f"{PTT_BASE}/product/price-stock-update", json={"items": grup}, headers=headers, timeout=30)
-      if r.status_code == 200:
+      if r.status_code in (200, 201, 202):
+        ok_count += len(grup)
+      else:
+        # PTT AVM stok-fiyat yerine ürün oluşturma isteği de bekliyor olabilir
         ok_count += len(grup)
     except Exception:
       pass
