@@ -386,7 +386,7 @@ def fiyat_artis_uygula(ayarlar, pid, df):
   df["satis_fiyati"] = df["satis_fiyati"].round(2)
   return df
 
-# --- TRENDRUUM CANLI KATEGORİ ÇEKME YARDIMCISI ---
+# --- TRENDRUUM DERİNLEMESİNE CANLI KATEGORİ ÇEKİCİ ---
 def trendruum_kategorileri_getir():
   try:
     key = kimlik(ayarlar, "trendruum_key")
@@ -397,14 +397,24 @@ def trendruum_kategorileri_getir():
     headers = {"Authorization": f"Bearer {token}"}
     r = http("GET", f"{TR_BASE}/categories", headers=headers, timeout=30)
     if r.status_code == 200:
-      veriler = r.json().get("data") or r.json().get("categories") or r.json() or []
+      j = r.json()
+      veriler = j.get("data") or j.get("categories") or j if isinstance(j, list) else []
       sonuc = []
-      if isinstance(veriler, list):
-        for item in veriler:
-          cid = str(item.get("id") or item.get("_id") or "")
-          ad = str(item.get("name") or item.get("title") or "")
-          if cid and ad:
-            sonuc.append({"id": cid, "ad": ad})
+
+      def ozyinelemeli_tara(dizi):
+        if not isinstance(dizi, list):
+          return
+        for item in dizi:
+          if isinstance(item, dict):
+            cid = str(item.get("id") or item.get("_id") or "")
+            ad = str(item.get("name") or item.get("title") or "")
+            if cid and ad and len(cid) == 24:
+              sonuc.append({"id": cid, "ad": ad})
+            alt = item.get("children") or item.get("sub_categories") or item.get("categories")
+            if alt:
+              ozyinelemeli_tara(alt)
+
+      ozyinelemeli_tara(veriler)
       return sonuc
   except Exception:
     pass
@@ -435,11 +445,10 @@ def kategori_eslestirme_bileseni(pid_adi):
 
   if k_ara.strip():
     if pid_adi == "trendruum":
-      # Trendruum için CANLI API Kategorilerini Çekip Filtreleyelim
-      st.info(f"🔍 Trendruum canlı sisteminde '{k_ara}' kategorileri aranıyor...")
+      st.info(f"🔍 Trendruum canlı sisteminde '{k_ara}' kategorileri taranıyor...")
       canli_katlar = trendruum_kategorileri_getir()
       uygunlar = [x for x in canli_katlar if k_ara.lower() in x["ad"].lower()]
-      
+
       if uygunlar:
         secilen_obj = st.selectbox(
             "Trendruum Canlı Kategorileri",
@@ -453,7 +462,7 @@ def kategori_eslestirme_bileseni(pid_adi):
           ayar_yaz(ayarlar)
           st.success(f"✅ Trendruum Kategorisi Bağlandı: {secilen_obj['ad']} (ID: {secilen_obj['id']})")
       else:
-        st.warning("Trendruum API'sinde bu isimde özel kategori bulunamadı. Manuel Kategori ID girebilirsiniz.")
+        st.warning("Trendruum canlı ağacında bu isimde kategori bulunamadı. Manuel Kategori ID girebilirsiniz.")
         manuel_id = st.text_input("24 Haneli Trendruum Kategori ID", key="tr_manuel_cat_id")
         if st.button("Manuel ID Kaydet", key="tr_manuel_btn"):
           if len(manuel_id.strip()) == 24:
@@ -463,7 +472,6 @@ def kategori_eslestirme_bileseni(pid_adi):
           else:
             st.error("Kategori ID 24 haneli olmalıdır.")
     else:
-      # Diğer Pazaryerleri için Standart Seçim
       secilen_kat = st.selectbox(
           "Sonuçlar",
           [
@@ -612,8 +620,8 @@ def trendruum_urun_listesi(df, ayarlar, brand_id, varsayilan_cat):
   harita = ayarlar.get("kategori_eslesme", {})
   uret, kdv = tr_ayar(ayarlar)
   pa = (ayarlar.get("pazar_ayarlari") or {}).get("trendruum") or {}
-  seçili_canlı_cat = pa.get("category_id")
-  
+  secili_canli_cat = pa.get("category_id")
+
   liste, atlanan = [], 0
   for _, row in df.iterrows():
     gorsel = str(row["gorsel"]).strip()
@@ -622,15 +630,12 @@ def trendruum_urun_listesi(df, ayarlar, brand_id, varsayilan_cat):
     if not gorsel or row["satis_fiyati"] <= 0 or not barkod:
       atlanan += 1
       continue
-    
+
     ana = str(row.get("kategori", "")).split(">>>")[0].strip()
-    
-    # 1. Öncelik: Seçilen Canlı 24 Haneli Kategori ID
-    # 2. Öncelik: Kategori Eşleştirme Tablosu
-    # 3. Öncelik: Varsayılan Kategori ID
+
     hedef_cat_id = varsayilan_cat
-    if seçili_canlı_cat and objectid_mi(seçili_canlı_cat):
-      hedef_cat_id = seçili_canlı_cat
+    if secili_canli_cat and objectid_mi(secili_canli_cat):
+      hedef_cat_id = secili_canli_cat
     elif objectid_mi(harita.get(ana)):
       hedef_cat_id = str(harita.get(ana)).strip()
 
@@ -1882,7 +1887,7 @@ def ac_kapa(pid):
   st.session_state["acik_pazar"] = None if st.session_state.get("acik_pazar") == pid else pid
 
 st.sidebar.title("🦅 ŞahEntegre")
-st.sidebar.caption("Sürüm: v60 - Trendruum Canlı Kategori Entegrasyonu")
+st.sidebar.caption("Sürüm: v61 - Derinlemesine Kategori Ağacı")
 
 def cikis_yap():
   st.session_state.giris_ok = False
