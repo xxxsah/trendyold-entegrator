@@ -238,7 +238,7 @@ elif aktif_sayfa == "Tedarikciler":
   if ayarlar["tedarikciler"]:
     st.markdown("---")
     st.subheader("Kayıtlı Tedarikçiler")
-    for t_ ad, t_bilgi in list(ayarlar["tedarikciler"].items()):
+    for t_ad, t_bilgi in list(ayarlar["tedarikciler"].items()):
       with st.expander(f"🏢 {t_ad}"):
         st.write(f"**XML Linki:** {t_bilgi.get('link')}")
         st.write(f"**Kâr Marjı:** %{t_bilgi.get('marj')} | **Sabit Ek:** {t_bilgi.get('sabit_ek')} TL")
