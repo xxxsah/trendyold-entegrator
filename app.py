@@ -621,7 +621,7 @@ def trendruum_guncelle(df, token, ilerleme=None, uret=False):
     grup = items[i : i + 1000]
     try:
       r = http("POST", f"{TR_BASE}/products/bulk-update", json={"products": grup}, headers=headers, timeout=120)
-    except Exception as e:
+    except Exception:
       hata += len(grup)
       hata_s |= {x["barcode"] for x in grup}
       continue
@@ -733,7 +733,6 @@ def trendyol_stok_fiyat(seller, key, secret, df):
   return ok, log
 
 N11_BASE = "https://api.n11.com"
-N11_GOREVLER = _kayit()["n11"]
 
 def n11_header(key, secret):
   return {"appKey": key, "appSecret": secret, "Content-Type": "application/json"}
@@ -875,7 +874,6 @@ def n11_toplu_panel():
     st.success(f"İşlem tamamlandı ({ok}/{top} paket iletildi).")
 
 ID_BASE = "https://merchantapi.idefix.com"
-IDEFIX_ISLER = _kayit()["idefix"]
 
 def idefix_ayar(ayarlar):
   return (ayarlar.get("pazar_ayarlari", {}) or {}).get("idefix", {}) or {}
@@ -1514,7 +1512,7 @@ PAZAR = {
     "hb": {"ad": "Hepsiburada", "renk": "#ff6000", "ikon": "🛍️", "pastel": "#fff3ed"},
     "trendyol": {"ad": "Trendyol", "renk": "#f27a1a", "ikon": "🧡", "pastel": "#fff4ec"},
     "n11": {"ad": "N11", "renk": "#5015ff", "ikon": "🔴", "pastel": "#f0ebff"},
-    "idefix": {"ad": "İdefix", "ikon": "#00a651", "ikon": "📚", "pastel": "#e6f9ed"},
+    "idefix": {"ad": "İdefix", "renk": "#00a651", "ikon": "📚", "pastel": "#e6f9ed"},
     "ptt": {"ad": "PTT AVM", "renk": "#ffcd00", "ikon": "📦", "pastel": "#fffde6"},
     "trendruum": {"ad": "Trendruum", "renk": "#8b5cf6", "ikon": "🛒", "pastel": "#f5f3ff"},
 }
@@ -1651,7 +1649,6 @@ def tedarikci_sayfasi():
     with st.expander(f"🏢 {ad}"):
       st.text(f"Link: {bilgi['link'][:60]}...")
       
-      # XML İndirme ve Yedekleme Butonları
       c_ind1, c_ind2 = st.columns(2)
       with c_ind1:
         if st.button(f"📥 XML Dosyasını İndir", key=f"xml_indir_{ad}"):
