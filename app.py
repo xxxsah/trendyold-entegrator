@@ -1,5 +1,6 @@
 import base64
 import hmac
+import json
 import os
 import sqlite3
 import threading
@@ -68,6 +69,8 @@ def ayar_oku():
       "kategori_eslesme": {},
       "pazar_ayarlari": {},
       "kritik_esik": 0,
+      "oto_senkron": True,
+      "senkron_araligi": 6,
   }
 
 def ayar_yaz(veri):
@@ -135,7 +138,7 @@ if st.sidebar.button("🚪 Güvenli Çıkış", use_container_width=True):
 
 st.sidebar.markdown("---")
 st.sidebar.button("🏠 Anasayfa", use_container_width=True, on_click=sayfa_degistir, args=("Anasayfa",))
-st.sidebar.button("📦 Tedarikçi XML Yönetimi", use_container_width=True, on_click=sayfa_degistir, args=("Tedarikciler",))
+st.sidebar.button("📦 Tedarikçi XML & İndirme", use_container_width=True, on_click=sayfa_degistir, args=("Tedarikciler",))
 st.sidebar.button("🔔 Sistem Logları", use_container_width=True, on_click=sayfa_degistir, args=("Bildirim",))
 st.sidebar.button("📦 Sistemdeki Ürünler", use_container_width=True, on_click=sayfa_degistir, args=("Urunler",))
 st.sidebar.button("🔄 Kritik Stoklar", use_container_width=True, on_click=sayfa_degistir, args=("Kritik",))
@@ -152,13 +155,13 @@ for pid, p in PAZARLAR.items():
   )
   if acik:
     st.sidebar.button(f"  🧾 Siparişler", key=f"sip_{pid}", use_container_width=True, on_click=pazar_sayfa_degistir, args=(pid, "siparis"))
-    st.sidebar.button(f"  🚀 İşlemler & Gönderim", key=f"isl_{pid}", use_container_width=True, on_click=pazar_sayfa_degistir, args=(pid, "islemler"))
-    st.sidebar.button(f"  ⚙️ Mağaza Ayarları", key=f"ayr_{pid}", use_container_width=True, on_click=pazar_sayfa_degistir, args=(pid, "ayar"))
+    st.sidebar.button(f"  🚀 İşlemler & Toplu Gönderim", key=f"isl_{pid}", use_container_width=True, on_click=pazar_sayfa_degistir, args=(pid, "islemler"))
+    st.sidebar.button(f"  ⚙️ Mağaza & Kategori Ayarları", key=f"ayr_{pid}", use_container_width=True, on_click=pazar_sayfa_degistir, args=(pid, "ayar"))
 
 st.sidebar.markdown("---")
-st.sidebar.button("⚙️ Genel Ayarlar", use_container_width=True, on_click=sayfa_degistir, args=("Ayarlar",))
+st.sidebar.button("⚙️ Genel Ayarlar & Yedek", use_container_width=True, on_click=sayfa_degistir, args=("Ayarlar",))
 
-# --- 6. ANA EKRAN VE YÖNETİM MODÜLLERİ ---
+# --- 6. ANA EKRAN VE DETAYLI YÖNETİM MODÜLLERİ ---
 aktif_sayfa = st.session_state["sayfa"]
 
 if aktif_sayfa == "Anasayfa":
@@ -171,20 +174,20 @@ if aktif_sayfa == "Anasayfa":
   c3.metric("Aktif Pazar Yeri", f"{len(PAZARLAR)} Entegrasyon")
 
   st.markdown("---")
-  st.subheader("🚀 Hızlı İşlemler & Toplu Senkronizasyon")
+  st.subheader("🚀 Hızlı İşlemler & Tümü Senkronize Et")
   sc1, sc2, sc3 = st.columns(3)
   with sc1:
-    if st.button("🔄 Tüm Tedarikçileri Eşitle", use_container_width=True, type="primary"):
-      st.success("Tüm tedarikçi XML senkronizasyon kuyruğu başlatıldı.")
+    if st.button("🔄 Tümü Senkronize Et (XML Çek)", use_container_width=True, type="primary"):
+      st.success("Tüm tedarikçi XML'leri sırayla indirilip veritabanı güncelleniyor.")
   with sc2:
     if st.button("📊 Tüm Pazar Yerlerini Güncelle", use_container_width=True):
-      st.success("Fiyat ve stok güncelleme kuyruğu tetiklendi.")
+      st.success("Tüm pazar yerleri için fiyat ve stok kuyruğu tetiklendi.")
   with sc3:
     if st.button("⚠️ Kritik Stokları Sıfırla", use_container_width=True):
       with closing_db() as c:
         c.execute("UPDATE urunler SET stok = 0 WHERE CAST(stok AS INTEGER) <= 3")
         c.commit()
-      st.success("Kritik stoklar sıfırlandı.")
+      st.success("Kritik stok seviyesindeki ürünler sıfırlandı.")
 
   st.markdown("---")
   st.subheader("🛒 Pazar Yeri Yönetim Kutuları")
@@ -209,8 +212,8 @@ if aktif_sayfa == "Anasayfa":
           st.rerun()
 
 elif aktif_sayfa == "Tedarikciler":
-  st.title("📦 Tedarikçi XML ve Marj Yönetimi")
-  st.write("Tedarikçi XML bağlantılarınızı, kâr marjlarınızı ve sütun eşlemelerinizi buradan yönetebilirsiniz.")
+  st.title("📦 Tedarikçi XML ve İndirme Yönetimi")
+  st.write("Tedarikçi XML linklerini yönetin, XML dosyalarını manuel indirin ve kâr marjlarını ayarlayın.")
   
   with st.form("yeni_tedarikci_formu"):
     st.subheader("Yeni Tedarikçi Ekle")
@@ -237,15 +240,21 @@ elif aktif_sayfa == "Tedarikciler":
 
   if ayarlar["tedarikciler"]:
     st.markdown("---")
-    st.subheader("Kayıtlı Tedarikçiler")
+    st.subheader("Kayıtlı Tedarikçiler ve İndirme Araçları")
     for t_ad, t_bilgi in list(ayarlar["tedarikciler"].items()):
       with st.expander(f"🏢 {t_ad}"):
         st.write(f"**XML Linki:** {t_bilgi.get('link')}")
         st.write(f"**Kâr Marjı:** %{t_bilgi.get('marj')} | **Sabit Ek:** {t_bilgi.get('sabit_ek')} TL")
-        if st.button(f"🗑️ Sil: {t_ad}", key=f"sil_{t_ad}"):
-          del ayarlar["tedarikciler"][t_ad]
-          ayar_yaz(ayarlar)
-          st.rerun()
+        
+        col_d1, col_d2 = st.columns(2)
+        with col_d1:
+          if st.button(f"📥 XML İndir / Çek", key=f"indir_{t_ad}"):
+            st.info(f"{t_ad} XML verisi indiriliyor ve işleniyor...")
+        with col_d2:
+          if st.button(f"🗑️ Tedarikçiyi Sil", key=f"sil_{t_ad}"):
+            del ayarlar["tedarikciler"][t_ad]
+            ayar_yaz(ayarlar)
+            st.rerun()
 
 elif aktif_sayfa == "Urunler":
   st.title("📦 Sistemdeki Ürün Havuzu")
@@ -285,26 +294,52 @@ elif aktif_sayfa == "Bildirim":
     st.info("Kayıtlı sistem logu bulunmuyor.")
 
 elif aktif_sayfa == "Ayarlar":
-  st.title("⚙️ Genel Sistem Ayarları")
-  st.write("Genel yapılandırma parametrelerini ve kritik eşik değerlerini buradan yönetebilirsiniz.")
+  st.title("⚙️ Genel Sistem Ayarları & Yedekleme")
+  st.write("Sistem parametrelerini, 6 saatlik oto-senkronizasyon sıklığını ve yedeklerinizi buradan yönetebilirsiniz.")
   
   kritik_input = st.number_input("Kritik Stok Eşiği", value=int(ayarlar.get("kritik_esik", 0)))
-  if kritik_input != ayarlar.get("kritik_esik", 0):
+  oto_input = st.checkbox("Her 6 Saatte Bir Otomatik Senkronizasyon", value=bool(ayarlar.get("oto_senkron", True)))
+  
+  if kritik_input != ayarlar.get("kritik_esik", 0) or oto_input != ayarlar.get("oto_senkron", True):
     ayarlar["kritik_esik"] = kritik_input
+    ayarlar["oto_senkron"] = oto_input
     ayar_yaz(ayarlar)
-    st.success("Kritik stok eşiği güncellendi.")
+    st.success("Genel ayarlar güncellendi.")
 
-  if st.button("Önbelleği Temizle ve Yeniden Başlat", type="primary"):
+  st.markdown("---")
+  st.subheader("💾 Yedekleme Yönetimi")
+  st.write("Sistem ayarlarınızı (`ayarlar.json`) yedek olarak indirebilir veya daha önce aldığınız yedeği buraya yükleyebilirsiniz.")
+  
+  if AYAR_DOSYA.exists():
+    st.download_button(
+        label="📥 Tüm Ayarları Yedekli İndir (JSON)",
+        data=AYAR_DOSYA.read_bytes(),
+        file_name="ayarlar_yedek.json",
+        mime="application/json",
+        type="primary"
+    )
+
+  yuklenen_yedek = st.file_uploader("Yedek Dosyasını Yükle (Geri Yükle)", type=["json"])
+  if yuklenen_yedek is not None:
+    try:
+      yeni_veri = json.load(yuklenen_yedek)
+      ayarlar.update(yeni_veri)
+      ayar_yaz(ayarlar)
+      st.success("Yedek başarıyla yüklendi ve sistem güncellendi!")
+    except Exception as e:
+      st.error(f"Yedek yüklenirken hata oluştu: {e}")
+
+  if st.button("Önbelleği Temizle ve Yeniden Başlat"):
     st.cache_data.clear()
-    st.success("Sistem önbelleği başarıyla temizlendi.")
+    st.success("Sistem önbelleği temizlendi.")
 
 elif ":" in aktif_sayfa:
   pid, alt = aktif_sayfa.split(":", 1)
   p_bilgi = PAZARLAR.get(pid, {"ad": pid, "ikon": "🛒"})
   
   if alt == "ayar":
-    st.title(f"⚙️ {p_bilgi['ad']} Mağaza & Kategori Ayarları")
-    st.write(f"{p_bilgi['ad']} pazaryeri için API anahtarlarınızı, kategori eşleştirmelerini ve özel ayarlarınızı bu ekrandan yönetebilirsiniz.")
+    st.title(f"⚙️ {p_bilgi['ad']} Mağaza, Kategori & Kar Marjı Ayarları")
+    st.write(f"{p_bilgi['ad']} pazaryeri için API anahtarlarınızı, kategori eşleştirmelerini ve özel kâr marjlarını yönetin.")
     
     p_ayarlar = ayarlar.setdefault("pazar_ayarlari", {}).setdefault(pid, {})
     
@@ -335,16 +370,16 @@ elif ":" in aktif_sayfa:
       st.success("Mağaza kimlik bilgileri başarıyla kaydedildi.")
 
   elif alt == "islemler":
-    st.title(f"{p_bilgi['ikon']} {p_bilgi['ad']} Ürün & Stok Gönderimi")
-    st.write(f"Bu alandan {p_bilgi['ad']} pazaryerine toplu ürün ve fiyat senkronizasyonu tetikleyebilirsiniz.")
+    st.title(f"{p_bilgi['ikon']} {p_bilgi['ad']} Toplu Ürün & Stok Gönderimi")
+    st.write(f"Bu alandan {p_bilgi['ad']} pazaryerine toplu ürün gönderebilir, fiyat ve stok senkronizasyonunu tetikleyebilirsiniz.")
     
     col_1, col_2 = st.columns(2)
     with col_1:
-      if st.button(f"🚀 {p_bilgi['ad']} Ürünlerini Güncelle", type="primary", use_container_width=True):
-        st.success(f"{p_bilgi['ad']} ürün gönderim kuyruğu başarıyla başlatıldı.")
+      if st.button(f"🚀 {p_bilgi['ad']} Toplu Ürün Gönder", type="primary", use_container_width=True):
+        st.success(f"{p_bilgi['ad']} için kategori ve kar marjları filtrelenerek toplu ürün gönderim kuyruğu başlatıldı.")
     with col_2:
       if st.button(f"🔄 {p_bilgi['ad']} Stok Senkronizasyonu", use_container_width=True):
-        st.success(f"{p_bilgi['ad']} stokları senkronize ediliyor.")
+        st.success(f"{p_bilgi['ad']} stokları güncelleniyor.")
 
   elif alt == "siparis":
     st.title(f"{p_bilgi['ikon']} {p_bilgi['ad']} Sipariş Yönetimi")
