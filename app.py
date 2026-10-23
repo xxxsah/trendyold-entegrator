@@ -11,9 +11,9 @@ import pandas as pd
 import requests
 import streamlit as st
 
-# --- 1. SAĞLAM ALTYAPI VE SAYFA YAPILANDIRMASI ---
+# --- 1. SAGLAM ALTYAPI VE SAYFA YAPILANDIRMASI ---
 st.set_page_config(
-    page_title="ŞahEntegre - Profesyonel E-Ticaret Yönetim Paneli",
+    page_title="SahEntegre - Profesyonel E-Ticaret Yonetim Paneli",
     page_icon="👑",
     layout="wide",
 )
@@ -22,7 +22,7 @@ BASE = Path(__file__).parent
 DB_DOSYA = BASE / "metentegre.db"
 AYAR_DOSYA = BASE / "ayarlar.json"
 
-# --- 2. GÜVENLİK VE GİRİŞ KONTROLÜ ---
+# --- 2. GUVENLIK VE GIRIS KONTROLU ---
 sifre = os.environ.get("APP_PASSWORD") or (
     str(st.secrets.get("APP_PASSWORD"))
     if "APP_PASSWORD" in st.secrets
@@ -37,20 +37,20 @@ if sifre and not st.session_state.get("giris_ok"):
   _, orta, _ = st.columns([1, 1.4, 1])
   with orta:
     st.markdown(
-        "<h3 style='color: white;'>🦅 ŞahEntegre Güvenli Giriş</h3>",
+        "<h3 style='color: white;'>🦅 SahEntegre Guvenli Giris</h3>",
         unsafe_allow_html=True,
     )
     with st.form("giris_formu"):
-      girilen = st.text_input("Yönetici Şifresi", type="password")
-      if st.form_submit_button("Giriş Yap", type="primary", use_container_width=True):
+      girilen = st.text_input("Yonetic Sifresi", type="password")
+      if st.form_submit_button("Giris Yap", type="primary", use_container_width=True):
         if hmac.compare_digest(girilen.encode(), str(sifre).encode()):
           st.session_state.giris_ok = True
           st.rerun()
         else:
-          st.error("Hatalı şifre. Lütfen tekrar deneyin.")
+          st.error("Hatali sifre. Lutfen tekrar deneyin.")
   st.stop()
 
-# --- 3. VERİTABANI VE AYAR YÖNETİCİSİ ---
+# --- 3. VERITABANI VE AYAR YONETICISI ---
 def baglan():
   conn = sqlite3.connect(DB_DOSYA, timeout=30)
   conn.execute("PRAGMA journal_mode=WAL")
@@ -97,7 +97,7 @@ from contextlib import closing
 def closing_db():
   return closing(baglan())
 
-# --- 4. PAZAR YERİ TANIMLARI VE YÖNETİMİ ---
+# --- 4. PAZAR YERI TANIMLARI VE YONETIMI ---
 PAZARLAR = {
     "trendruum": {"ad": "Trendruum", "ikon": "🛒", "renk": "#8b5cf6"},
     "trendyol": {"ad": "Trendyol", "ikon": "🧡", "renk": "#f27a1a"},
@@ -123,10 +123,10 @@ def pazar_menu_ac_kapa(pid):
   else:
     st.session_state["acik_pazar"] = pid
 
-# --- 5. YAN MENÜ (SIDEBAR) ---
-st.sidebar.title("🦅 ŞahEntegre")
-st.sidebar.caption("Profesyonel E-Ticaret Yönetimi")
-if st.sidebar.button("🚪 Güvenli Çıkış", use_container_width=True):
+# --- 5. YAN MENU (SIDEBAR) ---
+st.sidebar.title("🦅 SahEntegre")
+st.sidebar.caption("Profesyonel E-Ticaret Yonetimi")
+if st.sidebar.button("🚪 Guvenli Cikis", use_container_width=True):
   st.session_state.giris_ok = False
   st.rerun()
 
@@ -138,13 +138,13 @@ st.sidebar.button(
     args=("Anasayfa",),
 )
 st.sidebar.button(
-    "🔔 Sistem Logları",
+    "🔔 Sistem Loglari",
     use_container_width=True,
     on_click=sayfa_degistir,
     args=("Bildirim",),
 )
 st.sidebar.button(
-    "📦 Sistemdeki Ürünler",
+    "📦 Sistemdeki Urunler",
     use_container_width=True,
     on_click=sayfa_degistir,
     args=("Urunler",),
@@ -168,21 +168,21 @@ for pid, p in PAZARLAR.items():
   )
   if acik:
     st.sidebar.button(
-        f"  🧾 Siparişler",
+        f"  🧾 Siparisler",
         key=f"sip_{pid}",
         use_container_width=True,
         on_click=pazar_sayfa_degistir,
         args=(pid, "siparis"),
     )
     st.sidebar.button(
-        f"  🚀 İşlemler & Gönderim",
+        f"  🚀 Islemler & Gonderim",
         key=f"isl_{pid}",
         use_container_width=True,
         on_click=pazar_sayfa_degistir,
         args=(pid, "islemler"),
     )
     st.sidebar.button(
-        f"  ⚙️ Mağaza Ayarları",
+        f"  ⚙️ Magaza Ayarlari",
         key=f"ayr_{pid}",
         use_container_width=True,
         on_click=pazar_sayfa_degistir,
@@ -197,17 +197,17 @@ st.sidebar.button(
     args=("Ayarlar",),
 )
 
-# --- 6. ANA EKRAN YÖNETİCİSİ ---
- aktif_sayfa = st.session_state["sayfa"]
+# --- 6. ANA EKRAN YONETICISI ---
+aktif_sayfa = st.session_state["sayfa"]
 
 if aktif_sayfa == "Anasayfa":
-  st.title("👑 ŞahEntegre Kontrol Paneli")
+  st.title("👑 SahEntegre Kontrol Paneli")
   df = urunleri_oku()
   c1, c2, c3 = st.columns(3)
   c1.metric(
-      "Toplam Aktif Ürün",
+      "Toplam Aktif Urun",
       f"{len(df):,}" if not df.empty else "0",
-      help="Veritabanındaki toplam ürün sayısı",
+      help="Veritabanindaki toplam urun sayisi",
   )
   c2.metric(
       "Stokta Olanlar",
@@ -219,13 +219,13 @@ if aktif_sayfa == "Anasayfa":
 
   st.markdown("---")
   st.info(
-      "💡 **Altyapı Durumu:** Sistem modüler ve kararlı mimariyle çalışmaktadır."
-      " Trendruum 24 haneli Kategori ID desteği ve tüm pazar yeri API"
-      " yönlendiricileri hazırdır."
+      "💡 **Altyapi Durumu:** Sistem moduler ve kararli mimariyle calismaktadir."
+      " Trendruum 24 haneli Kategori ID destegi ve tum pazar yeri API"
+      " yonlendiricileri hazirdir."
   )
 
 elif aktif_sayfa == "Urunler":
-  st.title("📦 Sistemdeki Ürün Havuzu")
+  st.title("📦 Sistemdeki Urun Havuzu")
   df = urunleri_oku()
   if not df.empty:
     st.dataframe(
@@ -237,14 +237,14 @@ elif aktif_sayfa == "Urunler":
             "satis_fiyati",
             "tedarikci",
         ]],
-        column_config={"gorsel": st.column_config.ImageColumn("Görsel")},
+        column_config={"gorsel": st.column_config.ImageColumn("Gorsel")},
         hide_index=True,
         use_container_width=True,
     )
   else:
     st.warning(
-        "Henüz veritabanında ürün bulunmuyor. Lütfen tedarikçi XML senkronizasyonu"
-        " yapın."
+        "Henuz veritabaninda urun bulunmuyor. Lutfen tedarikci XML senkronizasyonu"
+        " yapin."
     )
 
 elif aktif_sayfa == "Kritik":
@@ -259,10 +259,10 @@ elif aktif_sayfa == "Kritik":
   if not df_k.empty:
     st.dataframe(df_k, hide_index=True, use_container_width=True)
   else:
-    st.success("Kritik seviyede stok bulunan ürün yok.")
+    st.success("Kritik seviyede stok bulunan urun yok.")
 
 elif aktif_sayfa == "Bildirim":
-  st.title("🔔 Sistem Logları ve Geçmişi")
+  st.title("🔔 Sistem Loglari ve Gecmisi")
   with closing_db() as c:
     try:
       df_log = pd.read_sql(
@@ -273,33 +273,32 @@ elif aktif_sayfa == "Bildirim":
   if not df_log.empty:
     st.dataframe(df_log, hide_index=True, use_container_width=True)
   else:
-    st.info("Kayıtlı sistem logu bulunmuyor.")
+    st.info("Kayitli sistem logu bulunmuyor.")
 
 elif aktif_sayfa == "Ayarlar":
-  st.title("⚙️ Genel Sistem Ayarları")
+  st.title("⚙️ Genel Sistem Ayarlari")
   st.write(
-      "Genel yapılandırma parametrelerini buradan yönetebilirsiniz. Pazar"
-      " yeri özel anahtarları için sol menüden ilgili pazarın 'Mağaza"
-      " Ayarları' sekmesini kullanın."
+      "Genel yapilandirma parametrelerini buradan yonetebilirsiniz. Pazar"
+      " yeri ozel anahtarlari icin sol menuden ilgili pazarin 'Magaza"
+      " Ayarlari' sekmesini kullanin."
   )
-  if st.button("Önbelleği Temizle ve Yeniden Başlat", type="primary"):
+  if st.button("Onbellegi Temizle ve Yeniden Baslat", type="primary"):
     st.cache_data.clear()
-    st.success("Sistem önbelleği başarıyla temizlendi.")
+    st.success("Sistem onbellegi basariyla temizlendi.")
 
 elif ":" in aktif_sayfa:
   pid, alt = aktif_sayfa.split(":", 1)
   p_bilgi = PAZARLAR.get(pid, {"ad": pid, "ikon": "🛒"})
   
   if alt == "ayar":
-    st.title(f"⚙️ {p_bilgi['ad']} Mağaza Ayarları")
+    st.title(f"⚙️ {p_bilgi['ad']} Magaza Ayarlari")
     p_ayarlar = ayarlar.setdefault("pazar_ayarlari", {}).setdefault(pid, {})
     
-    # Özel alanlar
-    k1 = st.text_input("API Key / Client ID / Mağaza ID", value=kimlik_al(f"{pid}_key"), type="password")
+    k1 = st.text_input("API Key / Client ID / Magaza ID", value=kimlik_al(f"{pid}_key"), type="password")
     k2 = st.text_input("API Secret / Token", value=kimlik_al(f"{pid}_secret"), type="password")
     
     if pid == "trendruum":
-      st.info("💡 Trendruum için doğrudan 24 haneli Kategori ID'nizi sabitleyebilirsiniz.")
+      st.info("💡 Trendruum icin dogrudan 24 haneli Kategori ID'nizi sabitleyebilirsiniz.")
       manuel_cat = st.text_input("24 Haneli Trendruum Kategori ID", value=p_ayarlar.get("category_id", ""))
       if manuel_cat != p_ayarlar.get("category_id", ""):
         p_ayarlar["category_id"] = manuel_cat.strip()
@@ -309,15 +308,15 @@ elif ":" in aktif_sayfa:
       ayarlar["kimlik"][f"{pid}_key"] = k1.strip()
       ayarlar["kimlik"][f"{pid}_secret"] = k2.strip()
       ayar_yaz(ayarlar)
-      st.success("Mağaza kimlik bilgileri başarıyla kaydedildi.")
+      st.success("Magaza kimlik bilgileri basariyla kaydedildi.")
 
   elif alt == "islemler":
-    st.title(f"{p_bilgi['ikon']} {p_bilgi['ad']} Ürün & Stok Gönderimi")
-    st.write(f"Bu alandan {p_bilgi['ad']} pazaryerine toplu ürün ve fiyat senkronizasyonu tetikleyebilirsiniz.")
-    if st.button(f"🚀 {p_bilgi['ad']} Ürünlerini Güncelle", type="primary"):
-      st.success(f"{p_bilgi['ad']} gönderim kuyruğu başarıyla başlatıldı.")
+    st.title(f"{p_bilgi['ikon']} {p_bilgi['ad']} Urun & Stok Gonderimi")
+    st.write(f"Bu alandan {p_bilgi['ad']} pazaryerine toplu urun ve fiyat senkronizasyonu tetikleyebilirsiniz.")
+    if st.button(f"🚀 {p_bilgi['ad']} Urunlerini Guncelle", type="primary"):
+      st.success(f"{p_bilgi['ad']} gonderim kuyrugu basariyla baslatildi.")
 
   elif alt == "siparis":
-    st.title(f"{p_bilgi['ikon']} {p_bilgi['ad']} Sipariş Yönetimi")
-    if st.button(f"🔄 {p_bilgi['ad']} Siparişlerini Çek", type="primary"):
-      st.info("Siparişler sorgulanıyor...")
+    st.title(f"{p_bilgi['ikon']} {p_bilgi['ad']} Siparis Yonetimi")
+    if st.button(f"🔄 {p_bilgi['ad']} Siparislerini Cek", type="primary"):
+      st.info("Siparisler sorgulaniyor...")
