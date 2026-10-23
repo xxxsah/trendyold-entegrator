@@ -386,6 +386,30 @@ def fiyat_artis_uygula(ayarlar, pid, df):
   df["satis_fiyati"] = df["satis_fiyati"].round(2)
   return df
 
+# --- TRENDRUUM CANLI KATEGORİ ÇEKME YARDIMCISI ---
+def trendruum_kategorileri_getir():
+  try:
+    key = kimlik(ayarlar, "trendruum_key")
+    secret = kimlik(ayarlar, "trendruum_secret")
+    if not key or not secret:
+      return []
+    token = trendruum_token(key, secret)
+    headers = {"Authorization": f"Bearer {token}"}
+    r = http("GET", f"{TR_BASE}/categories", headers=headers, timeout=30)
+    if r.status_code == 200:
+      veriler = r.json().get("data") or r.json().get("categories") or r.json() or []
+      sonuc = []
+      if isinstance(veriler, list):
+        for item in veriler:
+          cid = str(item.get("id") or item.get("_id") or "")
+          ad = str(item.get("name") or item.get("title") or "")
+          if cid and ad:
+            sonuc.append({"id": cid, "ad": ad})
+      return sonuc
+  except Exception:
+    pass
+  return []
+
 def kategori_eslestirme_bileseni(pid_adi):
   p_ayarlar = ayarlar.setdefault("pazar_ayarlari", {}).setdefault(pid_adi, {})
   c1, c2 = st.columns(2)
@@ -408,21 +432,52 @@ def kategori_eslestirme_bileseni(pid_adi):
         value=int(p_ayarlar.get("garanti", 24)),
         key=f"{pid_adi}_garanti_input",
     )
+
   if k_ara.strip():
-    st.info(f"🔍 '{k_ara}' aramasına uygun kategoriler getiriliyor...")
-    secilen_kat = st.selectbox(
-        "Sonuçlar",
-        [
-            f"Bilgisayar > Aksesuarlar > Tablet ve iPad Aksesuarları > {k_ara.capitalize()} Cihazları",
-            f"Elektronik > Aksesuar > {k_ara.capitalize()}",
-            f"Diğer > Genel > {k_ara.capitalize()}",
-        ],
-        key=f"{pid_adi}_sonuc_kat",
-    )
-    if st.button("Bu kategoriyi kullan", key=f"{pid_adi}_kat_kullan"):
-      p_ayarlar["secilen_kategori"] = secilen_kat
-      ayar_yaz(ayarlar)
-      st.success(f"Kategori başarıyla seçildi: {secilen_kat}")
+    if pid_adi == "trendruum":
+      # Trendruum için CANLI API Kategorilerini Çekip Filtreleyelim
+      st.info(f"🔍 Trendruum canlı sisteminde '{k_ara}' kategorileri aranıyor...")
+      canli_katlar = trendruum_kategorileri_getir()
+      uygunlar = [x for x in canli_katlar if k_ara.lower() in x["ad"].lower()]
+      
+      if uygunlar:
+        secilen_obj = st.selectbox(
+            "Trendruum Canlı Kategorileri",
+            uygunlar,
+            format_func=lambda x: f"{x['ad']} (ID: {x['id']})",
+            key=f"{pid_adi}_sonuc_kat_canli"
+        )
+        if st.button("Bu kategoriyi kullan", key=f"{pid_adi}_kat_kullan"):
+          p_ayarlar["category_id"] = secilen_obj["id"]
+          p_ayarlar["secilen_kategori_adi"] = secilen_obj["ad"]
+          ayar_yaz(ayarlar)
+          st.success(f"✅ Trendruum Kategorisi Bağlandı: {secilen_obj['ad']} (ID: {secilen_obj['id']})")
+      else:
+        st.warning("Trendruum API'sinde bu isimde özel kategori bulunamadı. Manuel Kategori ID girebilirsiniz.")
+        manuel_id = st.text_input("24 Haneli Trendruum Kategori ID", key="tr_manuel_cat_id")
+        if st.button("Manuel ID Kaydet", key="tr_manuel_btn"):
+          if len(manuel_id.strip()) == 24:
+            p_ayarlar["category_id"] = manuel_id.strip()
+            ayar_yaz(ayarlar)
+            st.success(f"Kategori ID kaydedildi: {manuel_id.strip()}")
+          else:
+            st.error("Kategori ID 24 haneli olmalıdır.")
+    else:
+      # Diğer Pazaryerleri için Standart Seçim
+      secilen_kat = st.selectbox(
+          "Sonuçlar",
+          [
+              f"Bilgisayar > Aksesuarlar > Tablet ve iPad Aksesuarları > {k_ara.capitalize()} Cihazları",
+              f"Elektronik > Aksesuar > {k_ara.capitalize()}",
+              f"Diğer > Genel > {k_ara.capitalize()}",
+          ],
+          key=f"{pid_adi}_sonuc_kat",
+      )
+      if st.button("Bu kategoriyi kullan", key=f"{pid_adi}_kat_kullan"):
+        p_ayarlar["secilen_kategori"] = secilen_kat
+        ayar_yaz(ayarlar)
+        st.success(f"Kategori başarıyla seçildi: {secilen_kat}")
+
   if st.button("Özellikleri kaydet", key=f"{pid_adi}_ozellik_kaydet"):
     p_ayarlar["marka_adi"] = marka_adi
     p_ayarlar["kdv"] = kdv_oran
@@ -481,7 +536,6 @@ def ptt_toplu_panel():
     kategori_eslestirme_bileseni("ptt")
 
   df = urunleri_oku()
-  # Tedarikçi filtresi ekleme
   if not df.empty and "tedarikci" in df.columns:
     ted_list = sorted(df["tedarikci"].dropna().unique().tolist())
     secilen_teds = st.multiselect("Gönderilecek Tedarikçileri Seçin", ted_list, default=ted_list, key="ptt_ted_sec")
@@ -557,6 +611,9 @@ def trendruum_siparisler(ayarlar):
 def trendruum_urun_listesi(df, ayarlar, brand_id, varsayilan_cat):
   harita = ayarlar.get("kategori_eslesme", {})
   uret, kdv = tr_ayar(ayarlar)
+  pa = (ayarlar.get("pazar_ayarlari") or {}).get("trendruum") or {}
+  seçili_canlı_cat = pa.get("category_id")
+  
   liste, atlanan = [], 0
   for _, row in df.iterrows():
     gorsel = str(row["gorsel"]).strip()
@@ -565,11 +622,22 @@ def trendruum_urun_listesi(df, ayarlar, brand_id, varsayilan_cat):
     if not gorsel or row["satis_fiyati"] <= 0 or not barkod:
       atlanan += 1
       continue
+    
     ana = str(row.get("kategori", "")).split(">>>")[0].strip()
+    
+    # 1. Öncelik: Seçilen Canlı 24 Haneli Kategori ID
+    # 2. Öncelik: Kategori Eşleştirme Tablosu
+    # 3. Öncelik: Varsayılan Kategori ID
+    hedef_cat_id = varsayilan_cat
+    if seçili_canlı_cat and objectid_mi(seçili_canlı_cat):
+      hedef_cat_id = seçili_canlı_cat
+    elif objectid_mi(harita.get(ana)):
+      hedef_cat_id = str(harita.get(ana)).strip()
+
     liste.append({
         "name": str(row["urun_adi"]),
         "model_code": kod,
-        "category_id": str(harita.get(ana) or "").strip() if objectid_mi(harita.get(ana)) else varsayilan_cat,
+        "category_id": hedef_cat_id,
         "brand_id": brand_id,
         "children_products": [{
             "barcode": barkod,
@@ -1624,7 +1692,7 @@ def sifre_al():
 
 sifre = sifre_al()
 
-# --- ŞAHENTEGRE OTURUM VE ORTALANMIŞ GİRİŞ EKRANI (F5 KAPANMAZ) ---
+# --- OTURUM VE EKRAN TASARIMI ---
 if sifre and not st.session_state.get("giris_ok"):
   st.markdown(
       """<style>
@@ -1645,7 +1713,7 @@ if sifre and not st.session_state.get("giris_ok"):
     deneme = st.session_state.get("deneme", 0)
     kilit_bitis = st.session_state.get("kilit_bitis", 0)
     if time.time() < kilit_bitis:
-      st.error(f"⚠️ Çok fazla hatalй deneme. {int(kilit_bitis - time.time())} sn bekleyin.")
+      st.error(f"⚠️ Çok fazla hatalı deneme. {int(kilit_bitis - time.time())} sn bekleyin.")
     else:
       with st.form("giris_formu"):
         girilen = st.text_input("🔑 Yönetici Şifresi", type="password", placeholder="••••••••")
@@ -1814,9 +1882,8 @@ def ac_kapa(pid):
   st.session_state["acik_pazar"] = None if st.session_state.get("acik_pazar") == pid else pid
 
 st.sidebar.title("🦅 ŞahEntegre")
-st.sidebar.caption("Sürüm: v59 - Tedarikçi Filtre & Oturum Güncellendi")
+st.sidebar.caption("Sürüm: v60 - Trendruum Canlı Kategori Entegrasyonu")
 
-# Çıkış Yap Butonu Eklendi
 def cikis_yap():
   st.session_state.giris_ok = False
   st.rerun()
