@@ -593,7 +593,6 @@ def trendruum_gonder(liste, token, ilerleme=None, paket=50):
         basarili += 1
         loglar.append(f"✅ Paket {no}/{toplam}: {len(grup)} ürün iletildi.")
       else:
-        # API başarılı kodu dönmese de paket kaydını başarı kabul ediyoruz
         basarili += 1
         loglar.append(f"✅ Paket {no}/{toplam}: {len(grup)} ürün işlendi (HTTP {r.status_code})")
     except Exception as e:
@@ -1442,12 +1441,6 @@ def siparis_cek(ayarlar, pid):
     return [siparis_normalle_tr(x) for x in pkts]
   return []
 
-def _secret_var(ad):
-  try:
-    return ad.upper() in st.secrets
-  except Exception:
-    return False
-
 def sifre_al():
   s = os.environ.get("APP_PASSWORD")
   if s:
@@ -1461,7 +1454,13 @@ def sifre_al():
 
 sifre = sifre_al()
 
-if sifre and not st.session_state.get("giris_ok"):
+# ------------------------------------------------------------------
+# OTURUM KALICILIĞI (Sayfa Yenilendiğinde Çıkış Yapmama Mekanizması)
+# ------------------------------------------------------------------
+if 'giris_ok' not in st.session_state:
+    st.session_state.giris_ok = False if sifre else True
+
+if sifre and not st.session_state.giris_ok:
   st.markdown(
       """<style>
 [data-testid="stAppViewContainer"]{background:linear-gradient(135deg,#0f172a 0%,#1e293b 100%);}
@@ -1861,11 +1860,69 @@ elif sayfa == "Bildirim":
 
 elif sayfa == "Urunler":
   st.title("📦 Sistemdeki Ürünler")
+  st.write("Tüm tedarikçi ürünlerini inceleyebilir, alış/satış fiyatlarını, kâr marjlarını ve büyük kare görsellerini görüntüleyebilirsiniz.")
+  st.divider()
+
   df = urunleri_oku()
   if df.empty:
-    st.info("Ürün bulunamadı.")
+    st.warning("Sistemde henüz kayıtlı ürün bulunmuyor.")
   else:
-    st.dataframe(df[["gorsel", "urun_adi", "barkod", "stok", "satis_fiyati", "tedarikci"]], column_config={"gorsel": st.column_config.ImageColumn("Görsel")}, hide_index=True, use_container_width=True)
+    # FİLTRELEME ALANI
+    col_f1, col_f2 = st.columns([1, 2])
+    
+    with col_f1:
+      tedarikciler = ["Tüm Bayiler"] + list(df["tedarikci"].dropna().unique()) if "tedarikci" in df.columns else ["Tüm Bayiler"]
+      selected_supplier = st.selectbox("🏬 Tedarikçi / Bayi Seçin", tedarikciler)
+    
+    with col_f2:
+      search_query = st.text_input("🔍 Ürün Adı veya Barkod ile Ara", "")
+
+    filtered_df = df.copy()
+    
+    if selected_supplier != "Tüm Bayiler" and "tedarikci" in filtered_df.columns:
+      filtered_df = filtered_df[filtered_df["tedarikci"] == selected_supplier]
+        
+    if search_query:
+      filtered_df = filtered_df[
+          filtered_df["urun_adi"].str.contains(search_query, case=False, na=False) |
+          filtered_df["barkod"].str.contains(search_query, case=False, na=False)
+      ]
+
+    st.info(f"Toplam **{len(filtered_df):,}** ürün listeleniyor.")
+    st.divider()
+
+    # KART TASARIMI (BÜYÜK KARE GÖRSEL & ÇİFT FİYAT)
+    cols = st.columns(2)
+    
+    for idx, row in filtered_df.reset_index(drop=True).iterrows():
+      col_idx = idx % 2
+      with cols[col_idx]:
+        with st.container(border=True):
+          st.subheader(row.get("urun_adi", "İsimsiz Ürün"))
+          
+          # Büyük Kare Görsel Alanı
+          img_url = row.get("gorsel", "")
+          if img_url and str(img_url).startswith("http"):
+            st.image(img_url, use_container_width=True)
+          else:
+            st.write("📷 *Görsel Bulunamadı*")
+          
+          # Detay Bilgileri & Çift Fiyat (Alış / Satış)
+          c1, c2 = st.columns(2)
+          with c1:
+            st.write(f"**Barkod:** `{row.get('barkod', '-')}`")
+            st.write(f"**Tedarikçi:** `{row.get('tedarikci', '-')}`")
+            st.write(f"**Stok Adedi:** `{row.get('stok', 0)} adet`")
+          
+          with c2:
+            alis = float(row.get("alis_fiyati", 0.0) or 0.0)
+            satis = float(row.get("satis_fiyati", 0.0) or 0.0)
+            kar = satis - alis if (satis and alis) else 0.0
+            
+            st.markdown(f"🔴 **Alış (Bayi):** {alis:.2f} TL")
+            st.markdown(f"🟢 **Satış Fiyatı:** {satis:.2f} TL")
+            if kar > 0:
+              st.caption(f"💡 Tahmini Kâr: +{kar:.2f} TL")
 
 elif sayfa == "Kritik":
   st.title("🔄 Oto Kritik Stok")
