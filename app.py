@@ -72,6 +72,8 @@ VARSAYILAN = {
     "idefix_oto_guncelle": False,
     "ptt_oto_guncelle": False,
     "pazar_ayarlari": {},
+    "kara_liste": "",
+    "son_yedek": "",
 }
 
 PAZAR = {
@@ -135,6 +137,48 @@ def ayar_oku():
         if k in veri and isinstance(veri[k], str):
             veri["kimlik"].setdefault(k, veri.pop(k))
     return veri
+
+
+def _yedek_anahtar(parola, tuz):
+    from cryptography.hazmat.primitives.kdf.scrypt import Scrypt
+    kdf = Scrypt(salt=tuz, length=32, n=2 ** 15, r=8, p=1)
+    return base64.urlsafe_b64encode(kdf.derive(parola.encode("utf-8")))
+
+
+def yedek_sifrele(veri, parola):
+    """Ayarları (API anahtarları dahil) parolayla şifreler. Dönüş: JSON baytları."""
+    from cryptography.fernet import Fernet
+    tuz = os.urandom(16)
+    jeton = Fernet(_yedek_anahtar(parola, tuz)).encrypt(json.dumps(veri, ensure_ascii=False).encode("utf-8"))
+    zarf = {"sahentegre_yedek": 1, "tuz": base64.b64encode(tuz).decode(), "veri": jeton.decode()}
+    return json.dumps(zarf).encode("utf-8")
+
+
+def yedek_coz(ham, parola):
+    from cryptography.fernet import Fernet, InvalidToken
+    zarf = json.loads(ham.decode("utf-8"))
+    try:
+        tuz = base64.b64decode(zarf["tuz"])
+        return json.loads(Fernet(_yedek_anahtar(parola, tuz)).decrypt(zarf["veri"].encode()).decode("utf-8"))
+    except InvalidToken:
+        raise ValueError("Yedek parolası hatalı ya da dosya bozulmuş.")
+
+
+def tr_norm(t):
+    """Türkçe-güvenli küçük harf (İ/I/ı sorunu: Python 'İ'.lower() noktalı birleşik karakter üretir)."""
+    return str(t).replace("İ", "i").replace("I", "i").replace("ı", "i").lower()
+
+
+def kara_liste_maskesi(ayar, df):
+    """Kara listedeki kelimeleri içeren ürünler için True döner (ad / kategori / barkod)."""
+    kelimeler = [tr_norm(k.strip()) for k in str(ayar.get("kara_liste", "") or "").splitlines() if k.strip()]
+    if not kelimeler or df.empty:
+        return pd.Series(False, index=df.index)
+    metin = pd.Series("", index=df.index)
+    for kol in ("urun_adi", "kategori", "barkod"):
+        if kol in df.columns:
+            metin = metin + " " + df[kol].astype(str).map(tr_norm)
+    return metin.apply(lambda t: any(k in t for k in kelimeler))
 
 
 def ayar_yaz(ayar):
@@ -867,6 +911,60 @@ def hb_guncelle(ayar, df, ilerleme=None):
     return _sonuc("hb", ok_k, hata_k, loglar, atlanan)
 
 
+def hb_urun_adresi(ayar):
+    """Ürün oluşturma adresi: yalnızca https + hepsiburada.com alan adı (kimlik bilgisi başka siteye sızmasın)."""
+    u = str(pa_al(ayar, "hb").get("urun_endpoint", "") or "").strip()
+    if not u:
+        raise ValueError("Hepsiburada 'Ürün oluşturma adresi' boş. Hepsiburada API dokümanındaki tam adresi Genel Ayarlar'dan girin.")
+    pr = urllib.parse.urlparse(u)
+    host = (pr.hostname or "").lower()
+    if pr.scheme != "https" or not (host == "hepsiburada.com" or host.endswith(".hepsiburada.com")):
+        raise ValueError("Hepsiburada ürün oluşturma adresi https:// ile başlamalı ve hepsiburada.com alan adında olmalı.")
+    return u
+
+
+def hb_urun_listesi(df, ayar):
+    """UYARI: Hepsiburada ürün oluşturma alan adları resmi dokümandan doğrulanmadı.
+    Önizlenen JSON'u Hepsiburada dokümanıyla karşılaştırın; önce 'Tek ürün (Test)' ile deneyin."""
+    hb_urun_adresi(ayar)
+    pa = pa_al(ayar, "hb")
+    cat_varsayilan = str(pa.get("category_id", "") or "").strip()
+    marka = str(pa.get("marka", "") or "").strip()
+    atr = pa.get("attributes") or []
+    onek = str(pa.get("sku_prefix", "") or "")
+    kdv = _i(pa.get("kdv"), 20)
+    uret = bool(pa.get("gecici_barkod", True))
+    liste, atlanan = [], 0
+    for r in kayit_listesi(df):
+        gorsel = str(r.get("gorsel", "")).strip()
+        kod = str(r["barkod"]).strip()
+        barkod = sabit_barkod(kod, uret)
+        fiyat = round(_f(r.get("satis_fiyati")), 2)
+        cat = kategori_id(pa, ayar, r.get("kategori"), "hb") or cat_varsayilan
+        if not gorsel.startswith("https") or fiyat <= 0 or not barkod or not cat:
+            atlanan += 1
+            continue
+        ad = str(r["urun_adi"]).strip()
+        liste.append({
+            "merchantSku": onek + kod, "barcode": barkod, "productName": ad[:250], "description": ad,
+            "categoryId": cat, "brand": marka, "price": fiyat, "availableStock": max(_i(r.get("stok")), 0),
+            "vatRate": kdv, "images": [gorsel], "attributes": atr,
+        })
+    return liste, atlanan
+
+
+def hb_urun_gonder(ayar, liste, ilerleme=None):
+    url = hb_urun_adresi(ayar)
+    kayit = [(u["merchantSku"], u) for u in liste]
+
+    def gonder(grup):
+        r = http("POST", url, json=grup, headers=hb_header(ayar), timeout=120, tries=2)
+        return r.status_code in (200, 201, 202), yanit_ozet(r)
+
+    ok_k, hata_k, loglar = paketle(kayit, 100, gonder, ilerleme, "Hepsiburada")
+    return len(ok_k), len(hata_k), loglar
+
+
 def hb_siparisler(ayar):
     m = kimlik(ayar, "hb_merchant_id")
     if not m:
@@ -921,6 +1019,52 @@ def ptt_guncelle(ayar, df, ilerleme=None):
 
     ok_k, hata_k, loglar = paketle(kayit, 100, gonder, ilerleme, "PTT")
     return _sonuc("ptt", ok_k, hata_k, loglar, atlanan)
+
+
+def ptt_urun_listesi(df, ayar):
+    """PTT AVM ürün oluşturma kayıtları. UYARI: PTT'nin ürün oluşturma alan adları
+    resmi dokümandan doğrulanmadı; 'Genel Ayarlar > PTT AVM' altındaki endpoint ve
+    önizlenen JSON'u PTT dokümanıyla karşılaştırın."""
+    pa = pa_al(ayar, "ptt")
+    if not str(pa.get("urun_endpoint", "") or "").strip():
+        raise ValueError("PTT AVM 'Ürün oluşturma endpoint yolu' boş. PTT API dokümanındaki yolu Genel Ayarlar'dan girin.")
+    cat_varsayilan = str(pa.get("category_id", "") or "").strip()
+    kdv = _i(pa.get("kdv"), 20)
+    uret = bool(pa.get("gecici_barkod", True))
+    liste, atlanan = [], 0
+    for r in kayit_listesi(df):
+        gorsel = str(r.get("gorsel", "")).strip()
+        kod = str(r["barkod"]).strip()
+        barkod = sabit_barkod(kod, uret)
+        fiyat = round(_f(r.get("satis_fiyati")), 2)
+        cat = kategori_id(pa, ayar, r.get("kategori"), "ptt") or cat_varsayilan
+        if not gorsel.startswith("https") or fiyat <= 0 or not barkod or not cat:
+            atlanan += 1
+            continue
+        ad = str(r["urun_adi"]).strip()
+        liste.append({
+            "Barcode": barkod, "StockCode": kod, "Name": ad[:250], "Description": ad,
+            "CategoryId": cat, "Price": fiyat, "Quantity": max(_i(r.get("stok")), 0),
+            "VatRate": kdv, "Images": [gorsel],
+        })
+    return liste, atlanan
+
+
+def ptt_urun_gonder(ayar, liste, ilerleme=None):
+    if not (kimlik(ayar, "ptt_key") and kimlik(ayar, "ptt_token")):
+        raise RuntimeError("PTT API Key / Token eksik.")
+    yol = str(pa_al(ayar, "ptt").get("urun_endpoint", "") or "").strip().lstrip("/")
+    if not yol:
+        raise RuntimeError("PTT ürün oluşturma endpoint yolu boş.")
+    h = ptt_header(ayar)
+    kayit = [(u["StockCode"], u) for u in liste]
+
+    def gonder(grup):
+        r = http("POST", f"{PTT_BASE}/{yol}", json={"items": grup}, headers=h, timeout=60, tries=2)
+        return r.status_code in (200, 201, 202), yanit_ozet(r)
+
+    ok_k, hata_k, loglar = paketle(kayit, 50, gonder, ilerleme, "PTT")
+    return len(ok_k), len(hata_k), loglar
 
 
 # --------------------------------------------------------------------------
@@ -1055,6 +1199,10 @@ def pazara_gonder(ayar, pid, df, ilerleme=None):
         if not pazar_bagli(ayar, pid):
             raise RuntimeError(f"{ad} API bilgileri eksik.")
         df = fiyat_artis_uygula(ayar, pid, df)
+        kara = kara_liste_maskesi(ayar, df)
+        if kara.any():  # kara listedeki ürünler pazarda satıştan kalksın (stok 0)
+            df = df.copy()
+            df.loc[kara, "stok"] = 0
         ok, hata, loglar = GUNCELLEYICI[pid](ayar, df, ilerleme)
     except Exception as e:
         log_yaz(ad, "HATA", f"Gönderilemedi: {e}")
@@ -1442,7 +1590,7 @@ def pazar_ayar_formu(pid):
         hata = None
         if pid == "hb":
             yeni["sku_prefix"] = st.text_input("Merchant SKU öneki (varsa)", value=str(pa.get("sku_prefix", "") or ""))
-        if pid in ("n11", "idefix", "trendruum"):
+        if pid in ("n11", "idefix", "trendruum", "ptt", "hb"):
             st.markdown("**Ürün oluşturma ayarları**")
             c1, c2, c3 = st.columns(3)
             yeni["category_id"] = c1.text_input("Varsayılan kategori ID", value=str(pa.get("category_id", "") or ""))
@@ -1459,9 +1607,16 @@ def pazar_ayar_formu(pid):
             c1, c2 = st.columns(2)
             yeni["teslim_suresi"] = int(c1.number_input("Teslim süresi (gün)", 1, 30, _i(pa.get("teslim_suresi"), 3) or 3))
             yeni["stok_kodu_barkod"] = c2.checkbox("Geçerli barkodu olmayan ürünlerde stok kodunu barkod yerine kullan", value=bool(pa.get("stok_kodu_barkod")))
-        if pid == "trendruum":
+        if pid == "hb":
+            yeni["urun_endpoint"] = st.text_input("Ürün oluşturma adresi (tam https URL, Hepsiburada dokümanından)", value=str(pa.get("urun_endpoint", "") or ""),
+                                                  help="https://….hepsiburada.com/… biçiminde; boşsa ürün oluşturma kapalı kalır.")
+            yeni["marka"] = st.text_input("Marka adı", value=str(pa.get("marka", "") or ""))
+        if pid == "ptt":
+            yeni["urun_endpoint"] = st.text_input("Ürün oluşturma endpoint yolu (PTT dokümanından)", value=str(pa.get("urun_endpoint", "") or ""),
+                                                  help="Örn: product/... — adres PTT AVM API dokümanından alınmalı; boşsa ürün oluşturma kapalı kalır.")
+        if pid in ("trendruum", "ptt", "hb"):
             yeni["gecici_barkod"] = st.checkbox("Geçerli barkodu olmayan ürünlere kalıcı geçici barkod üret (869…)", value=bool(pa.get("gecici_barkod", True)))
-        if pid in ("n11", "idefix"):
+        if pid in ("n11", "idefix", "hb"):
             atr_metin = st.text_area("Zorunlu özellikler (JSON listesi, boş bırakılabilir)",
                                      value=json.dumps(pa.get("attributes") or [], ensure_ascii=False))
             try:
@@ -1584,36 +1739,73 @@ def tedarikci_sayfasi():
                 st.success("Kaydedildi. Yeni değerler bir sonraki senkronizasyonda ürünlere uygulanır.")
 
 
+def ayarlari_geri_yukle(veri_y):
+    if not isinstance(veri_y, dict):
+        raise ValueError("Dosya bir JSON nesnesi olmalı.")
+    for k in VARSAYILAN:  # yalnızca bilinen alanlar geri yüklenir
+        if k == "kimlik" and isinstance(veri_y.get(k), dict):
+            for ka in KIMLIK_ALANLARI:
+                if isinstance(veri_y[k].get(ka), str) and veri_y[k][ka].strip():
+                    ayarlar["kimlik"][ka] = veri_y[k][ka]
+        elif k in veri_y and isinstance(veri_y[k], type(VARSAYILAN[k])):
+            ayarlar[k] = veri_y[k]
+    ayar_yaz(ayarlar)
+
+
+def yedek_isaretle():
+    ayarlar["son_yedek"] = datetime.now().strftime("%Y-%m-%d %H:%M")
+    ayar_yaz(ayarlar)
+
+
 def genel_ayarlar(sifre):
+    st.subheader("🚫 Kara liste")
+    st.caption("Her satıra bir kelime. Adı, kategorisi veya barkodu bu kelimeyi içeren ürünler yeni ürün olarak HİÇBİR pazara gönderilmez; "
+               "pazarda zaten varsa stok/fiyat güncellemesinde stoğu 0 yapılır (satıştan kalkar).")
+    kl = st.text_area("Yasaklı kelimeler", value=str(ayarlar.get("kara_liste", "") or ""), height=120, key="kara_liste_alan")
+    if gen(st.button, "💾 Kara listeyi kaydet", key="kara_kaydet"):
+        ayarlar["kara_liste"] = kl
+        ayar_yaz(ayarlar)
+        st.success("Kara liste kaydedildi.")
+    st.divider()
+
     st.subheader("💾 Yedekleme")
+    if ayarlar.get("son_yedek"):
+        st.caption(f"Son indirilen yedek: {ayarlar['son_yedek']}")
+    else:
+        st.warning("Henüz yedek almadınız. Sunucu yeniden başlarsa ayarlarınız/anahtarlarınız silinebilir; yedek indirip güvenli bir yerde saklayın.")
+    st.markdown("**🔐 Şifreli TAM yedek (API anahtarları, tedarikçiler, kategori eşleştirmeleri, tüm ayarlar)**")
+    try:
+        import cryptography  # noqa: F401
+        sifreleme_var = True
+    except ImportError:
+        sifreleme_var = False
+        st.error("Şifreli yedek için 'cryptography' paketi gerekli (requirements.txt içinde var; sunucuyu yeniden başlatın).")
+    if sifreleme_var:
+        p1 = st.text_input("Yedek parolası (en az 8 karakter)", type="password", key="yedek_p1")
+        p2 = st.text_input("Yedek parolası (tekrar)", type="password", key="yedek_p2")
+        if p1 and (len(p1) < 8 or p1 != p2):
+            st.info("Parola en az 8 karakter olmalı ve iki alan aynı olmalı.")
+        elif p1:
+            st.download_button("⬇️ Şifreli yedeği indir", yedek_sifrele(ayarlar, p1),
+                               f"sahentegre_sifreli_yedek_{datetime.now():%Y%m%d}.json", "application/json",
+                               on_click=yedek_isaretle)
+            st.caption("Parolayı kaybederseniz yedek açılamaz; parola bu dosyada saklanmaz.")
     guvenli = {k: v for k, v in ayarlar.items() if k != "kimlik"}
     guvenli["kimlik"] = {}
-    st.download_button("📄 Yedek (API anahtarları HARİÇ)", json.dumps(guvenli, ensure_ascii=False, indent=2).encode("utf-8"),
+    st.download_button("📄 Yedek (API anahtarları HARİÇ, şifresiz)", json.dumps(guvenli, ensure_ascii=False, indent=2).encode("utf-8"),
                        "sahentegre_yedek.json", "application/json")
-    with st.expander("🔐 API anahtarları DAHİL yedek"):
-        if not sifre:
-            st.warning("Anahtarlı yedek için APP_PASSWORD tanımlı olmalı.")
-        else:
-            girilen = st.text_input("Yönetici şifresini tekrar girin", type="password", key="tam_yedek_sifre")
-            if girilen and hmac.compare_digest(girilen.encode(), str(sifre).encode()):
-                st.download_button("⬇️ TAM Yedek (gizli bilgiler içerir)", json.dumps(ayarlar, ensure_ascii=False, indent=2).encode("utf-8"),
-                                   "sahentegre_tam_yedek.json", "application/json")
-            elif girilen:
-                st.error("Şifre hatalı.")
-    yuklenen = st.file_uploader("♻️ Yedek dosyasını geri yükle (.json)", type="json", key="yedek_yukle")
+
+    yuklenen = st.file_uploader("♻️ Yedek dosyasını geri yükle (.json — şifreli veya düz)", type="json", key="yedek_yukle")
+    geri_parola = st.text_input("Şifreli yedekse parolası", type="password", key="yedek_geri_parola")
     if yuklenen is not None and st.button("Geri Yükle", key="yedek_btn"):
         try:
-            veri_y = json.loads(yuklenen.getvalue().decode("utf-8"))
-            if not isinstance(veri_y, dict):
-                raise ValueError("Dosya bir JSON nesnesi olmalı.")
-            for k in VARSAYILAN:  # yalnızca bilinen alanlar geri yüklenir
-                if k == "kimlik" and isinstance(veri_y.get(k), dict):
-                    for ka in KIMLIK_ALANLARI:
-                        if isinstance(veri_y[k].get(ka), str) and veri_y[k][ka].strip():
-                            ayarlar["kimlik"][ka] = veri_y[k][ka]
-                elif k in veri_y and isinstance(veri_y[k], type(VARSAYILAN[k])):
-                    ayarlar[k] = veri_y[k]
-            ayar_yaz(ayarlar)
+            ham = yuklenen.getvalue()
+            veri_y = json.loads(ham.decode("utf-8"))
+            if isinstance(veri_y, dict) and veri_y.get("sahentegre_yedek"):
+                if not geri_parola:
+                    raise ValueError("Bu yedek şifreli; parolayı girin.")
+                veri_y = yedek_coz(ham, geri_parola)
+            ayarlari_geri_yukle(veri_y)
             st.success("Geri yüklendi.")
             st.rerun()
         except Exception as e:
@@ -1639,6 +1831,10 @@ def toplu_urun_paneli(pid):
     df = secili_urunler(urunleri_oku(), pid)
     if not df.empty and st.checkbox("Sadece stokta olanlar", value=True, key=f"{pid}_stoklu"):
         df = df[df["stok"] > 0]
+    kara = kara_liste_maskesi(ayarlar, df)
+    if kara.any():
+        st.caption(f"🚫 Kara listedeki {int(kara.sum())} ürün gönderim dışı bırakıldı.")
+        df = df[~kara]
     mod = st.selectbox("Gönderim Modu", ["Tek ürün (Test)", "Tüm Ürünler"], key=f"{pid}_mod")
     df = fiyat_artis_uygula(ayarlar, pid, df)
     if mod.startswith("Tek"):
@@ -1646,6 +1842,7 @@ def toplu_urun_paneli(pid):
     try:
         liste, atlanan = {
             "n11": n11_urun_listesi, "idefix": idefix_urun_listesi, "trendruum": trendruum_urun_listesi,
+            "ptt": ptt_urun_listesi, "hb": hb_urun_listesi,
         }[pid](df, ayarlar)
     except ValueError as e:
         st.error(str(e))
@@ -1653,6 +1850,8 @@ def toplu_urun_paneli(pid):
     st.write(f"Gönderilecek ürün: **{len(liste):,}** (Atlanan: {atlanan} — görsel/fiyat/barkod/kategori eksik)")
     if not liste:
         return
+    with st.expander("🔎 İlk ürünün gönderilecek JSON'u (pazar yeri dokümanıyla karşılaştırın)"):
+        st.json(liste[0])
     onay = st.checkbox("Göndermeyi onaylıyorum", key=f"{pid}_onay")
     if gen(st.button, f"🚀 {ad}'e Ürünleri Gönder", type="primary", key=f"{pid}_toplu_btn", disabled=not onay):
         pbar, log_k = st.progress(0.0), st.empty()
@@ -1662,7 +1861,7 @@ def toplu_urun_paneli(pid):
             log_k.code("\n".join(loglar[-12:]))
 
         try:
-            gonder = {"n11": n11_urun_gonder, "idefix": idefix_gonder, "trendruum": trendruum_gonder}[pid]
+            gonder = {"n11": n11_urun_gonder, "idefix": idefix_gonder, "trendruum": trendruum_gonder, "ptt": ptt_urun_gonder, "hb": hb_urun_gonder}[pid]
             ok, hata, loglar = gonder(ayarlar, liste, ilerleme)
         except Exception as e:
             log_yaz(ad, "HATA", f"Ürün gönderimi: {e}")
@@ -1681,20 +1880,25 @@ def pazar_islemler(pid):
         st.warning("API bilgileri eksik: 'Genel Ayarları' sayfasından girip kaydedin.")
 
     k = f"islem_{pid}"
+    with closing(baglan()) as c:
+        ted_liste = [r[0] for r in c.execute("SELECT DISTINCT tedarikci FROM urunler WHERE tedarikci IS NOT NULL ORDER BY 1")]
+    secili_ted = None
+    if ted_liste:
+        secili_ted = st.multiselect("Stok/fiyat gönderilecek tedarikçiler", ted_liste, default=ted_liste, key=f"{pid}_gond_ted")
     c1, c2, c3 = st.columns(3)
     if gen(c1.button, "🔄 Tam Senkronizasyon", key=f"b1_{pid}", type="primary", disabled=not bagli, help="Önce tedarikçi XML'lerini yeniler, sonra stok/fiyatı bu pazara gönderir."):
         st.session_state[k] = None
         with st.spinner("Tedarikçiler güncelleniyor..."):
             for tad, ok_, msg in tumunu_senkronla(oto=False):
                 (st.success if ok_ else st.error)(f"{tad}: {msg}")
-        gonder_ve_goster(pid)
+        gonder_ve_goster(pid, secili_ted)
     if gen(c2.button, "⚠️ Kritik Stok Sıfırla", key=f"b2_{pid}"):
         st.session_state[k] = "kritik"
     if gen(c3.button, "🔢 Tüm Stok/Fiyatları Güncelle", key=f"b3_{pid}", disabled=not bagli, help="Veritabanındaki mevcut stok/fiyatı bu pazara gönderir."):
         st.session_state[k] = None
-        gonder_ve_goster(pid)
+        gonder_ve_goster(pid, secili_ted)
 
-    if pid in ("n11", "idefix", "trendruum"):
+    if pid in ("n11", "idefix", "trendruum", "ptt", "hb"):
         if gen(st.button, "📤 Toplu Ürün Oluştur / Gönder", key=f"b4_{pid}"):
             st.session_state[k] = "toplu"
 
@@ -1730,7 +1934,7 @@ def pazar_islemler(pid):
         st.caption("Son gönderim durumu (barkod bazında): " + ", ".join(f"{r.durum}: {r.adet}" for r in d.itertuples()))
 
 
-def gonder_ve_goster(pid):
+def gonder_ve_goster(pid, tedarikciler=None):
     ad = PAZAR_AD[pid]
     pbar, log_k = st.progress(0.0), st.empty()
 
@@ -1739,8 +1943,14 @@ def gonder_ve_goster(pid):
         log_k.code("\n".join(loglar[-8:]))
 
     try:
+        df_g = urunleri_oku()
+        if tedarikciler is not None:
+            if not tedarikciler:
+                st.warning("Hiç tedarikçi seçilmedi.")
+                return
+            df_g = df_g[df_g["tedarikci"].isin(tedarikciler)]
         with st.spinner(f"{ad} stok/fiyat gönderiliyor..."):
-            ok, hata, _ = pazara_gonder(ayarlar, pid, urunleri_oku(), ilerleme)
+            ok, hata, _ = pazara_gonder(ayarlar, pid, df_g, ilerleme)
         if ok == 0 and hata == 0:
             st.warning("Gönderilecek ürün bulunamadı (önce tedarikçi senkronizasyonu yapın / fiyatı olmayan ürünler atlanır).")
         else:
@@ -1775,7 +1985,7 @@ def pazar_ayar(pid):
         ayar_yaz(ayarlar)
     st.divider()
     pazar_ayar_formu(pid)
-    if pid in ("n11", "idefix", "trendruum"):
+    if pid in ("n11", "idefix", "trendruum", "ptt", "hb"):
         with st.expander("🗂️ Kategori eşleştirme (tedarikçi kategorisi → pazar yeri kategori ID)"):
             kategori_esleme_editoru(pid)
 
