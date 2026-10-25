@@ -279,26 +279,37 @@ def url_guvenli(url):
             raise ValueError("Yerel/özel ağ adreslerine erişime izin verilmiyor.")
 
 
-def indir(url):
+def indir(url, okuma_sn=300, deneme=2):
     url = (url or "").strip()
     url_guvenli(url)
     basliklar = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36",
         "Accept": "application/xml,text/xml,*/*",
     }
-    parcalar, boyut = [], 0
-    with requests.get(url, headers=basliklar, timeout=(15, 120), stream=True) as r:
-        r.raise_for_status()
-        url_guvenli(r.url)  # yönlendirme sonrası adresi de doğrula
-        for p in r.iter_content(1024 * 1024):
-            boyut += len(p)
-            if boyut > MAKS_XML_BOYUT:
-                raise ValueError("XML dosyası çok büyük (300 MB üstü).")
-            parcalar.append(p)
-    veri = b"".join(parcalar)
-    if veri[:2] == b"\x1f\x8b":
-        veri = gzip.decompress(veri)
-    return veri
+    son_hata = None
+    for i in range(max(1, deneme)):
+        parcalar, boyut = [], 0
+        try:
+            with requests.get(url, headers=basliklar, timeout=(20, max(30, float(okuma_sn))), stream=True) as r:
+                r.raise_for_status()
+                url_guvenli(r.url)  # yönlendirme sonrası adresi de doğrula
+                for p in r.iter_content(1024 * 1024):
+                    boyut += len(p)
+                    if boyut > MAKS_XML_BOYUT:
+                        raise ValueError("XML dosyası çok büyük (300 MB üstü).")
+                    parcalar.append(p)
+            veri = b"".join(parcalar)
+            if veri[:2] == b"\x1f\x8b":
+                veri = gzip.decompress(veri)
+            return veri
+        except (requests.Timeout, requests.ConnectionError) as e:
+            son_hata = e
+            if i < deneme - 1:
+                time.sleep(5)
+    raise RuntimeError(
+        f"Sunucu {int(okuma_sn)} sn içinde yanıt vermedi ({deneme} deneme). "
+        "Tedarikçi sitesi yavaş olabilir ya da bu sunucunun IP'sini engelliyor olabilir."
+    ) from son_hata
 
 
 def ekle(sozluk, anahtar, deger):
@@ -362,8 +373,8 @@ def xml_oku(veri):
 
 
 @st.cache_data(ttl=600, show_spinner=False)
-def xml_onizleme(url):
-    return xml_oku(indir(url))
+def xml_onizleme(url, okuma_sn=300):
+    return xml_oku(indir(url, okuma_sn))
 
 
 def sayi(x):
@@ -455,7 +466,7 @@ def normalle(tedarikci, df, harita, marj, sabit_ek, kritik_esik=0, stok_ust=50):
 
 
 def tedarikci_senkron(ad, bilgi, kritik_esik=0, stok_ust=50):
-    df_ham = xml_oku(indir(bilgi["link"]))
+    df_ham = xml_oku(indir(bilgi["link"], _f(bilgi.get("zaman_asimi"), 300.0)))
     df = normalle(
         ad, df_ham, bilgi.get("harita", {}),
         float(bilgi.get("marj", 30.0)), float(bilgi.get("sabit_ek", 0.0)),
@@ -1515,7 +1526,7 @@ def tedarikci_sayfasi():
             c1, c2 = st.columns(2)
             if c1.button("📥 XML'i yedek olarak hazırla", key=f"xml_indir_{ad}"):
                 try:
-                    st.session_state[f"xml_yedek_{ad}"] = indir(bilgi["link"])
+                    st.session_state[f"xml_yedek_{ad}"] = indir(bilgi["link"], _f(bilgi.get("zaman_asimi"), 300.0))
                 except Exception as e:
                     st.error(f"İndirilemedi: {e}")
             if f"xml_yedek_{ad}" in st.session_state:
@@ -1529,20 +1540,32 @@ def tedarikci_sayfasi():
                         c.execute("DELETE FROM urunler WHERE tedarikci=?", (ad,))
                         c.commit()
                     st.rerun()
-            try:
-                df_test = xml_onizleme(bilgi["link"])
-            except Exception as e:
-                st.warning(f"XML analiz edilemedi: {e}")
+            zs = st.number_input("XML bekleme süresi (sn)", 30, 1800, int(_f(bilgi.get("zaman_asimi"), 300.0)), 30, key=f"{ad}_zs",
+                                 help="Yavaş yanıt veren tedarikçiler için artırın.")
+            if float(zs) != _f(bilgi.get("zaman_asimi"), 300.0):
+                bilgi["zaman_asimi"] = float(zs)
+                ayar_yaz(ayarlar)
+            onizleme = st.session_state.get(f"onizleme_{ad}")
+            if gen(st.button, "🔍 XML alanlarını yükle / yenile", key=f"onizle_{ad}"):
+                try:
+                    with st.spinner("XML indiriliyor ve analiz ediliyor..."):
+                        df_t = xml_onizleme(bilgi["link"], float(zs))
+                    onizleme = {"kolonlar": list(df_t.columns), "ornek": df_t.head(5)}
+                    st.session_state[f"onizleme_{ad}"] = onizleme
+                except Exception as e:
+                    st.warning(f"XML analiz edilemedi: {e}")
+            if not onizleme:
+                st.caption("Alan eşleştirmesini düzenlemek için yukarıdaki düğmeyle XML'i yükleyin. Kayıtlı eşleştirme senkronizasyonda aynen kullanılır.")
                 continue
             with st.expander("Ham XML önizleme (ilk 5 ürün)"):
-                st.dataframe(df_test.head(5))
-            kolonlar = ["(yok)"] + list(df_test.columns)
+                st.dataframe(onizleme["ornek"])
+            kolonlar = ["(yok)"] + onizleme["kolonlar"]
             eski = bilgi.get("harita", {})
 
-            def sec(lbl, anah, aid, ad=ad, kolonlar=kolonlar, eski=eski, df_test=df_test):
+            def sec(lbl, anah, aid, ad=ad, kolonlar=kolonlar, eski=eski, kol_adlari=onizleme["kolonlar"]):
                 v = eski.get(aid)
                 if v not in kolonlar:
-                    v = tahmin(df_test.columns, anah)
+                    v = tahmin(kol_adlari, anah)
                 return st.selectbox(lbl, kolonlar, index=kolonlar.index(v), key=f"{ad}_{aid}")
 
             harita = {
