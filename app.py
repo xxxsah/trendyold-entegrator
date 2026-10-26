@@ -1066,6 +1066,9 @@ def ptt_urun_listesi(df, ayar):
     KDV'li/KDV'siz fiyat kural\u0131) i\u00e7in \u00f6nce 'Tek \u00fcr\u00fcn (Test)' ile deneyip sonucu sorgulay\u0131n."""
     pa = pa_al(ayar, "ptt")
     cat_varsayilan = str(pa.get("category_id", "") or "").strip()
+    if cat_varsayilan and not cat_varsayilan.isdigit():
+        raise ValueError(f"PTT 'Varsay\u0131lan kategori ID' bir SAYI olmal\u0131 (\u00f6rn. 55) ama \u015fu yaz\u0131lm\u0131\u015f: '{cat_varsayilan[:60]}'. "
+                         "Genel Ayarlar'dan d\u00fczeltin.")
     kdv = _i(pa.get("kdv"), 20)
     uret = bool(pa.get("gecici_barkod", True))
     marka = str(pa.get("marka", "") or "").strip()
@@ -1163,7 +1166,11 @@ def ptt_kategori_agaci(ayar):
     r = http("GET", f"{PTT_BASE}/categories/category-tree", headers=ptt_header(ayar), timeout=90, tries=2)
     if r.status_code != 200:
         raise RuntimeError(f"Kategori a\u011fac\u0131 al\u0131namad\u0131 ({yanit_ozet(r)})")
-    return r.json()
+    j = r.json()
+    if isinstance(j, dict) and j.get("success") is False:
+        ayrinti = j.get("error") or {k: v for k, v in j.items() if k != "category_tree"}
+        raise RuntimeError("PTT kategori a\u011fac\u0131n\u0131 vermedi. PTT'nin yan\u0131t\u0131: " + json.dumps(ayrinti, ensure_ascii=False)[:800])
+    return j
 
 
 def ptt_kategori_duzlestir(veri):
@@ -1209,10 +1216,74 @@ def ptt_kategori_duzlestir(veri):
     return sonuc
 
 
+def ptt_kategori_getir(ayar, yol):
+    """PTT kategori u\u00e7lar\u0131: 'main' (Ana Kategori Listesi) veya bir kategori ID'si (Kategori Bilgisi)."""
+    yol = str(yol or "").strip()
+    if yol != "main" and not yol.isdigit():
+        raise ValueError("Kategori ID bir say\u0131 olmal\u0131.")
+    r = http("GET", f"{PTT_BASE}/categories/{yol}", headers=ptt_header(ayar), timeout=60, tries=1)
+    try:
+        j = r.json()
+    except Exception:
+        j = None
+    return r.status_code, j, (r.text or "")[:1500]
+
+
+def ptt_kategori_gez():
+    """A\u011fa\u00e7 \u00e7al\u0131\u015fmazsa: ana kategorilerden ba\u015flay\u0131p ID ile alt kategorilere inerek gezme."""
+    st.markdown("**Ana kategorilerden gezerek bul**")
+    c1, c2 = st.columns(2)
+    istek = None
+    if gen(c1.button, "\U0001f4c2 Ana kategorileri getir", key="ptt_kat_main"):
+        istek = "main"
+    hedef = c2.text_input("Kategori ID (i\u00e7indekileri g\u00f6rmek i\u00e7in)", key="ptt_kat_gez_id")
+    if gen(c2.button, "\u27a1\ufe0f Bu kategoriyi a\u00e7", key="ptt_kat_ac"):
+        istek = hedef
+    if istek is not None:
+        try:
+            kod, j, ham = ptt_kategori_getir(ayarlar, istek)
+            st.session_state["ptt_kat_gez"] = {
+                "yol": str(istek), "kod": kod, "ham": ham,
+                "liste": ptt_kategori_duzlestir(j) if j is not None else [],
+                "json": j,
+            }
+        except Exception as e:
+            st.session_state["ptt_kat_gez"] = None
+            st.error(f"Hata: {e}")
+    g = st.session_state.get("ptt_kat_gez")
+    if not g:
+        return
+    (st.success if g["kod"] == 200 else st.error)(f"'{g['yol']}' i\u00e7in PTT yan\u0131t\u0131: HTTP {g['kod']}")
+    if g["liste"]:
+        d = pd.DataFrame(g["liste"]).head(300)
+        st.dataframe(d[["ID", "Kategori"]], hide_index=True)
+        secenek = [f"{r.ID} \u2014 {r.Kategori}" for r in d.itertuples()]
+        sec = st.selectbox("Bu listeden se\u00e7", secenek, key="ptt_kat_gez_sec")
+        k1, k2 = st.columns(2)
+        if gen(k1.button, "\U0001f4c2 Se\u00e7ileni a\u00e7 (alt kategorileri)", key="ptt_kat_gez_ac"):
+            st.session_state["ptt_kat_gez_id"] = sec.split(" \u2014 ")[0].strip()
+            st.rerun()
+        if gen(k2.button, "\u2705 Se\u00e7ileni varsay\u0131lan yap", key="ptt_kat_gez_varsayilan"):
+            secilen = sec.split(" \u2014 ")[0].strip()
+            pa_al(ayarlar, "ptt")["category_id"] = secilen
+            ayar_yaz(ayarlar)
+            st.success(f"Varsay\u0131lan kategori ID: {secilen}")
+    else:
+        st.warning("Listede kategori okunamad\u0131; ham yan\u0131t\u0131 a\u015fa\u011f\u0131dan inceleyebilirsiniz.")
+    with st.expander("Ham yan\u0131t"):
+        if g.get("json") is not None:
+            st.json(g["json"])
+        else:
+            st.text(g["ham"])
+
+
 def ptt_kategori_bulucu():
     if not pazar_bagli(ayarlar, "ptt"):
         st.caption("Kategori aramak i\u00e7in \u00f6nce PTT API bilgilerini kaydedin.")
         return
+    ptt_kategori_gez()
+    st.divider()
+    st.markdown("**T\u00fcm kategori a\u011fac\u0131 (PTT bu hesapta hata verebilir)**")
     if gen(st.button, "\U0001f4e5 Kategorileri PTT'den y\u00fckle", key="ptt_kat_yukle"):
         try:
             with st.spinner("PTT kategori a\u011fac\u0131 al\u0131n\u0131yor..."):
@@ -1226,7 +1297,11 @@ def ptt_kategori_bulucu():
         return
     if not kat:
         st.warning("Kategori listesi okunamad\u0131. A\u015fa\u011f\u0131daki ham yan\u0131t\u0131n ilk k\u0131sm\u0131n\u0131 bana g\u00f6nderin, okuyucuyu ona g\u00f6re d\u00fczelteyim.")
-        st.code(str(st.session_state.get("ptt_kat_ham", ""))[:3000])
+        ham = str(st.session_state.get("ptt_kat_ham", ""))[:3000]
+        try:
+            st.json(json.loads(ham))
+        except Exception:
+            st.text(ham)
         return
     ara = st.text_input("Kategori ara (\u00f6rn. elbise)", key="ptt_kat_ara")
     yaprak = st.checkbox("Sadece en alt (yaprak) kategoriler", value=True, key="ptt_kat_yaprak")
@@ -1688,6 +1763,9 @@ def tema_css():
         k.append(".st-key-navp_%s button{background:%s;}" % (pid, p["pastel"]))
         for alt, _, _ in ALT:
             k.append(".st-key-sub_%s_%s button{background:#fff;border-left:5px solid %s;margin-left:16px;width:calc(100%% - 16px);}" % (pid, alt, p["renk"]))
+    k.append('[data-testid="stSidebar"] button, [data-testid="stSidebar"] button p{color:#1e293b !important;}')
+    k.append('[data-testid="stSidebar"] button[kind="primary"], [data-testid="stSidebar"] button[data-testid="stBaseButton-primary"]'
+             '{font-weight:700;box-shadow:inset 0 0 0 2px #1e293b;}')
     return "<style>" + "".join(k) + "</style>"
 
 
