@@ -2,14 +2,7 @@
 
 Çalıştırma:  streamlit run app.py
 Gizli bilgiler için öncelik sırası: ortam değişkeni > st.secrets > ayarlar.json
-Önerilen: APP_PASSWORD ortam değişkenini mutlaka tanımlayın.
-"""
-import base64
-import gzip
-import hashlib
-import hmac
-import ipaddress
-import json
+Önerilen: APP_PASS
 import os
 import re
 import socket
