@@ -1389,9 +1389,7 @@ def ptt_kategori_gez():
             st.rerun()
         if gen(k2.button, "\u2705 Se\u00e7ileni varsay\u0131lan yap", key="ptt_kat_gez_varsayilan"):
             secilen = sec.split(" \u2014 ")[0].strip()
-            pa_al(ayarlar, "ptt")["category_id"] = secilen
-            ayar_yaz(ayarlar)
-            st.success(f"Varsay\u0131lan kategori ID: {secilen}")
+            varsayilan_kategori_yaz("ptt", secilen)
     else:
         st.warning("Listede kategori okunamad\u0131; ham yan\u0131t\u0131 a\u015fa\u011f\u0131dan inceleyebilirsiniz.")
     with st.expander("Ham yan\u0131t"):
@@ -1601,6 +1599,56 @@ def trendruum_kategori_sema(ayar, cid):
     return r.status_code, j
 
 
+def kat_belirtec(t):
+    """Turkce-guvenli, ekleri kabaca kirpilmis kelime kumesi (ilk 5 harf)."""
+    m = tr_norm(t).translate(str.maketrans("\u00e7\u011f\u00f6\u015f\u00fc", "cgosu"))
+    dur = {"ve", "ile", "icin", "diger"}
+    return {w[:5] for w in re.findall(r"[a-z0-9]+", m) if len(w) > 1 and w not in dur}
+
+
+def trendruum_agac_yukle(ayar):
+    """GET /categories?limit=5000 -> uc kategorilerin duz listesi (tek istek)."""
+    token = trendruum_token(kimlik(ayar, "trendruum_key"), kimlik(ayar, "trendruum_secret"))
+    r = http("GET", f"{TR_BASE}/categories", params={"limit": 5000},
+             headers={"Authorization": f"Bearer {token}"}, timeout=120, tries=2)
+    if r.status_code != 200:
+        raise RuntimeError(f"Trendruum kategori listesi alinamadi (HTTP {r.status_code})")
+    try:
+        j = r.json()
+    except Exception:
+        raise RuntimeError("Trendruum kategori yaniti okunamadi.")
+    dugumler = []
+    for d in trendruum_kategori_duzlestir(j):
+        if d["Uc kategori"] != "evet":
+            continue
+        son = d["Kategori"].split(">")[-1]
+        dugumler.append({"ID": d["ID"], "yol": d["Kategori"], "son": kat_belirtec(son), "tum": kat_belirtec(d["Kategori"])})
+    if not dugumler:
+        raise RuntimeError("Trendruum kategori listesi bos geldi.")
+    return dugumler
+
+
+def kategori_oner(ted_yol, dugumler):
+    """Tedarikci kategorisine en yakin Trendruum uc kategorisi: (ID, yol, guven)."""
+    parcalar = [x.strip() for x in re.split(r"[>/|]+", str(ted_yol)) if x.strip()]
+    if not parcalar:
+        return "", "", "yok"
+    sl, st_ = kat_belirtec(parcalar[-1]), kat_belirtec(ted_yol)
+    en, en_puan, en_son = None, 0.0, 0.0
+    for d in dugumler:
+        u = sl | d["son"]
+        son_sim = len(sl & d["son"]) / len(u) if u else 0.0
+        u2 = st_ | d["tum"]
+        tum_sim = len(st_ & d["tum"]) / len(u2) if u2 else 0.0
+        puan = 0.65 * son_sim + 0.35 * tum_sim
+        if puan > en_puan or (puan == en_puan and en and len(d["yol"]) < len(en["yol"])):
+            en, en_puan, en_son = d, puan, son_sim
+    if not en or en_puan < 0.3:
+        return "", "", "yok"
+    guven = "yuksek" if (en_son >= 0.8 and en_puan >= 0.6) else ("orta" if en_son >= 0.5 else "dusuk")
+    return en["ID"], en["yol"], guven
+
+
 def trendruum_kategori_bulucu():
     if not pazar_bagli(ayarlar, "trendruum"):
         st.caption("Kategori aramak icin once Trendruum API bilgilerini kaydedin.")
@@ -1633,11 +1681,11 @@ def trendruum_kategori_bulucu():
     secenek = [f"{r.ID} \u2014 {r.Kategori}" for r in d.itertuples()]
     sec = st.selectbox("Listeden sec", secenek, key="trk_sec")
     secilen = sec.split(" \u2014 ")[0].strip()
+    mevcut_vk = pa_al(ayarlar, "trendruum").get("category_id") or "(bo\u015f)"
+    st.caption(f"\u015eu an kay\u0131tl\u0131 varsay\u0131lan kategori ID: {mevcut_vk}")
     k1, k2 = st.columns(2)
     if gen(k1.button, "Varsayilan kategori yap", key="trk_varsayilan"):
-        pa_al(ayarlar, "trendruum")["category_id"] = secilen
-        ayar_yaz(ayarlar)
-        st.rerun()
+        varsayilan_kategori_yaz("trendruum", secilen)
     if gen(k2.button, "Bu kategorinin zorunlu alanlari", key="trk_sema"):
         try:
             kod, j = trendruum_kategori_sema(ayarlar, secilen)
@@ -2088,6 +2136,48 @@ def secili_urunler(df, anahtar):
     return df[df["tedarikci"].isin(sec)] if sec else df.iloc[0:0]
 
 
+def trendruum_oto_esleme(pa, adet, mevcut):
+    st.markdown("**Otomatik \u00f6neri**")
+    st.caption("Trendruum kategori listesini \u00e7ekip tedarik\u00e7i kategorilerinize en yak\u0131n kategoriyi \u00f6nerir. "
+               "Hi\u00e7bir \u015fey kendili\u011finden kaydedilmez; i\u015faretledi\u011finiz sat\u0131rlar kaydedilir.")
+    if gen(st.button, "\u00d6nerileri haz\u0131rla", key="trk_oto_hazirla"):
+        try:
+            with st.spinner("Trendruum kategori listesi al\u0131n\u0131yor..."):
+                dugumler = trendruum_agac_yukle(ayarlar)
+            satirlar = []
+            for k in adet.index:
+                if mevcut.get(k):
+                    continue
+                i, y, g = kategori_oner(k, dugumler)
+                satirlar.append({"Onayla": g == "yuksek", "Tedarik\u00e7i kategorisi": k, "\u00dcr\u00fcn": int(adet[k]),
+                                 "\u00d6nerilen Trendruum kategorisi": y, "G\u00fcven": {"yuksek": "Y\u00fcksek", "orta": "Orta", "dusuk": "D\u00fc\u015f\u00fck"}.get(g, "Yok"),
+                                 "ID": i})
+            st.session_state["trk_oneri"] = satirlar
+        except Exception as e:
+            st.session_state["trk_oneri"] = None
+            st.error(f"Hata: {e}")
+    sat = st.session_state.get("trk_oneri")
+    if not sat:
+        return
+    d = pd.DataFrame(sat).head(300)
+    st.caption(f"{len(sat)} e\u015fle\u015fmemi\u015f kategori i\u00e7in \u00f6neri haz\u0131r. 'Y\u00fcksek' g\u00fcvenliler i\u015faretli geldi; 'Orta/D\u00fc\u015f\u00fck' olanlar\u0131 kendiniz kontrol edip i\u015faretleyin.")
+    duz = st.data_editor(d, hide_index=True, key=f"trk_oto_{len(d)}",
+                         disabled=["Tedarik\u00e7i kategorisi", "\u00dcr\u00fcn", "\u00d6nerilen Trendruum kategorisi", "G\u00fcven", "ID"])
+    if gen(st.button, "\u0130\u015faretlenenleri kaydet", key="trk_oto_kaydet"):
+        yeni = dict(mevcut)
+        n = 0
+        for _, r in duz.iterrows():
+            if r["Onayla"] and objectid_mi(r["ID"]):
+                yeni[str(r["Tedarik\u00e7i kategorisi"])] = str(r["ID"])
+                n += 1
+        pa["kategori_eslesme"] = yeni
+        ayar_yaz(ayarlar)
+        st.session_state["trk_oneri"] = None
+        st.success(f"{n} kategori e\u015fle\u015ftirmesi kaydedildi (toplam {len(yeni)}).")
+        st.rerun()
+    st.divider()
+
+
 def kategori_esleme_editoru(pid):
     pa = pa_al(ayarlar, pid)
     df = urunleri_oku()
@@ -2098,6 +2188,9 @@ def kategori_esleme_editoru(pid):
     ana = df["kategori"].dropna().astype(str).map(lambda k: k.split(">>>")[0].strip())
     adet = ana[ana != ""].value_counts()
     st.caption(f"{len(adet)} farkl\u0131 tedarik\u00e7i kategorisi var; e\u015fle\u015fmemi\u015f \u00fcr\u00fcnler (varsay\u0131lan kapal\u0131yken) g\u00f6nderilmez.")
+    if pid == "trendruum":
+        trendruum_oto_esleme(pa, adet, mevcut)
+    st.markdown("**Elle e\u015fle\u015ftirme**")
     ara = st.text_input("Kategori ara (filtre)", key=f"kat_ara_{pid}")
     liste = [k for k in adet.index if not ara.strip() or tr_norm(ara) in tr_norm(k)]
     sadece_bos = st.checkbox("Sadece ID'si girilmemi\u015fleri g\u00f6ster", key=f"kat_bos_{pid}")
@@ -2128,8 +2221,19 @@ def kategori_esleme_editoru(pid):
         st.success(f"Toplam {len(yeni)} kategori e\u015fle\u015ftirmesi kay\u0131tl\u0131.")
 
 
+def varsayilan_kategori_yaz(pid, cid):
+    """Varsayilan kategori ID'sini kaydeder; formun yeni degeri gostermesi icin sayfayi yeniler."""
+    pa_al(ayarlar, pid)["category_id"] = str(cid).strip()
+    ayar_yaz(ayarlar)
+    st.session_state[f"vk_bilgi_{pid}"] = str(cid).strip()
+    st.rerun()
+
+
 def pazar_ayar_formu(pid):
     pa = pa_al(ayarlar, pid)
+    bilgi = st.session_state.pop(f"vk_bilgi_{pid}", None)
+    if bilgi:
+        st.success(f"Varsay\u0131lan kategori ID kaydedildi: {bilgi}")
     with st.form(f"ayar_form_{pid}"):
         st.markdown("**Fiyat kurallar\u0131 (bu pazar yeri i\u00e7in)**")
         c1, c2, c3 = st.columns(3)
@@ -2143,7 +2247,8 @@ def pazar_ayar_formu(pid):
         if pid in ("n11", "idefix", "trendruum", "ptt", "hb"):
             st.markdown("**\u00dcr\u00fcn olu\u015fturma ayarlar\u0131**")
             c1, c2, c3 = st.columns(3)
-            yeni["category_id"] = c1.text_input("Varsay\u0131lan kategori ID", value=str(pa.get("category_id", "") or ""))
+            yeni["category_id"] = c1.text_input("Varsay\u0131lan kategori ID", value=str(pa.get("category_id", "") or ""),
+                                                key=f"vk_alan_{pid}_{pa.get('category_id', '')}")
             yeni["varsayilan_kategori_kullan"] = st.checkbox(
                 "E\u015fle\u015fmesi olmayan \u00fcr\u00fcnleri de varsay\u0131lan kategoriye koy",
                 value=bool(pa.get("varsayilan_kategori_kullan", False)),
