@@ -8,6 +8,7 @@ import base64
 import gzip
 import hashlib
 import hmac
+import html
 import ipaddress
 import json
 import os
@@ -481,6 +482,47 @@ def ilk_gorsel(df, secili):
     return sonuc.str.replace("http://", "https://", regex=False)
 
 
+VARSAYILAN_KADEME = [[500, 60.0], [5000, 30.0], [20000, 15.0], [None, 8.0]]
+
+
+def kademe_temizle(k):
+    """[[ust_sinir, marj], ...] -> gecerli, sirali liste. Son satir sinirsiz (None) olur."""
+    sonuc = []
+    for r in (k or []):
+        try:
+            ust = None if r[0] in (None, "") else float(r[0])
+            mj = float(r[1])
+        except (TypeError, ValueError, IndexError):
+            continue
+        if mj < 0 or (ust is not None and ust <= 0):
+            continue
+        sonuc.append([ust, mj])
+    sinirli = sorted([r for r in sonuc if r[0] is not None], key=lambda r: r[0])
+    sinirsiz = [r for r in sonuc if r[0] is None]
+    son = sinirsiz[-1] if sinirsiz else None
+    if not sinirli and not son:
+        return []
+    if son is None:
+        son = [None, sinirli[-1][1]]
+    return sinirli + [son]
+
+
+def kademeli_marj(alis, kademe, varsayilan):
+    """Alis fiyatina gore marj (%) serisi dondurur. Kademe yoksa varsayilan marj."""
+    kademe = kademe_temizle(kademe)
+    if not kademe:
+        return pd.Series([float(varsayilan)] * len(alis), index=alis.index)
+    sonuc = pd.Series([kademe[-1][1]] * len(alis), index=alis.index, dtype=float)
+    for ust, mj in reversed([r for r in kademe if r[0] is not None]):
+        sonuc = sonuc.where(alis > ust, mj)
+    return sonuc
+
+
+def ad_temizle(x):
+    t = html.unescape(html.unescape(str(x)))
+    return re.sub(r"\s+", " ", t).strip()
+
+
 DOVIZ_TL = {"TL", "TRY", "TRL", "\u20ba"}
 DOVIZ_USD = {"USD", "$"}
 DOVIZ_SON = {}  # tedarikci adi -> son senkronizasyondaki para birimi dagilimi
@@ -554,7 +596,8 @@ def normalle(tedarikci, df, harita, marj, sabit_ek, kritik_esik=0, stok_ust=50, 
     if ozet is not None:
         ozet["ornek_usd"] = [f"{str(r)[:60]} | {f:.2f} TL" for r, f in zip(kol("ad")[usd].head(3), alis[usd].head(3))]
     alis = alis.where(~bilinmeyen, 0.0)
-    satis = (alis * (1 + marj / 100) + sabit_ek).where(~bilinmeyen, 0.0)
+    marj_s = kademeli_marj(alis, bilgi.get("kademe") if bilgi.get("kademe_aktif") else None, marj)
+    satis = (alis * (1 + marj_s / 100) + sabit_ek).where(~bilinmeyen, 0.0)
     stok = kol("stok").map(sayi).clip(lower=0, upper=max(1, int(stok_ust))).astype(int)
     if kritik_esik and kritik_esik > 0:
         stok = stok.where(stok > kritik_esik, 0)
@@ -566,7 +609,7 @@ def normalle(tedarikci, df, harita, marj, sabit_ek, kritik_esik=0, stok_ust=50, 
         "gorsel": ilk_gorsel(df, harita.get("gorsel", "(yok)")),
         "tedarikci": tedarikci,
         "barkod": kol("kod").astype(str).str.strip(),
-        "urun_adi": kol("ad").astype(str).str.strip(),
+        "urun_adi": kol("ad").map(ad_temizle),
         "stok": stok,
         "alis_fiyati": alis.round(2),
         "satis_fiyati": satis.round(2),
@@ -631,7 +674,13 @@ def fiyat_artis_uygula(ayar, pid, df):
         anahtar = df["barkod"].astype(str)
         alis = anahtar.map(ref["alis_fiyati"])
         tadi = anahtar.map(ref["tedarikci"])
-        m_s = tadi.map(lambda t: float((ted.get(t) or {}).get("marj", 30.0)))
+        m_t = tadi.map(lambda t: float((ted.get(t) or {}).get("marj", 30.0)))
+        m_s = pd.Series(m_t.values, index=alis.index, dtype=float)
+        for t in tadi.dropna().unique():
+            bt = ted.get(t) or {}
+            if bt.get("kademe_aktif"):
+                mk = (tadi == t)
+                m_s[mk] = kademeli_marj(alis[mk], bt.get("kademe"), _f(bt.get("marj"), 30.0)).values
         k_s = tadi.map(lambda t: float((ted.get(t) or {}).get("sabit_ek", 0.0)))
         yeni = alis * (1 + (marj if marj > 0 else m_s) / 100) + (kargo if kargo > 0 else k_s)
         df["satis_fiyati"] = yeni.where(alis.notna() & (alis > 0), df["satis_fiyati"])
@@ -2127,6 +2176,19 @@ def tedarikci_sayfasi():
                 bilgi.update({"harita": harita, "marj": marj, "sabit_ek": sabit})
                 ayar_yaz(ayarlar)
                 st.success("Kaydedildi. Yeni de\u011ferler bir sonraki senkronizasyonda \u00fcr\u00fcnlere uygulan\u0131r.")
+            st.markdown("**\U0001f4ca Kademeli k\u00e2r marj\u0131 (al\u0131\u015f fiyat\u0131na g\u00f6re)**")
+            kad_a = st.checkbox("Kademeli marj\u0131 kullan (a\u00e7\u0131kken yukar\u0131daki tek marj yerine ge\u00e7er)", bool(bilgi.get("kademe_aktif")), key=f"{ad}_kad_a")
+            mevcut = kademe_temizle(bilgi.get("kademe")) or [list(r) for r in VARSAYILAN_KADEME]
+            tablo = pd.DataFrame([{"Al\u0131\u015f fiyat\u0131 bu TL'ye kadar (bo\u015f = \u00fcst\u00fc hepsi)": r[0], "Marj %": r[1]} for r in mevcut])
+            duz = st.data_editor(tablo, num_rows="dynamic", hide_index=True, key=f"{ad}_kad_t")
+            yeni_k = kademe_temizle([[(None if r.iloc[0] != r.iloc[0] else r.iloc[0]), r.iloc[1]] for _, r in duz.iterrows()])
+            if kad_a != bool(bilgi.get("kademe_aktif")) or yeni_k != kademe_temizle(bilgi.get("kademe")):
+                bilgi.update({"kademe_aktif": kad_a, "kademe": yeni_k or [list(r) for r in VARSAYILAN_KADEME]})
+                ayar_yaz(ayarlar)
+                st.success("Kademe kaydedildi. Senkronizasyondan sonra uygulan\u0131r.")
+            if kad_a:
+                ozet_k = ", ".join(("\u00fcst\u00fc" if r[0] is None else f"{int(r[0])} TL'ye kadar") + f" %{r[1]:g}" for r in kademe_temizle(bilgi.get("kademe")))
+                st.caption("\u00d6rnek: " + ozet_k)
 
 
 def ayarlari_geri_yukle(veri_y):
