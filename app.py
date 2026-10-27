@@ -1543,6 +1543,118 @@ def trendruum_urun_listesi(df, ayar):
     return liste, atlanan
 
 
+def trendruum_kategori_duzlestir(j):
+    """GET /categories yanitini (liste ya da {data:[...]}, ic ice sub_categories) duz listeye cevirir."""
+    if isinstance(j, dict):
+        for a in ("data", "categories", "items", "results"):
+            if isinstance(j.get(a), list):
+                j = j[a]
+                break
+        else:
+            j = [j]
+    cikti, goruldu = [], set()
+
+    def gez(dugum):
+        if not isinstance(dugum, dict):
+            return
+        cid = str(dugum.get("id") or dugum.get("_id") or "").strip()
+        alt = dugum.get("sub_categories")
+        if objectid_mi(cid) and cid not in goruldu:
+            goruldu.add(cid)
+            ad = str(dugum.get("name") or "")
+            cikti.append({
+                "ID": cid, "Kategori": str(dugum.get("full_path") or ad),
+                "Uc kategori": "evet" if not alt else "hayir",
+            })
+        for a in (alt or []):
+            gez(a)
+
+    for d in (j if isinstance(j, list) else []):
+        gez(d)
+    return cikti
+
+
+def trendruum_kategori_ara(ayar, ad, limit=40):
+    ad = str(ad or "").strip()
+    if len(ad) < 2:
+        raise ValueError("Aramak icin en az 2 harf yazin.")
+    token = trendruum_token(kimlik(ayar, "trendruum_key"), kimlik(ayar, "trendruum_secret"))
+    r = http("GET", f"{TR_BASE}/categories", params={"name": ad, "limit": int(limit)},
+             headers={"Authorization": f"Bearer {token}"}, timeout=60, tries=1)
+    try:
+        j = r.json()
+    except Exception:
+        j = None
+    return r.status_code, j, (r.text or "")[:1500]
+
+
+def trendruum_kategori_sema(ayar, cid):
+    """GET /categories/{id}: kategorinin ozellik ve varyant semasi."""
+    if not objectid_mi(cid):
+        raise ValueError("Kategori ID 24 karakterlik olmali.")
+    token = trendruum_token(kimlik(ayar, "trendruum_key"), kimlik(ayar, "trendruum_secret"))
+    r = http("GET", f"{TR_BASE}/categories/{cid}", headers={"Authorization": f"Bearer {token}"}, timeout=60, tries=1)
+    try:
+        j = r.json()
+    except Exception:
+        j = None
+    return r.status_code, j
+
+
+def trendruum_kategori_bulucu():
+    if not pazar_bagli(ayarlar, "trendruum"):
+        st.caption("Kategori aramak icin once Trendruum API bilgilerini kaydedin.")
+        return
+    st.caption("Urun tipini yazin (ornek: laptop, kulaklik, tencere). 'Uc kategori = evet' olanlari secin.")
+    c1, c2 = st.columns([3, 1])
+    ad = c1.text_input("Kategori adi", key="trk_ara_ad")
+    if gen(c2.button, "Ara", key="trk_ara_btn"):
+        try:
+            kod, j, ham = trendruum_kategori_ara(ayarlar, ad)
+            st.session_state["trk_sonuc"] = {
+                "kod": kod, "ham": ham, "json": j,
+                "liste": trendruum_kategori_duzlestir(j) if j is not None else [],
+            }
+        except Exception as e:
+            st.session_state["trk_sonuc"] = None
+            st.error(f"Hata: {e}")
+    g = st.session_state.get("trk_sonuc")
+    if not g:
+        return
+    if g["kod"] != 200:
+        st.error(f"Trendruum yaniti: HTTP {g['kod']}")
+    if not g["liste"]:
+        st.warning("Sonuc bulunamadi; farkli bir kelime deneyin.")
+        with st.expander("Ham yanit"):
+            st.text(g["ham"])
+        return
+    d = pd.DataFrame(g["liste"]).head(200)
+    st.dataframe(d, hide_index=True)
+    secenek = [f"{r.ID} \u2014 {r.Kategori}" for r in d.itertuples()]
+    sec = st.selectbox("Listeden sec", secenek, key="trk_sec")
+    secilen = sec.split(" \u2014 ")[0].strip()
+    k1, k2 = st.columns(2)
+    if gen(k1.button, "Varsayilan kategori yap", key="trk_varsayilan"):
+        pa_al(ayarlar, "trendruum")["category_id"] = secilen
+        ayar_yaz(ayarlar)
+        st.rerun()
+    if gen(k2.button, "Bu kategorinin zorunlu alanlari", key="trk_sema"):
+        try:
+            kod, j = trendruum_kategori_sema(ayarlar, secilen)
+            st.session_state["trk_sema_sonuc"] = (secilen, kod, j)
+        except Exception as e:
+            st.error(f"Hata: {e}")
+    sm = st.session_state.get("trk_sema_sonuc")
+    if sm and sm[0] == secilen:
+        j = sm[2] if isinstance(sm[2], dict) else {}
+        j = j.get("data") if isinstance(j.get("data"), dict) else j
+        st.caption(f"Yanit: HTTP {sm[1]}")
+        for baslik, anahtar in (("Ozellikler", "attributes"), ("Varyantlar", "variants")):
+            for x in (j.get(anahtar) or []):
+                if isinstance(x, dict):
+                    st.write(f"- {baslik}: {x.get('name')} ({x.get('slug')})" + (" - ZORUNLU" if x.get("required") else ""))
+
+
 def trendruum_gonder(ayar, liste, ilerleme=None):
     token = trendruum_token(kimlik(ayar, "trendruum_key"), kimlik(ayar, "trendruum_secret"))
     h = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
@@ -2290,7 +2402,20 @@ def toplu_urun_paneli(pid):
     mod = st.selectbox("G\u00f6nderim Modu", ["Tek \u00fcr\u00fcn (Test)", "T\u00fcm \u00dcr\u00fcnler"], key=f"{pid}_mod")
     df = fiyat_artis_uygula(ayarlar, pid, df)
     if mod.startswith("Tek"):
-        df = df.head(1)
+        aranan = st.text_input("Test i\u00e7in \u00fcr\u00fcn ara (ad veya barkod)", key=f"{pid}_tek_ara",
+                               help="\u00d6rnek: ASUS ya da Depo2-006.NOTE.ASUS.B1-I5-3D. Bo\u015f b\u0131rak\u0131rsan\u0131z listenin ilk \u00fcr\u00fcn\u00fc se\u00e7ilir.")
+        if aranan.strip():
+            q = tr_norm(aranan.strip())
+            eslesen = df[df["urun_adi"].map(tr_norm).str.contains(q, regex=False) | df["barkod"].astype(str).map(tr_norm).str.contains(q, regex=False)]
+            if eslesen.empty:
+                st.warning("Aramaya uyan \u00fcr\u00fcn yok (stokta olmayanlar ve kara listedekiler listede olmaz).")
+                return
+            eslesen = eslesen.head(50)
+            etiketler = [f"{r['urun_adi'][:70]} | {r['barkod']} | {r['satis_fiyati']:.2f} TL | stok {int(r['stok'])}" for _, r in eslesen.iterrows()]
+            secim = st.selectbox(f"{len(eslesen)} \u00fcr\u00fcn bulundu, birini se\u00e7in", range(len(etiketler)), format_func=lambda i: etiketler[i], key=f"{pid}_tek_sec")
+            df = eslesen.iloc[[secim]]
+        else:
+            df = df.head(1)
     try:
         liste, atlanan = {
             "n11": n11_urun_listesi, "idefix": idefix_urun_listesi, "trendruum": trendruum_urun_listesi,
@@ -2459,6 +2584,9 @@ def pazar_ayar(pid):
     if pid == "ptt":
         with st.expander("\U0001f50e PTT kategori ID bulucu (kategori ad\u0131ndan ID bul)"):
             ptt_kategori_bulucu()
+    if pid == "trendruum":
+        with st.expander("\U0001f50e Trendruum kategori ID bulucu (kategori ad\u0131ndan ID bul)"):
+            trendruum_kategori_bulucu()
     if pid in ("n11", "idefix", "trendruum", "ptt", "hb"):
         with st.expander("\U0001f5c2\ufe0f Kategori e\u015fle\u015ftirme (tedarik\u00e7i kategorisi \u2192 pazar yeri kategori ID)"):
             kategori_esleme_editoru(pid)
