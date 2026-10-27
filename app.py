@@ -481,15 +481,80 @@ def ilk_gorsel(df, secili):
     return sonuc.str.replace("http://", "https://", regex=False)
 
 
-def normalle(tedarikci, df, harita, marj, sabit_ek, kritik_esik=0, stok_ust=50):
+DOVIZ_TL = {"TL", "TRY", "TRL", "\u20ba"}
+DOVIZ_USD = {"USD", "$"}
+DOVIZ_SON = {}  # tedarikci adi -> son senkronizasyondaki para birimi dagilimi
+
+
+def kesin_sayi(x):
+    """Nokta her zaman ondalik ayracidir (ornek: 1282.275). Sadece kontrollu tedarikcilerde kullanilir."""
+    s = str(x).strip().replace("TL", "").replace(" ", "")
+    if not s:
+        return 0.0
+    if "," in s and "." in s:
+        s = s.replace(".", "").replace(",", ".")
+    elif "," in s:
+        s = s.replace(",", ".")
+    try:
+        return float(s)
+    except ValueError:
+        return 0.0
+
+
+def kdv_orani(x, varsayilan=0.20):
+    try:
+        v = float(str(x).strip().replace(",", "."))
+    except ValueError:
+        return varsayilan
+    if v > 1:
+        v = v / 100
+    return v if 0 <= v <= 0.5 else varsayilan
+
+
+def normalle(tedarikci, df, harita, marj, sabit_ek, kritik_esik=0, stok_ust=50, bilgi=None):
     def kol(ad):
         k = harita.get(ad, "(yok)")
         if k == "(yok)" or k not in df.columns:
             return pd.Series([""] * len(df), index=df.index)
         return df[k]
 
-    alis = kol("fiyat").map(sayi)
-    satis = alis * (1 + marj / 100) + sabit_ek
+    bilgi = bilgi or {}
+    kontrol = bool(bilgi.get("doviz_kontrol"))
+    kdv_ekle = bool(bilgi.get("kdv_ekle"))
+    ozet = None
+    bilinmeyen = pd.Series([False] * len(df), index=df.index)
+    if kontrol or kdv_ekle:
+        fk = harita.get("fiyat", "(yok)")
+        if kontrol and str(fk).lower().endswith("_tl"):
+            raise ValueError(f"Fiyat alani '{fk}' zaten TL karsiligi. Para birimi kontrolu icin ham fiyat alanini (ornek: urun_fiyat) secin.")
+        alis = kol("fiyat").map(kesin_sayi)
+    else:
+        alis = kol("fiyat").map(sayi)
+    if kontrol:
+        dk = tahmin(df.columns, ["doviz", "currency", "para_birimi"])
+        if dk not in df.columns:
+            raise ValueError("XML'de para birimi alani (urun_doviz) bulunamadi. Alan gelmeden senkronizasyon yapilmaz.")
+        cur = df[dk].astype(str).str.strip().str.upper()
+        usd = cur.isin(DOVIZ_USD)
+        tl = cur.isin(DOVIZ_TL)
+        bilinmeyen = ~(usd | tl)
+        kur = _f(bilgi.get("usd_kuru"))
+        if usd.any() and kur <= 1:
+            raise ValueError(f"{int(usd.sum())} urun USD ama dolar kuru girilmemis. Tedarikci ayarindan kuru yazin.")
+        alis = alis.where(~usd, alis * kur)
+        ozet = {
+            "tl": int(tl.sum()), "usd": int(usd.sum()), "bilinmeyen": int(bilinmeyen.sum()),
+            "bilinmeyen_degerler": cur[bilinmeyen].replace("", "(bos)").value_counts().head(5).to_dict(),
+            "ornek_usd": [],
+        }
+    if kdv_ekle:
+        kdk = tahmin(df.columns, ["kdv", "vat"])
+        oran = df[kdk].map(kdv_orani) if kdk in df.columns else pd.Series([0.20] * len(df), index=df.index)
+        alis = alis * (1 + oran)
+    if ozet is not None:
+        ozet["ornek_usd"] = [f"{str(r)[:60]} | {f:.2f} TL" for r, f in zip(kol("ad")[usd].head(3), alis[usd].head(3))]
+    alis = alis.where(~bilinmeyen, 0.0)
+    satis = (alis * (1 + marj / 100) + sabit_ek).where(~bilinmeyen, 0.0)
     stok = kol("stok").map(sayi).clip(lower=0, upper=max(1, int(stok_ust))).astype(int)
     if kritik_esik and kritik_esik > 0:
         stok = stok.where(stok > kritik_esik, 0)
@@ -508,7 +573,11 @@ def normalle(tedarikci, df, harita, marj, sabit_ek, kritik_esik=0, stok_ust=50):
         "kategori": kategori,
     })
     out = out[(out["barkod"] != "") & (out["urun_adi"] != "")]
-    return out.drop_duplicates(subset=["barkod"], keep="first")
+    out = out.drop_duplicates(subset=["barkod"], keep="first")
+    if bilinmeyen.any():
+        out.loc[out["barkod"].isin(kol("kod").astype(str).str.strip()[bilinmeyen]), "stok"] = 0
+    out.attrs["doviz_ozet"] = ozet
+    return out
 
 
 def tedarikci_senkron(ad, bilgi, kritik_esik=0, stok_ust=50):
@@ -516,8 +585,14 @@ def tedarikci_senkron(ad, bilgi, kritik_esik=0, stok_ust=50):
     df = normalle(
         ad, df_ham, bilgi.get("harita", {}),
         float(bilgi.get("marj", 30.0)), float(bilgi.get("sabit_ek", 0.0)),
-        kritik_esik, stok_ust,
+        kritik_esik, stok_ust, bilgi,
     )
+    ozet = df.attrs.get("doviz_ozet")
+    if ozet:
+        DOVIZ_SON[ad] = ozet
+        log_yaz(ad, "BILGI", f"Para birimi: TL={ozet['tl']}, USD={ozet['usd']}, belirsiz={ozet['bilinmeyen']}")
+        if bilgi.get("usd_bekle") and ozet["usd"] == 0:
+            raise ValueError("USD urun beklenirken hic USD urun gelmedi. Tedarikci para birimi alanini henuz duzeltmemis olabilir; senkronizasyon durduruldu, eski veri korundu.")
     if df.empty:
         raise ValueError("XML'den ge\u00e7erli \u00fcr\u00fcn \u00e7\u0131kmad\u0131. Alan e\u015fle\u015ftirmesini kontrol edin.")
     sutunlar = ["gorsel", "tedarikci", "barkod", "urun_adi", "stok", "alis_fiyati", "satis_fiyati", "kategori"]
@@ -1994,6 +2069,27 @@ def tedarikci_sayfasi():
             if float(zs) != _f(bilgi.get("zaman_asimi"), 300.0):
                 bilgi["zaman_asimi"] = float(zs)
                 ayar_yaz(ayarlar)
+            st.markdown("**\U0001f4b1 Fiyat / Para Birimi**")
+            kdv_e = st.checkbox("Fiyata KDV ekle (XML'deki KDV alan\u0131ndan, yoksa %20)", bool(bilgi.get("kdv_ekle")), key=f"{ad}_kdv_ekle")
+            dv_k = st.checkbox("Para birimi kontrol\u00fc (urun_doviz: TL / USD)", bool(bilgi.get("doviz_kontrol")), key=f"{ad}_dvk",
+                               help="A\u00e7\u0131kken USD \u00fcr\u00fcnler dolar kuruyla TL'ye \u00e7evrilir. TL/USD d\u0131\u015f\u0131 ya da bo\u015f para birimli \u00fcr\u00fcnler g\u00f6nderilmez.")
+            kur_g = st.number_input("Dolar kuru (TL)", 0.0, 1000.0, _f(bilgi.get("usd_kuru")), 0.05, key=f"{ad}_kur",
+                                    help="Elle girin ve d\u00fczenli g\u00fcncelleyin.")
+            usd_b = st.checkbox("USD \u00fcr\u00fcn bekleniyor (hi\u00e7 gelmezse senkronizasyonu durdur)", bool(bilgi.get("usd_bekle")), key=f"{ad}_usdb")
+            yeni_d = {"kdv_ekle": kdv_e, "doviz_kontrol": dv_k, "usd_kuru": float(kur_g), "usd_bekle": usd_b}
+            if any(bilgi.get(k) != v for k, v in yeni_d.items()):
+                bilgi.update(yeni_d)
+                ayar_yaz(ayarlar)
+                st.success("Kaydedildi. Senkronizasyondan sonra fiyatlara uygulan\u0131r.")
+            oz = DOVIZ_SON.get(ad)
+            if oz:
+                st.dataframe(pd.DataFrame([{"TL": oz["tl"], "USD": oz["usd"], "Belirsiz (g\u00f6nderilmez)": oz["bilinmeyen"]}]), hide_index=True)
+                if oz["bilinmeyen_degerler"]:
+                    st.warning(f"Belirsiz para birimi de\u011ferleri: {oz['bilinmeyen_degerler']}")
+                for o in oz.get("ornek_usd") or []:
+                    st.caption(f"USD \u00f6rnek: {o}")
+                if oz["usd"] == 0:
+                    st.warning("Hi\u00e7 USD \u00fcr\u00fcn yok. Tedarik\u00e7i para birimi alan\u0131n\u0131 hen\u00fcz d\u00fczeltmemi\u015f olabilir.")
             onizleme = st.session_state.get(f"onizleme_{ad}")
             if gen(st.button, "\U0001f50d XML alanlar\u0131n\u0131 y\u00fckle / yenile", key=f"onizle_{ad}"):
                 try:
