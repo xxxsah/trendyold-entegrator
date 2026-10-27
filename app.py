@@ -862,7 +862,7 @@ def n11_urun_listesi(df, ayar):
         gorsel = str(r.get("gorsel", "")).strip()
         kod = str(r["barkod"]).strip()
         fiyat = round(_f(r.get("satis_fiyati")), 2)
-        cat = _i(kategori_id(pa, ayar, r.get("kategori"), "n11") or cat_varsayilan)
+        cat = _i(kat_sec(pa, ayar, r.get("kategori"), "n11"))
         if not gorsel.startswith("https") or fiyat <= 0 or not kod or cat <= 0:
             atlanan += 1
             continue
@@ -948,7 +948,7 @@ def idefix_urun_listesi(df, ayar):
         kod = str(r["barkod"]).strip()
         bk = idefix_barkod(kod, ayar)
         fiyat = round(_f(r.get("satis_fiyati")), 2)
-        cat = _i(kategori_id(pa, ayar, r.get("kategori"), "idefix") or cat_varsayilan)
+        cat = _i(kat_sec(pa, ayar, r.get("kategori"), "idefix"))
         if not gorsel.startswith("https") or fiyat <= 0 or not bk or cat <= 0:
             atlanan += 1
             continue
@@ -1066,7 +1066,7 @@ def hb_urun_listesi(df, ayar):
         kod = str(r["barkod"]).strip()
         barkod = sabit_barkod(kod, uret)
         fiyat = round(_f(r.get("satis_fiyati")), 2)
-        cat = kategori_id(pa, ayar, r.get("kategori"), "hb") or cat_varsayilan
+        cat = kat_sec(pa, ayar, r.get("kategori"), "hb")
         if not gorsel.startswith("https") or fiyat <= 0 or not barkod or not cat:
             atlanan += 1
             continue
@@ -1206,7 +1206,7 @@ def ptt_urun_listesi(df, ayar):
         kod = str(r["barkod"]).strip()
         barkod = sabit_barkod(kod, uret)
         fiyat = round(_f(r.get("satis_fiyati")), 2)
-        cat = kategori_id(pa, ayar, r.get("kategori"), "ptt") or cat_varsayilan
+        cat = kat_sec(pa, ayar, r.get("kategori"), "ptt")
         if not gorsel.startswith("https") or fiyat <= 0 or not barkod or not cat.isdigit():
             atlanan += 1
             continue
@@ -1529,7 +1529,7 @@ def trendruum_urun_listesi(df, ayar):
         kod = str(r["barkod"]).strip()
         barkod = sabit_barkod(kod, uret)
         fiyat = _f(r.get("satis_fiyati"))
-        cat = kategori_id(pa, ayar, r.get("kategori"), "trendruum") or cat_varsayilan
+        cat = kat_sec(pa, ayar, r.get("kategori"), "trendruum")
         if not gorsel or fiyat <= 0 or not barkod or not objectid_mi(cat):
             atlanan += 1
             continue
@@ -1694,6 +1694,16 @@ def trendruum_guncelle(ayar, df, ilerleme=None):
 
     ok_k, hata_k, loglar = paketle(kayit, 1000, gonder, ilerleme, "Trendruum")
     return _sonuc("trendruum", ok_k, hata_k, loglar, atlanan)
+
+
+def kat_sec(pa, ayar, kategori, pid):
+    """Eslesmis kategori ID'si; yoksa varsayilan SADECE 'varsayilan kategoriyi kullan' acikken."""
+    v = kategori_id(pa, ayar, kategori, pid)
+    if v:
+        return v
+    if pa.get("varsayilan_kategori_kullan"):
+        return str(pa.get("category_id") or "").strip()
+    return ""
 
 
 def kategori_id(pa, ayar, kategori, pid):
@@ -2084,16 +2094,30 @@ def kategori_esleme_editoru(pid):
     if df.empty or "kategori" not in df.columns:
         st.caption("Kategori e\u015fle\u015ftirmesi i\u00e7in \u00f6nce tedarik\u00e7i senkronizasyonu yap\u0131n.")
         return
-    anaklar = sorted({str(k).split(">>>")[0].strip() for k in df["kategori"].dropna() if str(k).strip()})[:300]
     mevcut = pa.get("kategori_eslesme") or {}
+    ana = df["kategori"].dropna().astype(str).map(lambda k: k.split(">>>")[0].strip())
+    adet = ana[ana != ""].value_counts()
+    st.caption(f"{len(adet)} farkl\u0131 tedarik\u00e7i kategorisi var; e\u015fle\u015fmemi\u015f \u00fcr\u00fcnler (varsay\u0131lan kapal\u0131yken) g\u00f6nderilmez.")
+    ara = st.text_input("Kategori ara (filtre)", key=f"kat_ara_{pid}")
+    liste = [k for k in adet.index if not ara.strip() or tr_norm(ara) in tr_norm(k)]
+    sadece_bos = st.checkbox("Sadece ID'si girilmemi\u015fleri g\u00f6ster", key=f"kat_bos_{pid}")
+    if sadece_bos:
+        liste = [k for k in liste if not mevcut.get(k)]
+    liste = liste[:300]
     tablo = pd.DataFrame({
-        "Tedarik\u00e7i kategorisi": anaklar,
-        "Pazar yeri kategori ID": [str(mevcut.get(k, "")) for k in anaklar],
+        "Tedarik\u00e7i kategorisi": liste,
+        "\u00dcr\u00fcn say\u0131s\u0131": [int(adet[k]) for k in liste],
+        "Pazar yeri kategori ID": [str(mevcut.get(k, "")) for k in liste],
     })
-    duz = st.data_editor(tablo, hide_index=True, disabled=["Tedarik\u00e7i kategorisi"], key=f"kat_edit_{pid}")
+    duz = st.data_editor(tablo, hide_index=True, disabled=["Tedarik\u00e7i kategorisi", "\u00dcr\u00fcn say\u0131s\u0131"], key=f"kat_edit_{pid}_{ara}_{sadece_bos}")
     if gen(st.button, "E\u015fle\u015ftirmeyi kaydet", key=f"kat_kaydet_{pid}"):
-        yeni = {str(r["Tedarik\u00e7i kategorisi"]): str(r["Pazar yeri kategori ID"]).strip()
-                for _, r in duz.iterrows() if str(r["Pazar yeri kategori ID"]).strip()}
+        yeni = dict(mevcut)  # filtrede g\u00f6r\u00fcnmeyen e\u015fle\u015ftirmeler korunur
+        for _, r in duz.iterrows():
+            k, v = str(r["Tedarik\u00e7i kategorisi"]), str(r["Pazar yeri kategori ID"]).strip()
+            if v:
+                yeni[k] = v
+            else:
+                yeni.pop(k, None)
         if pid == "trendruum":
             gecersiz = [k for k, v in yeni.items() if not objectid_mi(v)]
             if gecersiz:
@@ -2101,7 +2125,7 @@ def kategori_esleme_editoru(pid):
                 return
         pa["kategori_eslesme"] = yeni
         ayar_yaz(ayarlar)
-        st.success(f"{len(yeni)} kategori e\u015fle\u015ftirmesi kaydedildi.")
+        st.success(f"Toplam {len(yeni)} kategori e\u015fle\u015ftirmesi kay\u0131tl\u0131.")
 
 
 def pazar_ayar_formu(pid):
@@ -2120,6 +2144,11 @@ def pazar_ayar_formu(pid):
             st.markdown("**\u00dcr\u00fcn olu\u015fturma ayarlar\u0131**")
             c1, c2, c3 = st.columns(3)
             yeni["category_id"] = c1.text_input("Varsay\u0131lan kategori ID", value=str(pa.get("category_id", "") or ""))
+            yeni["varsayilan_kategori_kullan"] = st.checkbox(
+                "E\u015fle\u015fmesi olmayan \u00fcr\u00fcnleri de varsay\u0131lan kategoriye koy",
+                value=bool(pa.get("varsayilan_kategori_kullan", False)),
+                help="Kapal\u0131yken (\u00f6nerilen) yaln\u0131zca 'Kategori e\u015fle\u015ftirme'de ID'si girilmi\u015f \u00fcr\u00fcnler g\u00f6nderilir; "
+                     "di\u011ferleri atlan\u0131r. A\u00e7\u0131kken t\u00fcm \u00fcr\u00fcnler varsay\u0131lan kategoriye d\u00fc\u015fer.")
             if pid in ("idefix", "trendruum"):
                 yeni["brand_id"] = c2.text_input("Marka ID", value=str(pa.get("brand_id", "") or (kimlik(ayarlar, "trendruum_brand") if pid == "trendruum" else "")))
             kdv_liste = [20, 10, 1, 0]
