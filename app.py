@@ -1649,7 +1649,7 @@ def trendruum_kategori_duzlestir(j):
     return cikti
 
 
-def trendruum_kategori_ara(ayar, ad, limit=40):
+def trendruum_kategori_ara(ayar, ad, limit=300):
     ad = str(ad or "").strip()
     if len(ad) < 2:
         raise ValueError("Aramak icin en az 2 harf yazin.")
@@ -1726,6 +1726,19 @@ def kategori_oner(ted_yol, dugumler):
     return en["ID"], en["yol"], guven
 
 
+def kategori_siralama(liste, aranan):
+    """Aranan ada en yakin (son parcasi kisa ve aranani iceren) uc kategorileri uste alir."""
+    q = tr_norm(aranan).strip()
+
+    def anahtar(k):
+        son = tr_norm(k["Kategori"].split(">")[-1]).strip()
+        icerir = all(w in son for w in q.split()) if q else False
+        uc = 0 if k.get("Uc kategori", "evet") == "evet" else 1
+        return (0 if icerir else 1, uc, abs(len(son) - len(q)), len(k["Kategori"]))
+
+    return sorted(liste, key=anahtar)
+
+
 def kategoriye_ata_paneli(pid, secilen):
     """Bulucuda secilen pazar yeri kategorisini, bir tedarikci kategorisine tek tikla atar."""
     bilgi = st.session_state.pop(f"ata_bilgi_{pid}", None)
@@ -1766,7 +1779,7 @@ def trendruum_kategori_bulucu():
             kod, j, ham = trendruum_kategori_ara(ayarlar, ad)
             st.session_state["trk_sonuc"] = {
                 "kod": kod, "ham": ham, "json": j,
-                "liste": trendruum_kategori_duzlestir(j) if j is not None else [],
+                "liste": kategori_siralama(trendruum_kategori_duzlestir(j), ad) if j is not None else [],
             }
         except Exception as e:
             st.session_state["trk_sonuc"] = None
@@ -1782,6 +1795,7 @@ def trendruum_kategori_bulucu():
             st.text(g["ham"])
         return
     d = pd.DataFrame(g["liste"]).head(200)
+    st.caption(f"{len(g['liste'])} sonu\u00e7; aranan ada en yak\u0131n olanlar \u00fcstte.")
     st.dataframe(d, hide_index=True)
     secenek = [f"{r.ID} \u2014 {r.Kategori}" for r in d.itertuples()]
     sec = st.selectbox("Listeden sec", secenek, key="trk_sec")
@@ -2359,7 +2373,7 @@ def hb_kategori_bulucu():
     st.caption(f"{len(liste):,} u\u00e7 kategori y\u00fcklendi.")
     ad = st.text_input("Kategori ad\u0131 (birden \u00e7ok kelime yazabilirsiniz)", key="hbk_ara")
     kel = tr_norm(ad).split()
-    bulunan = [k for k in liste if kel and all(w in tr_norm(k["Kategori"]) for w in kel)][:100]
+    bulunan = kategori_siralama([k for k in liste if kel and all(w in tr_norm(k["Kategori"]) for w in kel)], ad)[:100]
     if not kel:
         return
     if not bulunan:
