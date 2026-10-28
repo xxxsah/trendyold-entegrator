@@ -75,6 +75,7 @@ VARSAYILAN = {
     "ptt_oto_guncelle": False,
     "pazar_ayarlari": {},
     "kara_liste": "",
+    "stok_sifir": {},
     "son_yedek": "",
     "ptt_takip": [],
 }
@@ -250,6 +251,59 @@ def log_yaz(tedarikci, durum, mesaj=""):
         )
         c.execute("DELETE FROM senkron_log WHERE id <= (SELECT MAX(id) FROM senkron_log) - 3000")
         c.commit()
+
+
+def stok_sifir_kume(ayar):
+    return {str(b) for b in (ayar.get("stok_sifir") or {})}
+
+
+def stok_sifir_maskesi(ayar, df):
+    """Elle 'stoku sifir' yapilmis (kilitli) barkodlar icin True doner."""
+    if df.empty or "barkod" not in df.columns:
+        return pd.Series(False, index=df.index)
+    return df["barkod"].astype(str).isin(stok_sifir_kume(ayar))
+
+
+def stok_sifirla(ayar, barkodlar, pazarlara_gonder=True):
+    """Barkodlari kilitler, veritabaninda stogu 0 yapar ve istenirse bagli pazar yerlerine hemen gonderir.
+    Donus: [(pazar_adi, ok, hata_ya_da_mesaj), ...]"""
+    barkodlar = sorted({str(b).strip() for b in barkodlar if str(b).strip()})
+    if not barkodlar:
+        return []
+    z = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    kilit = ayar.setdefault("stok_sifir", {})
+    for b in barkodlar:
+        kilit[b] = z
+    ayar_yaz(ayar)
+    with closing(baglan()) as c:
+        for i in range(0, len(barkodlar), 500):
+            parca = barkodlar[i:i + 500]
+            c.execute(f"UPDATE urunler SET stok = 0 WHERE barkod IN ({','.join('?' * len(parca))})", parca)
+        c.commit()
+    sonuc = []
+    if pazarlara_gonder:
+        df = urunleri_oku()
+        df = df[df["barkod"].isin(barkodlar)].drop_duplicates("barkod").reset_index(drop=True)
+        for pid in GUNCELLEYICI:
+            if not pazar_bagli(ayar, pid):
+                continue
+            try:
+                ok, hata, _ = pazara_gonder(ayar, pid, df)
+                sonuc.append((PAZAR_AD.get(pid, pid), ok, hata))
+            except Exception as e:
+                sonuc.append((PAZAR_AD.get(pid, pid), 0, str(e)))
+    log_yaz("Sistem", "OK", f"{len(barkodlar)} \u00fcr\u00fcn\u00fcn sto\u011fu elle s\u0131f\u0131rland\u0131 (kilitlendi).")
+    return sonuc
+
+
+def stok_kilidi_kaldir(ayar, barkodlar):
+    kilit = ayar.setdefault("stok_sifir", {})
+    n = 0
+    for b in barkodlar:
+        if kilit.pop(str(b), None) is not None:
+            n += 1
+    ayar_yaz(ayar)
+    return n
 
 
 def pazar_isaretle(pazar, ok_list, hata_list):
@@ -674,6 +728,9 @@ def tedarikci_senkron(ad, bilgi, kritik_esik=0, stok_ust=50):
             raise ValueError("USD urun beklenirken hic USD urun gelmedi. Tedarikci para birimi alanini henuz duzeltmemis olabilir; senkronizasyon durduruldu, eski veri korundu.")
     if df.empty:
         raise ValueError("XML'den ge\u00e7erli \u00fcr\u00fcn \u00e7\u0131kmad\u0131. Alan e\u015fle\u015ftirmesini kontrol edin.")
+    kilit = stok_sifir_kume(ayar_oku())
+    if kilit:  # elle sifirlanan urunler tedarikci stogu gelse bile 0 kalir
+        df.loc[df["barkod"].astype(str).isin(kilit), "stok"] = 0
     sutunlar = ["gorsel", "tedarikci", "barkod", "urun_adi", "stok", "alis_fiyati", "satis_fiyati", "kategori"]
     with closing(baglan()) as c:
         try:
@@ -749,10 +806,11 @@ def sabit_barkod(kod, uret=False):
     return f"869{h:09d}"
 
 
-def paketle(kayitlar, paket, fn, ilerleme=None, ad=""):
+def paketle(kayitlar, paket, fn, ilerleme=None, ad="", durdur=0):
     """kayitlar: [(anahtar, veri)]. fn(veri_listesi) -> (basarili_mi, mesaj).
     Her paketin sonucu GER\u00c7EK HTTP durumuna g\u00f6re say\u0131l\u0131r."""
     ok_k, hata_k, loglar = [], [], []
+    ust_uste = 0
     toplam = max(1, -(-len(kayitlar) // paket))
     for no, i in enumerate(range(0, len(kayitlar), paket), 1):
         grup = kayitlar[i:i + paket]
@@ -763,10 +821,20 @@ def paketle(kayitlar, paket, fn, ilerleme=None, ad=""):
             basari, mesaj = False, f"\u0130stek hatas\u0131: {e}"
         if basari:
             ok_k += anahtarlar
+            ust_uste = 0
             loglar.append(f"\u2705 {ad} paket {no}/{toplam}: {len(grup)} kay\u0131t. {mesaj}".strip())
         else:
             hata_k += anahtarlar
+            ust_uste += 1
             loglar.append(f"\u274c {ad} paket {no}/{toplam}: {len(grup)} kay\u0131t BA\u015eARISIZ. {mesaj}".strip())
+        if durdur and ust_uste >= durdur:
+            kalan = len(kayitlar) - (i + len(grup))
+            if kalan > 0:
+                loglar.append(f"\u26d4 {ad}: \u00fcst \u00fcste {durdur} paket hata ald\u0131, g\u00f6nderim DURDURULDU. "
+                              f"G\u00f6nderilmeyen kalan kay\u0131t: {kalan}. Hata mesaj\u0131n\u0131 d\u00fczeltip tekrar deneyin.")
+                if ilerleme:
+                    ilerleme(1.0, loglar)
+                break
         if ilerleme:
             ilerleme(no / toplam, loglar)
     return ok_k, hata_k, loglar
@@ -923,7 +991,7 @@ def n11_urun_gonder(ayar, liste, ilerleme=None):
                  json={"payload": {"integrator": "SahEntegre", "skus": grup}})
         return r.status_code == 200, yanit_ozet(r)
 
-    ok_k, hata_k, loglar = paketle(kayit, 100, gonder, ilerleme, "N11")
+    ok_k, hata_k, loglar = paketle(kayit, 100, gonder, ilerleme, "N11", durdur=3)
     return len(ok_k), len(hata_k), loglar
 
 
@@ -1007,7 +1075,7 @@ def idefix_gonder(ayar, liste, ilerleme=None):
         r = http("POST", f"{ID_BASE}/pim/pool/{v}/create", json={"products": grup}, headers=h, timeout=120, tries=2)
         return r.status_code in (200, 201, 202), yanit_ozet(r)
 
-    ok_k, hata_k, loglar = paketle(kayit, 100, gonder, ilerleme, "\u0130defix")
+    ok_k, hata_k, loglar = paketle(kayit, 100, gonder, ilerleme, "\u0130defix", durdur=3)
     return len(ok_k), len(hata_k), loglar
 
 
@@ -1164,7 +1232,7 @@ def hb_urun_gonder(ayar, liste, ilerleme=None):
                 ozet += f" | izleme kodu: {t.group(1)}"
         return ok, ozet
 
-    ok_k, hata_k, loglar = paketle(kayit, 100, gonder, ilerleme, "Hepsiburada")
+    ok_k, hata_k, loglar = paketle(kayit, 100, gonder, ilerleme, "Hepsiburada", durdur=3)
     return len(ok_k), len(hata_k), loglar
 
 
@@ -1354,7 +1422,7 @@ def ptt_urun_gonder(ayar, liste, ilerleme=None):
         ok, ek = ptt_yanit_kontrol(r)
         return ok, yanit_ozet(r) + ek + (f" | trackingId: {tid}" if tid else "")
 
-    ok_k, hata_k, loglar = paketle(kayit, 25, gonder, ilerleme, "PTT")
+    ok_k, hata_k, loglar = paketle(kayit, 25, gonder, ilerleme, "PTT", durdur=3)
     try:
         ptt_takip_kaydet(ayar, izler)
     except Exception:
@@ -1832,7 +1900,7 @@ def trendruum_gonder(ayar, liste, ilerleme=None):
         r = http("POST", f"{TR_BASE}/products/bulk", json={"products": grup}, headers=h, timeout=60, tries=2)
         return r.status_code in (200, 201, 202), yanit_ozet(r)
 
-    ok_k, hata_k, loglar = paketle(kayit, 50, gonder, ilerleme, "Trendruum")
+    ok_k, hata_k, loglar = paketle(kayit, 50, gonder, ilerleme, "Trendruum", durdur=3)
     return len(ok_k), len(hata_k), loglar
 
 
@@ -1900,7 +1968,7 @@ def pazara_gonder(ayar, pid, df, ilerleme=None):
         if not pazar_bagli(ayar, pid):
             raise RuntimeError(f"{ad} API bilgileri eksik.")
         df = fiyat_artis_uygula(ayar, pid, df)
-        kara = kara_liste_maskesi(ayar, df)
+        kara = kara_liste_maskesi(ayar, df) | stok_sifir_maskesi(ayar, df)
         if kara.any():  # kara listedeki \u00fcr\u00fcnler pazarda sat\u0131\u015ftan kalks\u0131n (stok 0)
             df = df.copy()
             df.loc[kara, "stok"] = 0
@@ -2418,7 +2486,11 @@ def oto_esleme(pid, pa, adet, mevcut):
     pazar_ad = {"trendruum": "Trendruum", "hb": "Hepsiburada"}.get(pid, pid)
     st.caption(f"{pazar_ad} kategori listesini \u00e7ekip tedarik\u00e7i kategorilerinize en yak\u0131n kategoriyi \u00f6nerir. "
                "Hi\u00e7bir \u015fey kendili\u011finden kaydedilmez; i\u015faretledi\u011finiz sat\u0131rlar kaydedilir.")
-    if gen(st.button, "\u00d6nerileri haz\u0131rla", key=f"oto_hazirla_{pid}"):
+    bildirim = st.session_state.pop(f"oto_bildirim_{pid}", None)
+    if bildirim:
+        st.success(bildirim)
+    tek_tus = gen(st.button, "\u26a1 Tek tu\u015f: hepsini bul, y\u00fcksek g\u00fcvenlileri kaydet", key=f"oto_tek_{pid}", type="primary")
+    if gen(st.button, "\u00d6nerileri haz\u0131rla (\u00f6nce ben bakay\u0131m)", key=f"oto_hazirla_{pid}") or tek_tus:
         try:
             with st.spinner("Kategori listesi al\u0131n\u0131yor..."):
                 dugumler = trendruum_agac_yukle(ayarlar) if pid == "trendruum" else hb_oto_dugumler(ayarlar)
@@ -2430,6 +2502,23 @@ def oto_esleme(pid, pa, adet, mevcut):
                 satirlar.append({"Onayla": g == "yuksek", "Tedarik\u00e7i kategorisi": k, "\u00dcr\u00fcn": int(adet[k]),
                                  "\u00d6nerilen kategori": y, "G\u00fcven": {"yuksek": "Y\u00fcksek", "orta": "Orta", "dusuk": "D\u00fc\u015f\u00fck"}.get(g, "Yok"),
                                  "ID": i})
+            if tek_tus:
+                yeni_esl = dict(mevcut)
+                kayit = 0
+                for r in satirlar:
+                    if r["G\u00fcven"] == "Y\u00fcksek" and str(r["ID"]).strip():
+                        yeni_esl[str(r["Tedarik\u00e7i kategorisi"])] = str(r["ID"])
+                        kayit += 1
+                pa["kategori_eslesme"] = yeni_esl
+                ayar_yaz(ayarlar)
+                satirlar = [r for r in satirlar if not (r["G\u00fcven"] == "Y\u00fcksek" and str(r["ID"]).strip())]
+                for r in satirlar:
+                    r["Onayla"] = False
+                st.session_state[f"oto_bildirim_{pid}"] = (
+                    f"{kayit} kategori otomatik e\u015fle\u015ftirildi ve kaydedildi. {len(satirlar)} kategori i\u00e7in g\u00fcveni d\u00fc\u015f\u00fck "
+                    "\u00f6neri a\u015fa\u011f\u0131da; kontrol edip i\u015faretleyin. B\u00fcy\u00fck kategorileri tabloda mutlaka g\u00f6zden ge\u00e7irin.")
+                st.session_state[f"oneri_{pid}"] = satirlar
+                st.rerun()
             st.session_state[f"oneri_{pid}"] = satirlar
         except Exception as e:
             st.session_state[f"oneri_{pid}"] = None
@@ -2844,6 +2933,37 @@ def ilk_gonderilebilir(df, pid, uretici, en_fazla=500):
     return None, -1
 
 
+def kategori_secimi_uygula(pid, df):
+    """Gonderilecek kategorileri alt alta isaretlettirir; df'yi buna gore suzer."""
+    if df.empty or "kategori" not in df.columns:
+        return df
+    pa = pa_al(ayarlar, pid)
+    esl = pa.get("kategori_eslesme") or {}
+    varsayilan = bool(pa.get("varsayilan_kategori_kullan"))
+    ana = df["kategori"].fillna("").astype(str).map(lambda k: k.split(">>>")[0].strip())
+    adet = ana[ana != ""].value_counts()
+    gosterilen = [k for k in adet.index if varsayilan or esl.get(k)]
+    eslesmeyen = [k for k in adet.index if k not in gosterilen]
+    if eslesmeyen:
+        st.caption(f"{len(eslesmeyen)} kategori ({int(adet[eslesmeyen].sum())} \u00fcr\u00fcn) pazar yeri kategorisine e\u015fle\u015ftirilmedi\u011fi i\u00e7in listede yok ve g\u00f6nderilmez.")
+    if not gosterilen:
+        st.warning("E\u015fle\u015ftirilmi\u015f kategori yok. Genel Ayarlar > Kategori e\u015fle\u015ftirme b\u00f6l\u00fcm\u00fcnden e\u015fle\u015ftirin.")
+        return df.iloc[0:0]
+    st.markdown("**G\u00f6nderilecek kategoriler**")
+    tumu = st.checkbox("T\u00fcm kategorileri i\u015faretle", value=True, key=f"{pid}_kat_tumu")
+    tablo = pd.DataFrame({
+        "G\u00f6nder": [bool(tumu)] * len(gosterilen),
+        "Kategori": gosterilen,
+        "\u00dcr\u00fcn": [int(adet[k]) for k in gosterilen],
+        "E\u015fle\u015fme": ["Kay\u0131tl\u0131" if esl.get(k) else "Varsay\u0131lan" for k in gosterilen],
+    })
+    duz = st.data_editor(tablo, hide_index=True, height=min(420, 40 + 35 * len(tablo)),
+                         disabled=["Kategori", "\u00dcr\u00fcn", "E\u015fle\u015fme"], key=f"{pid}_kat_ed_{bool(tumu)}")
+    secilen = set(duz.loc[duz["G\u00f6nder"], "Kategori"])
+    st.caption(f"{len(secilen)}/{len(gosterilen)} kategori i\u015faretli. Yaln\u0131zca i\u015faretlenenler g\u00f6nderilir.")
+    return df[ana.isin(secilen).values]
+
+
 def toplu_urun_paneli(pid):
     """\u00dcr\u00fcn OLU\u015eTURMA (N11, \u0130defix, Trendruum)."""
     ad = PAZAR_AD[pid]
@@ -2858,6 +2978,7 @@ def toplu_urun_paneli(pid):
     if kara.any():
         st.caption(f"\U0001f6ab Kara listedeki {int(kara.sum())} \u00fcr\u00fcn g\u00f6nderim d\u0131\u015f\u0131 b\u0131rak\u0131ld\u0131.")
         df = df[~kara]
+    df = kategori_secimi_uygula(pid, df)
     mod = st.selectbox("G\u00f6nderim Modu", ["Tek \u00fcr\u00fcn (Test)", "T\u00fcm \u00dcr\u00fcnler"], key=f"{pid}_mod")
     df = fiyat_artis_uygula(ayarlar, pid, df)
     uretici = {
@@ -2920,8 +3041,36 @@ def toplu_urun_paneli(pid):
             log_yaz(ad, "HATA", f"\u00dcr\u00fcn g\u00f6nderimi: {e}")
             st.error(f"Hata: {e}")
             return
+        dur = [x for x in loglar if x.startswith("\u26d4")]
+        if dur:
+            st.error(dur[0])
         log_yaz(ad, "OK" if hata == 0 else ("KISM\u0130" if ok else "HATA"), f"\u00dcr\u00fcn olu\u015fturma: {ok} \u00fcr\u00fcn iletildi, {hata} \u00fcr\u00fcn hatal\u0131.")
         (st.success if hata == 0 else st.warning)(f"{ok} \u00fcr\u00fcn iletildi, {hata} \u00fcr\u00fcn hatal\u0131. (API kabul\u00fc = \u00fcr\u00fcn onay\u0131 de\u011fildir; pazar yeri panelinden kontrol edin.)")
+
+
+def pazar_ozet(pid):
+    """Sistem kayitlarina gore pazar yeri ozeti (pazar yerinin canli sayimi degildir)."""
+    with closing(baglan()) as c:
+        d = pd.read_sql("SELECT barkod, durum, zaman FROM pazar_durum WHERE pazar=?", c, params=(pid,))
+    if d.empty:
+        st.caption("Bu pazar yerine hen\u00fcz \u00fcr\u00fcn g\u00f6nderilmedi; g\u00f6nderimden sonra burada durum \u00f6zeti \u00e7\u0131kacak.")
+        return
+    u = urunleri_oku()
+    stok = u.groupby("barkod")["stok"].max() if not u.empty else pd.Series(dtype=int)
+    m = d.copy()
+    m["stok"] = m["barkod"].astype(str).map(stok)
+    esik = _i(ayarlar.get("kritik_esik")) or 3
+    ok = m[m["durum"] == "ok"]
+    st.markdown("**\U0001f4ca Durum \u00f6zeti** (sistem kay\u0131tlar\u0131na g\u00f6re)")
+    a, b, c3, d4, e5 = st.columns(5)
+    a.metric("G\u00f6nderilen", f"{len(ok):,}")
+    b.metric("Hatal\u0131", f"{int((m['durum'] == 'hata').sum()):,}")
+    c3.metric("T\u00fckenen", f"{int((ok['stok'] == 0).sum()):,}")
+    d4.metric(f"Az kalan (\u2264{esik})", f"{int(ok['stok'].between(1, esik).sum()):,}")
+    e5.metric("Sistemde yok", f"{int(ok['stok'].isna().sum()):,}")
+    son = ok["zaman"].max() if not ok.empty else None
+    gonderilmeyen = max(int(u["barkod"].nunique()) - len(ok), 0) if not u.empty else 0
+    st.caption(f"Son ba\u015far\u0131l\u0131 g\u00f6nderim: {son or '-'} \u00b7 Sistemde olup bu pazara hi\u00e7 gitmeyen: {gonderilmeyen:,}")
 
 
 def pazar_islemler(pid):
@@ -2931,6 +3080,7 @@ def pazar_islemler(pid):
     st.title(f"{p['ikon']} {ad} \u0130\u015flemleri")
     if not bagli:
         st.warning("API bilgileri eksik: 'Genel Ayarlar\u0131' sayfas\u0131ndan girip kaydedin.")
+    pazar_ozet(pid)
 
     k = f"islem_{pid}"
     with closing(baglan()) as c:
@@ -3105,47 +3255,123 @@ def pazar_siparis(pid):
 
 def urunler_sayfasi():
     st.title("\U0001f4e6 Sistemdeki \u00dcr\u00fcnler")
+    for mesaj in st.session_state.pop("urun_senk_sonuc", []) or []:
+        (st.success if mesaj[1] else st.error)(f"{mesaj[0]}: {mesaj[2]}")
+    for mesaj in st.session_state.pop("urun_sifir_sonuc", []) or []:
+        st.info(mesaj)
     df = urunleri_oku()
     if df.empty:
         st.warning("Sistemde hen\u00fcz kay\u0131tl\u0131 \u00fcr\u00fcn bulunmuyor.")
+        if gen(st.button, "\U0001f504 Stoklar\u0131 tedarik\u00e7iden \u00e7ek", key="urun_stok_cek_bos"):
+            st.session_state["urun_senk_sonuc"] = tumunu_senkronla(oto=False)
+            st.rerun()
         return
-    col_f1, col_f2 = st.columns([1, 2])
-    with col_f1:
-        secenek = ["T\u00fcm Bayiler"] + sorted(df["tedarikci"].dropna().unique().tolist())
-        secili = st.selectbox("\U0001f3ec Tedarik\u00e7i / Bayi Se\u00e7in", secenek)
-    with col_f2:
-        ara = st.text_input("\U0001f50d \u00dcr\u00fcn Ad\u0131 veya Barkod ile Ara", "")
+    kilit = stok_sifir_kume(ayarlar)
+    esik = _i(ayarlar.get("kritik_esik")) or 3
+    c1, c2 = st.columns([1, 2])
+    secenek = ["T\u00fcm Bayiler"] + sorted(df["tedarikci"].dropna().unique().tolist())
+    secili = c1.selectbox("\U0001f3ec Tedarik\u00e7i / Bayi", secenek)
+    ara = c2.text_input("\U0001f50d \u00dcr\u00fcn ad\u0131 veya barkod ara", "")
+    d1, d2 = st.columns([1, 2])
+    durum = d1.selectbox("Stok durumu", ["T\u00fcm\u00fc", "Stokta", "T\u00fckenen", f"Kritik (\u2264{esik})", "Elle s\u0131f\u0131rlananlar"])
+    gorunum = d2.radio("G\u00f6r\u00fcn\u00fcm", ["Tablo (kayd\u0131rmal\u0131)", "Kart (k\u00fc\u00e7\u00fck g\u00f6rsel)"], horizontal=True)
+
     f = df
     if secili != "T\u00fcm Bayiler":
         f = f[f["tedarikci"] == secili]
     if ara:
-        f = f[f["urun_adi"].str.contains(ara, case=False, na=False, regex=False) | f["barkod"].str.contains(ara, case=False, na=False, regex=False)]
-    sayfa_boyu = 20
-    toplam_sayfa = max(1, -(-len(f) // sayfa_boyu))
-    st.info(f"Toplam **{len(f):,}** \u00fcr\u00fcn listeleniyor.")
-    no = int(st.number_input("Sayfa", 1, toplam_sayfa, 1, key="urun_sayfa_no"))
-    f = f.iloc[(no - 1) * sayfa_boyu: no * sayfa_boyu].reset_index(drop=True)
-    cols = st.columns(2)
-    for idx, row in f.iterrows():
-        with cols[idx % 2]:
+        n = tr_norm(ara)
+        f = f[f["urun_adi"].astype(str).map(tr_norm).str.contains(n, regex=False) | f["barkod"].astype(str).map(tr_norm).str.contains(n, regex=False)]
+    if durum == "Stokta":
+        f = f[f["stok"] > 0]
+    elif durum == "T\u00fckenen":
+        f = f[f["stok"] <= 0]
+    elif durum.startswith("Kritik"):
+        f = f[f["stok"].between(1, esik)]
+    elif durum == "Elle s\u0131f\u0131rlananlar":
+        f = f[f["barkod"].astype(str).isin(kilit)]
+    f = f.reset_index(drop=True)
+
+    top1, top2 = st.columns([2, 1])
+    top1.info(f"Toplam **{len(f):,}** \u00fcr\u00fcn listeleniyor. Elle s\u0131f\u0131rlanm\u0131\u015f: **{len(kilit):,}**")
+    if gen(top2.button, "\U0001f504 Stoklar\u0131 tedarik\u00e7iden \u00e7ek", key="urun_stok_cek",
+           help="Se\u00e7ili bayinin (ya da t\u00fcm bayilerin) XML'ini yeniler ve stoklar\u0131 g\u00fcncel haline getirir."):
+        with st.spinner("Tedarik\u00e7i stoklar\u0131 \u00e7ekiliyor..."):
+            if secili != "T\u00fcm Bayiler" and secili in ayarlar["tedarikciler"]:
+                try:
+                    sayi = tedarikci_senkron(secili, ayarlar["tedarikciler"][secili], esik, _i(ayarlar.get("stok_ust_sinir"), 50))
+                    log_yaz(secili, "OK", f"{sayi} \u00fcr\u00fcn g\u00fcncellendi")
+                    st.session_state["urun_senk_sonuc"] = [(secili, True, f"{sayi} \u00fcr\u00fcn")]
+                except Exception as e:
+                    st.session_state["urun_senk_sonuc"] = [(secili, False, str(e))]
+            else:
+                st.session_state["urun_senk_sonuc"] = tumunu_senkronla(oto=False)
+        st.rerun()
+
+    if gorunum.startswith("Tablo"):
+        v = pd.DataFrame({
+            "G\u00f6rsel": f["gorsel"].where(f["gorsel"].astype(str).str.startswith("http"), None),
+            "\u00dcr\u00fcn": f["urun_adi"], "Barkod": f["barkod"], "Tedarik\u00e7i": f["tedarikci"], "Stok": f["stok"],
+            "Al\u0131\u015f": f["alis_fiyati"].map(_f).round(2), "Sat\u0131\u015f": f["satis_fiyati"].map(_f).round(2),
+            "Kilit": f["barkod"].astype(str).isin(kilit).map({True: "\U0001f512", False: ""}),
+        })
+        ayar_kol = {
+            "G\u00f6rsel": st.column_config.ImageColumn("G\u00f6rsel", width="small"),
+            "\u00dcr\u00fcn": st.column_config.TextColumn("\u00dcr\u00fcn", width="large"),
+            "Al\u0131\u015f": st.column_config.NumberColumn("Al\u0131\u015f", format="%.2f \u20ba"),
+            "Sat\u0131\u015f": st.column_config.NumberColumn("Sat\u0131\u015f", format="%.2f \u20ba"),
+        }
+        secilen = []
+        try:
+            olay = st.dataframe(v, hide_index=True, height=620, column_config=ayar_kol,
+                                on_select="rerun", selection_mode="multi-row", key="urun_tablo")
+            secilen = list(olay.selection.rows)
+        except TypeError:
+            st.dataframe(v, hide_index=True, height=620, column_config=ayar_kol)
+            st.caption("Bu Streamlit s\u00fcr\u00fcm\u00fcnde sat\u0131r se\u00e7imi yok; stok s\u0131f\u0131rlamak i\u00e7in barkodu a\u015fa\u011f\u0131ya yaz\u0131n.")
+        st.caption("Sat\u0131r\u0131n solundaki kutuyla \u00fcr\u00fcn se\u00e7in (birden fazla se\u00e7ebilirsiniz). Kayd\u0131rd\u0131k\u00e7a t\u00fcm liste a\u00e7\u0131l\u0131r; sayfa numaras\u0131 yok.")
+        sec_barkod = [str(f.loc[i, "barkod"]) for i in secilen if i < len(f)]
+        if not sec_barkod:
+            elle = st.text_input("veya sto\u011funu s\u0131f\u0131rlamak istedi\u011finiz barkodlar (virg\u00fclle)", key="sifir_elle")
+            sec_barkod = [x.strip() for x in elle.split(",") if x.strip()]
+        if sec_barkod:
             with st.container(border=True):
-                st.subheader(row.get("urun_adi", "\u0130simsiz \u00dcr\u00fcn"))
+                st.write(f"Se\u00e7ili \u00fcr\u00fcn: **{len(sec_barkod)}**")
+                gonder = st.checkbox("Ba\u011fl\u0131 pazar yerlerine de hemen g\u00f6nder", value=True, key="sifir_gonder")
+                onay = st.checkbox("Onayl\u0131yorum", key="sifir_onay")
+                k1, k2 = st.columns(2)
+                if gen(k1.button, "\U0001f512 Sto\u011fu s\u0131f\u0131rla ve kilitle", key="sifir_btn", disabled=not onay):
+                    sonuc = stok_sifirla(ayarlar, sec_barkod, gonder)
+                    st.session_state["urun_sifir_sonuc"] = [f"{len(sec_barkod)} \u00fcr\u00fcn\u00fcn sto\u011fu s\u0131f\u0131rland\u0131 ve kilitlendi."] + [
+                        f"{ad}: {ok} g\u00f6nderildi" + (f", hata: {h}" if h else "") for ad, ok, h in sonuc]
+                    st.rerun()
+                if gen(k2.button, "\U0001f513 Kilidi kald\u0131r", key="kilit_kaldir_btn"):
+                    n = stok_kilidi_kaldir(ayarlar, sec_barkod)
+                    st.session_state["urun_sifir_sonuc"] = [f"{n} \u00fcr\u00fcn\u00fcn kilidi kald\u0131r\u0131ld\u0131. Stok, bir sonraki tedarik\u00e7i \u00e7eki\u015finde geri gelir ('Stoklar\u0131 tedarik\u00e7iden \u00e7ek')."]
+                    st.rerun()
+    else:
+        st.caption("K\u00fc\u00e7\u00fck g\u00f6rselli kart g\u00f6r\u00fcn\u00fcm\u00fc; daha fazlas\u0131 i\u00e7in a\u015fa\u011f\u0131daki d\u00fc\u011fmeyi kullan\u0131n.")
+        sayi = st.session_state.setdefault("urun_kart_sayi", 24)
+        for idx, row in f.head(sayi).iterrows():
+            with st.container(border=True):
+                g, y = st.columns([1, 4])
                 img = row.get("gorsel", "")
                 if img and str(img).startswith("http"):
-                    gen(st.image, img)
+                    g.image(img, width=70)
                 else:
-                    st.write("\U0001f4f7 *G\u00f6rsel Bulunamad\u0131*")
-                a, b = st.columns(2)
-                with a:
-                    st.write(f"**Barkod:** `{row.get('barkod', '-')}`")
-                    st.write(f"**Tedarik\u00e7i:** `{row.get('tedarikci', '-')}`")
-                    st.write(f"**Stok:** `{row.get('stok', 0)} adet`")
-                with b:
-                    alis, satis = _f(row.get("alis_fiyati")), _f(row.get("satis_fiyati"))
-                    st.markdown(f"\U0001f534 **Al\u0131\u015f:** {alis:.2f} TL")
-                    st.markdown(f"\U0001f7e2 **Sat\u0131\u015f:** {satis:.2f} TL")
-                    if satis > alis > 0:
-                        st.caption(f"\U0001f4a1 Tahmini K\u00e2r: +{satis - alis:.2f} TL")
+                    g.write("\U0001f4f7")
+                alis, satis = _f(row.get("alis_fiyati")), _f(row.get("satis_fiyati"))
+                kil = " \U0001f512" if str(row.get("barkod")) in kilit else ""
+                ad_k = row.get("urun_adi") or "\u0130simsiz \u00dcr\u00fcn"
+                y.markdown(f"**{ad_k}**{kil}")
+                y.caption(f"Barkod `{row.get('barkod', '-')}` \u00b7 {row.get('tedarikci', '-')} \u00b7 Stok **{row.get('stok', 0)}** \u00b7 Al\u0131\u015f {alis:.2f} \u20ba \u00b7 Sat\u0131\u015f {satis:.2f} \u20ba")
+        if len(f) > sayi and gen(st.button, f"\u2b07\ufe0f Daha fazla g\u00f6ster ({min(sayi, len(f))}/{len(f)})", key="urun_daha_fazla"):
+            st.session_state["urun_kart_sayi"] = sayi + 48
+            st.rerun()
+    if kilit:
+        with st.expander(f"\U0001f512 Elle s\u0131f\u0131rlanm\u0131\u015f \u00fcr\u00fcnler ({len(kilit)})"):
+            kd = pd.DataFrame({"Barkod": sorted(kilit), "Kilit zaman\u0131": [ayarlar["stok_sifir"][b] for b in sorted(kilit)]})
+            st.dataframe(kd, hide_index=True)
 
 
 def anasayfa():
