@@ -2519,6 +2519,39 @@ def gunluk_sayfasi():
         gen(st.dataframe, lg, hide_index=True)
 
 
+def atlama_nedenleri(df, pid):
+    """Gonderilemeyen urunlerin nedenlerini sayar (kullaniciya gostermek icin)."""
+    pa = pa_al(ayarlar, pid)
+    say = {}
+
+    def ekle(k):
+        say[k] = say.get(k, 0) + 1
+
+    for r in kayit_listesi(df):
+        if not str(r.get("gorsel", "")).strip():
+            ekle("g\u00f6rseli yok")
+        elif pid == "hb" and not str(r.get("gorsel", "")).strip().startswith("https"):
+            ekle("g\u00f6rsel adresi https de\u011fil")
+        if _f(r.get("satis_fiyati")) <= 0:
+            ekle("fiyat\u0131 0")
+        cat = kat_sec(pa, ayarlar, r.get("kategori"), pid)
+        if not cat:
+            ekle("kategorisi e\u015fle\u015ftirilmemi\u015f (varsay\u0131lan kategori kapal\u0131)")
+        elif pid == "trendruum" and not objectid_mi(cat):
+            ekle("kategori ID ge\u00e7ersiz")
+    return ", ".join(f"{k}: {v}" for k, v in say.items())
+
+
+def ilk_gonderilebilir(df, pid, uretici, en_fazla=500):
+    """Test modunda listenin ilk degil, gonderilebilen ilk urununu bulur."""
+    for i in range(min(len(df), en_fazla)):
+        satir = df.iloc[[i]]
+        liste, _ = uretici(satir, ayarlar)
+        if liste:
+            return satir, i
+    return None, -1
+
+
 def toplu_urun_paneli(pid):
     """\u00dcr\u00fcn OLU\u015eTURMA (N11, \u0130defix, Trendruum)."""
     ad = PAZAR_AD[pid]
@@ -2535,6 +2568,10 @@ def toplu_urun_paneli(pid):
         df = df[~kara]
     mod = st.selectbox("G\u00f6nderim Modu", ["Tek \u00fcr\u00fcn (Test)", "T\u00fcm \u00dcr\u00fcnler"], key=f"{pid}_mod")
     df = fiyat_artis_uygula(ayarlar, pid, df)
+    uretici = {
+        "n11": n11_urun_listesi, "idefix": idefix_urun_listesi, "trendruum": trendruum_urun_listesi,
+        "ptt": ptt_urun_listesi, "hb": hb_urun_listesi,
+    }[pid]
     if mod.startswith("Tek"):
         aranan = st.text_input("Test i\u00e7in \u00fcr\u00fcn ara (ad veya barkod)", key=f"{pid}_tek_ara",
                                help="\u00d6rnek: ASUS ya da Depo2-006.NOTE.ASUS.B1-I5-3D. Bo\u015f b\u0131rak\u0131rsan\u0131z listenin ilk \u00fcr\u00fcn\u00fc se\u00e7ilir.")
@@ -2549,17 +2586,30 @@ def toplu_urun_paneli(pid):
             secim = st.selectbox(f"{len(eslesen)} \u00fcr\u00fcn bulundu, birini se\u00e7in", range(len(etiketler)), format_func=lambda i: etiketler[i], key=f"{pid}_tek_sec")
             df = eslesen.iloc[[secim]]
         else:
-            df = df.head(1)
+            try:
+                bulunan, sira = ilk_gonderilebilir(df, pid, uretici)
+            except ValueError as e:
+                st.error(str(e))
+                return
+            if bulunan is not None:
+                df = bulunan
+                if sira > 0:
+                    st.caption(f"Listenin ilk {sira} \u00fcr\u00fcn\u00fc g\u00f6nderilemedi\u011fi i\u00e7in g\u00f6nderilebilen ilk \u00fcr\u00fcn se\u00e7ildi.")
+            else:
+                df = df.head(1)
     try:
-        liste, atlanan = {
-            "n11": n11_urun_listesi, "idefix": idefix_urun_listesi, "trendruum": trendruum_urun_listesi,
-            "ptt": ptt_urun_listesi, "hb": hb_urun_listesi,
-        }[pid](df, ayarlar)
+        liste, atlanan = uretici(df, ayarlar)
     except ValueError as e:
         st.error(str(e))
         return
     st.write(f"G\u00f6nderilecek \u00fcr\u00fcn: **{len(liste):,}** (Atlanan: {atlanan} \u2014 g\u00f6rsel/fiyat/barkod/kategori eksik)")
+    if atlanan:
+        neden = atlama_nedenleri(df, pid)
+        if neden:
+            st.caption("Atlanma nedenleri: " + neden)
     if not liste:
+        if mod.startswith("Tek"):
+            st.warning("G\u00f6nderilebilir \u00fcr\u00fcn bulunamad\u0131. Kategori e\u015fle\u015ftirmesini yap\u0131n ya da Genel Ayarlar'da 'E\u015fle\u015fmesi olmayan \u00fcr\u00fcnleri de varsay\u0131lan kategoriye koy'u a\u00e7\u0131p tek \u00fcr\u00fcnle deneyin.")
         return
     with st.expander("\U0001f50e \u0130lk \u00fcr\u00fcn\u00fcn g\u00f6nderilecek JSON'u (pazar yeri dok\u00fcman\u0131yla kar\u015f\u0131la\u015ft\u0131r\u0131n)"):
         st.json(liste[0])
