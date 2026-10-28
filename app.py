@@ -1082,19 +1082,44 @@ def hb_urun_adresi(ayar):
     host = (pr.hostname or "").lower()
     if pr.scheme != "https" or not (host == "hepsiburada.com" or host.endswith(".hepsiburada.com")):
         raise ValueError("Hepsiburada \u00fcr\u00fcn olu\u015fturma adresi https:// ile ba\u015flamal\u0131 ve hepsiburada.com alan ad\u0131nda olmal\u0131.")
+    if not pr.path.rstrip("/").endswith("/products/import"):
+        raise ValueError("Hepsiburada \u00fcr\u00fcn olu\u015fturma adresi \u015fu \u015fekilde bitmeli: https://mpop.hepsiburada.com/product/api/products/import")
     return u
 
 
+def hb_ek_ozellikler(pa):
+    """Ayarlardaki ek ozellikleri sozluge cevirir ({"renk_variant_property": "Siyah"} ya da [{"name":..,"value":..}])."""
+    ek = pa.get("ek_ozellik")
+    if isinstance(ek, dict):
+        return {str(k): v for k, v in ek.items()}
+    if isinstance(ek, list):
+        return {str(x.get("name") or x.get("slug")): x.get("value") for x in ek
+                if isinstance(x, dict) and (x.get("name") or x.get("slug"))}
+    return {}
+
+
+def hb_fiyat_metni(fiyat):
+    """Dokumandaki ornege gore ondalik ayraci virgul: 130,50"""
+    return f"{round(float(fiyat), 2):.2f}".replace(".", ",")
+
+
 def hb_urun_listesi(df, ayar):
-    """UYARI: Hepsiburada \u00fcr\u00fcn olu\u015fturma alan adlar\u0131 resmi dok\u00fcmandan do\u011frulanmad\u0131.
-    \u00d6nizlenen JSON'u Hepsiburada dok\u00fcman\u0131yla kar\u015f\u0131la\u015ft\u0131r\u0131n; \u00f6nce 'Tek \u00fcr\u00fcn (Test)' ile deneyin."""
+    """Hepsiburada 'Urun Bilgisi Gonderme' (POST /product/api/products/import) bicimi:
+    [{categoryId, merchant, attributes:{merchantSku, VaryantGroupID, Barcode, UrunAdi, UrunAciklamasi, Marka,
+    GarantiSuresi, kg, tax_vat_rate, price, stock, Image1..}}] -- dosya (integrator.json) olarak yuklenir."""
     hb_urun_adresi(ayar)
     pa = pa_al(ayar, "hb")
-    cat_varsayilan = str(pa.get("category_id", "") or "").strip()
+    merchant = kimlik(ayar, "hb_merchant_id")
+    if not merchant:
+        raise ValueError("Hepsiburada Merchant ID kay\u0131tl\u0131 de\u011fil.")
     marka = str(pa.get("marka", "") or "").strip()
-    atr = pa.get("attributes") or []
+    if not marka:
+        raise ValueError("Hepsiburada i\u00e7in Marka ad\u0131 gerekli (Genel Ayarlar > Marka ad\u0131).")
+    ek = hb_ek_ozellikler(pa)
     onek = str(pa.get("sku_prefix", "") or "")
     kdv = _i(pa.get("kdv"), 20)
+    garanti = _i(pa.get("garanti"), 24)
+    kg = _f(pa.get("kg"), 1.0) or 1.0
     uret = bool(pa.get("gecici_barkod", True))
     liste, atlanan = [], 0
     for r in kayit_listesi(df):
@@ -1107,21 +1132,37 @@ def hb_urun_listesi(df, ayar):
             atlanan += 1
             continue
         ad = str(r["urun_adi"]).strip()
-        liste.append({
-            "merchantSku": onek + kod, "barcode": barkod, "productName": ad[:250], "description": ad,
-            "categoryId": cat, "brand": marka, "price": fiyat, "availableStock": max(_i(r.get("stok")), 0),
-            "vatRate": kdv, "images": [gorsel], "attributes": atr,
-        })
+        sku = onek + kod
+        oz = {
+            "merchantSku": sku, "VaryantGroupID": "VG-" + sku, "Barcode": barkod,
+            "UrunAdi": ad[:200], "UrunAciklamasi": ad, "Marka": marka, "GarantiSuresi": garanti,
+            "kg": str(kg).rstrip("0").rstrip(".") if "." in str(kg) else str(kg),
+            "tax_vat_rate": str(kdv), "price": hb_fiyat_metni(fiyat),
+            "stock": str(max(_i(r.get("stok")), 0)), "Image1": gorsel,
+        }
+        for k, v in ek.items():
+            oz.setdefault(k, v)
+        liste.append({"categoryId": int(cat) if str(cat).isdigit() else cat, "merchant": merchant, "attributes": oz})
     return liste, atlanan
 
 
 def hb_urun_gonder(ayar, liste, ilerleme=None):
     url = hb_urun_adresi(ayar)
-    kayit = [(u["merchantSku"], u) for u in liste]
+    kayit = [(u["attributes"]["merchantSku"], u) for u in liste]
+    baslik = {k: v for k, v in hb_header(ayar).items() if k.lower() != "content-type"}  # multipart sinirini requests koyar
 
     def gonder(grup):
-        r = http("POST", url, json=grup, headers=hb_header(ayar), timeout=120, tries=2)
-        return r.status_code in (200, 201, 202), yanit_ozet(r)
+        govde = json.dumps(grup, ensure_ascii=False).encode("utf-8")
+        r = http("POST", url, files={"file": ("integrator.json", govde, "application/json")},
+                 headers=baslik, timeout=120, tries=2)
+        ok = r.status_code in (200, 201, 202)
+        ozet = yanit_ozet(r)
+        if ok:
+            t = re.search(r'"trackingId"\s*:\s*"([^"]+)"', r.text or "")
+            if t:
+                log_yaz("Hepsiburada", "OK", f"\u00dcr\u00fcn y\u00fckleme izleme kodu: {t.group(1)}")
+                ozet += f" | izleme kodu: {t.group(1)}"
+        return ok, ozet
 
     ok_k, hata_k, loglar = paketle(kayit, 100, gonder, ilerleme, "Hepsiburada")
     return len(ok_k), len(hata_k), loglar
@@ -1685,6 +1726,34 @@ def kategori_oner(ted_yol, dugumler):
     return en["ID"], en["yol"], guven
 
 
+def kategoriye_ata_paneli(pid, secilen):
+    """Bulucuda secilen pazar yeri kategorisini, bir tedarikci kategorisine tek tikla atar."""
+    bilgi = st.session_state.pop(f"ata_bilgi_{pid}", None)
+    if bilgi:
+        st.success(bilgi)
+    df = urunleri_oku()
+    if df.empty or "kategori" not in df.columns:
+        return
+    ana = df["kategori"].dropna().astype(str).map(lambda k: k.split(">>>")[0].strip())
+    adet = ana[ana != ""].value_counts()
+    if adet.empty:
+        return
+    mevcut = (pa_al(ayarlar, pid).get("kategori_eslesme") or {})
+    isaret = " \u2713"
+    etiket = {}
+    for k in adet.index:
+        etiket[f"{k} ({int(adet[k])} \u00fcr\u00fcn){isaret if mevcut.get(k) else ''}"] = k
+    sec = st.selectbox("Bu kategoriyi \u015fu tedarik\u00e7i kategorisine ata", list(etiket), key=f"ata_sec_{pid}")
+    if gen(st.button, "Se\u00e7ili kategoriyi bu tedarik\u00e7i kategorisine ata", key=f"ata_btn_{pid}"):
+        k = etiket[sec]
+        yeni = dict(mevcut)
+        yeni[k] = str(secilen)
+        pa_al(ayarlar, pid)["kategori_eslesme"] = yeni
+        ayar_yaz(ayarlar)
+        st.session_state[f"ata_bilgi_{pid}"] = f"'{k}' kategorisi art\u0131k {secilen} ID'sine e\u015fle\u015fti. \u00d6nceki g\u00f6nderilmi\u015f \u00fcr\u00fcnler de\u011fi\u015fmez; gerekirse silip yeniden g\u00f6nderin."
+        st.rerun()
+
+
 def trendruum_kategori_bulucu():
     if not pazar_bagli(ayarlar, "trendruum"):
         st.caption("Kategori aramak icin once Trendruum API bilgilerini kaydedin.")
@@ -1719,6 +1788,7 @@ def trendruum_kategori_bulucu():
     secilen = sec.split(" \u2014 ")[0].strip()
     mevcut_vk = pa_al(ayarlar, "trendruum").get("category_id") or "(bo\u015f)"
     st.caption(f"\u015eu an kay\u0131tl\u0131 varsay\u0131lan kategori ID: {mevcut_vk}")
+    kategoriye_ata_paneli("trendruum", secilen)
     k1, k2 = st.columns(2)
     if gen(k1.button, "Varsayilan kategori yap", key="trk_varsayilan"):
         varsayilan_kategori_yaz("trendruum", secilen)
@@ -2302,6 +2372,7 @@ def hb_kategori_bulucu():
     secilen = sec.split(" \u2014 ")[0].strip()
     mevcut_vk = pa_al(ayarlar, "hb").get("category_id") or "(bo\u015f)"
     st.caption(f"\u015eu an kay\u0131tl\u0131 varsay\u0131lan kategori ID: {mevcut_vk}")
+    kategoriye_ata_paneli("hb", secilen)
     k1, k2 = st.columns(2)
     if gen(k1.button, "Varsay\u0131lan kategori yap", key="hbk_varsayilan"):
         varsayilan_kategori_yaz("hb", secilen)
@@ -2473,7 +2544,21 @@ def pazar_ayar_formu(pid):
                                                help="Kapal\u0131yken \u00fcr\u00fcnler pasif olu\u015fturulur; PTT panelinden kontrol edip aktifle\u015ftirebilirsiniz (\u00f6nerilen).")
         if pid in ("trendruum", "ptt", "hb"):
             yeni["gecici_barkod"] = st.checkbox("Ge\u00e7erli barkodu olmayan \u00fcr\u00fcnlere kal\u0131c\u0131 ge\u00e7ici barkod \u00fcret (869\u2026)", value=bool(pa.get("gecici_barkod", True)))
-        if pid in ("n11", "idefix", "hb"):
+        if pid == "hb":
+            h1, h2 = st.columns(2)
+            yeni["garanti"] = int(h1.number_input("Garanti s\u00fcresi (ay)", 0, 120, _i(pa.get("garanti"), 24)))
+            yeni["kg"] = h2.number_input("A\u011f\u0131rl\u0131k (kg)", 0.01, 500.0, _f(pa.get("kg"), 1.0) or 1.0, 0.1)
+            ek_metin = st.text_area("Ek \u00fcr\u00fcn \u00f6zellikleri (JSON nesnesi; kategorinin istedi\u011fi alanlar)",
+                                    value=json.dumps(pa.get("ek_ozellik") or {}, ensure_ascii=False),
+                                    help='\u00d6rnek: {"renk_variant_property": "Siyah"}. Kategorinin zorunlu alanlar\u0131n\u0131 kategori bulucudaki "Zorunlu alanlar\u0131 g\u00f6ster" ile g\u00f6rebilirsiniz.')
+            try:
+                ek = json.loads(ek_metin.strip() or "{}")
+                if not isinstance(ek, dict):
+                    raise ValueError("nesne olmal\u0131")
+                yeni["ek_ozellik"] = ek
+            except ValueError as e:
+                hata = f"Ek \u00f6zellikler ge\u00e7erli bir JSON nesnesi olmal\u0131: {e}"
+        if pid in ("n11", "idefix"):
             atr_metin = st.text_area("Zorunlu \u00f6zellikler (JSON listesi, bo\u015f b\u0131rak\u0131labilir)",
                                      value=json.dumps(pa.get("attributes") or [], ensure_ascii=False))
             try:
