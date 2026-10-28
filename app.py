@@ -300,9 +300,45 @@ def http(method, url, tries=4, **kw):
     raise RuntimeError(f"Ba\u011flant\u0131 kurulamad\u0131: {son}")
 
 
+def _hata_metinleri(x, cikti, derinlik=0):
+    if derinlik > 4 or len(cikti) >= 8:
+        return
+    if isinstance(x, str):
+        if x.strip():
+            cikti.append(x.strip())
+    elif isinstance(x, list):
+        for y in x:
+            _hata_metinleri(y, cikti, derinlik + 1)
+    elif isinstance(x, dict):
+        for y in x.values():
+            _hata_metinleri(y, cikti, derinlik + 1)
+
+
 def yanit_ozet(r):
-    govde = (r.text or "").strip().replace("\n", " ")[:200]
-    return f"HTTP {r.status_code} {govde}".strip()
+    """Yaniti okunur ozet yapar: JSON ise mesaj + hata metinleri (Turkce karakterler cozulur)."""
+    ham = (r.text or "").strip().replace("\n", " ")
+    try:
+        j = r.json()
+    except Exception:
+        j = None
+    if isinstance(j, dict):
+        parcalar = []
+        meta = j.get("meta") if isinstance(j.get("meta"), dict) else {}
+        for m in (meta.get("message"), j.get("message")):
+            if isinstance(m, str) and m.strip() and m.strip() not in parcalar:
+                parcalar.append(m.strip())
+        _hata_metinleri(j.get("errors") or j.get("error"), parcalar)
+        if parcalar:
+            return f"HTTP {r.status_code} " + " | ".join(parcalar)[:700]
+    return f"HTTP {r.status_code} {ham[:300]}".strip()
+
+
+def kod_goster(yer, metin):
+    """Uzun log satirlarini kaydirmadan okunsun diye satir kaydirmali gosterir."""
+    try:
+        yer.code(metin, wrap_lines=True)
+    except TypeError:
+        yer.code(metin)
 
 
 def etiket(tag):
@@ -2619,7 +2655,7 @@ def toplu_urun_paneli(pid):
 
         def ilerleme(p, loglar):
             pbar.progress(min(p, 1.0))
-            log_k.code("\n".join(loglar[-12:]))
+            kod_goster(log_k, "\n".join(loglar[-12:]))
 
         try:
             gonder = {"n11": n11_urun_gonder, "idefix": idefix_gonder, "trendruum": trendruum_gonder, "ptt": ptt_urun_gonder, "hb": hb_urun_gonder}[pid]
@@ -2720,7 +2756,7 @@ def gonder_ve_goster(pid, tedarikciler=None):
 
     def ilerleme(p, loglar):
         pbar.progress(min(p, 1.0))
-        log_k.code("\n".join(loglar[-8:]))
+        kod_goster(log_k, "\n".join(loglar[-8:]))
 
     try:
         df_g = urunleri_oku()
