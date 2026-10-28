@@ -1073,10 +1073,116 @@ def idefix_gonder(ayar, liste, ilerleme=None):
 
     def gonder(grup):
         r = http("POST", f"{ID_BASE}/pim/pool/{v}/create", json={"products": grup}, headers=h, timeout=120, tries=2)
-        return r.status_code in (200, 201, 202), yanit_ozet(r)
+        ok = r.status_code in (200, 201, 202)
+        ozet = yanit_ozet(r)
+        if ok:
+            b = idefix_batch_id(r.text)
+            if b:
+                takip = ayar.setdefault("idefix_takip", [])
+                takip.append(b)
+                del takip[:-50]
+                ayar_yaz(ayar)
+                log_yaz("\u0130defix", "OK", f"\u00dcr\u00fcn y\u00fckleme batchRequestId: {b} (kabul = \u00fcr\u00fcn onay\u0131 de\u011fildir; sonucu sorgulay\u0131n)")
+                ozet += f" | batchRequestId: {b}"
+            else:
+                ozet += " | UYARI: batchRequestId d\u00f6nmedi, sonu\u00e7 sorgulanamaz"
+        return ok, ozet
 
     ok_k, hata_k, loglar = paketle(kayit, 100, gonder, ilerleme, "\u0130defix", durdur=3)
     return len(ok_k), len(hata_k), loglar
+
+
+IDEFIX_HATA = {
+    "VENDOR_RETURN_ADDRESS_NOT_CORRECT": "\u0130ade adresi sistemdekiyle uyu\u015fmuyor",
+    "PRODUCT_IMAGE_MANDATORY_ONCREATE": "\u00dcr\u00fcn g\u00f6rseli zorunlu",
+    "DATA_PARSE_ERROR": "G\u00f6nderilen veri okunamad\u0131 (bi\u00e7im hatas\u0131)",
+    "NO_BATCH_ID_EXIST": "Hatal\u0131 batch kimli\u011fi",
+    "PRODUCT_POOL_ALREADY_EXIST": "\u00dcr\u00fcn zaten havuzunuzda var",
+    "CATEGORY_FAILED_TO_MATCH": "Kategori e\u015fle\u015fmedi",
+    "CATALOG_CATEGORY": "\u00dcr\u00fcn katalogda var; kategori katalogdakine g\u00f6re belirlenir",
+    "PRODUCT_BARCODE_NOT_EXIST": "Barkod \u0130defix katalo\u011funda yok",
+    "VENDOR_CATEGORY_ACCESS_DENIED": "Bu kategoriye \u00fcr\u00fcn ekleme yetkiniz yok",
+    "BRAND_EXCLUSIVE_NOT_AUTHORIZED": "Bu markaya \u00fcr\u00fcn ekleme yetkiniz yok",
+    "PRODUCT_NOT_FOUND": "Barkod \u00fcr\u00fcn havuzunuzda yok",
+    "NO_PRICE": "Fiyat yok",
+    "CATALOG_PRICE_LOCKED": "Fiyat kilitli (\u0130defix destek ile g\u00f6r\u00fc\u015f\u00fcn)",
+}
+IDEFIX_DURUM = {
+    "waiting_vendor_approve": "Onay\u0131n\u0131z\u0131 bekliyor (katalogda var)",
+    "not_matched": "Katalogda e\u015fle\u015fmedi, \u0130defix inceliyor",
+    "ready_for_sale": "Sat\u0131\u015fa haz\u0131r",
+    "platform_declined": "\u0130defix reddetti",
+    "auto_matched": "Otomatik e\u015fle\u015fti",
+    "manuel_matched": "Elle e\u015fle\u015fti",
+    "decline": "Hata (y\u00fcklenemedi)",
+}
+
+
+def idefix_batch_id(metin):
+    m = re.search(r'"batchRequestId"\s*:\s*"([^"]+)"', metin or "")
+    return m.group(1) if m else ""
+
+
+def idefix_batch_sorgula(ayar, batch_id):
+    v = kimlik(ayar, "idefix_satici_id")
+    if not v:
+        raise ValueError("\u0130defix Sat\u0131c\u0131 ID (vendorId) kay\u0131tl\u0131 de\u011fil.")
+    r = http("GET", f"{ID_BASE}/pim/pool/{urllib.parse.quote(str(v), safe='')}/batch-result/{urllib.parse.quote(str(batch_id).strip(), safe='')}",
+             headers=idefix_header(ayar), timeout=60, tries=1)
+    try:
+        j = r.json()
+    except Exception:
+        j = None
+    return r.status_code, j, (r.text or "")[:4000]
+
+
+def idefix_sonuc_ozet(j):
+    """batch-result yanitini okunur satirlara cevirir (alan adlari esnek okunur)."""
+    ogeler = []
+    if isinstance(j, dict):
+        for a in ("items", "products", "data", "results"):
+            if isinstance(j.get(a), list):
+                ogeler = j[a]
+                break
+    elif isinstance(j, list):
+        ogeler = j
+    satirlar, sayim = [], {}
+    for x in ogeler:
+        if not isinstance(x, dict):
+            continue
+        durum = str(x.get("poolState") or x.get("status") or x.get("state") or "").strip()
+        sebep = x.get("failureReasons") or x.get("failureReason") or x.get("errors") or ""
+        if isinstance(sebep, list):
+            sebep = ", ".join(str(e) for e in sebep)
+        sebep = str(sebep or "").strip()
+        kodlar = [k.strip() for k in re.split(r"[,;\s]+", sebep) if k.strip()]
+        sebep_tr = "; ".join(IDEFIX_HATA.get(k.split(":")[0], k) for k in kodlar)
+        mp = x.get("matchedProduct") if isinstance(x.get("matchedProduct"), dict) else {}
+        anahtar = durum.lower().replace(" ", "_")
+        satirlar.append({
+            "Barkod": str(x.get("barcode") or x.get("vendorStockCode") or ""),
+            "\u00dcr\u00fcn": str(x.get("title") or x.get("name") or "")[:60],
+            "Durum": IDEFIX_DURUM.get(anahtar, durum),
+            "Hata sebebi": sebep_tr,
+            "E\u015fle\u015fen \u0130defix \u00fcr\u00fcn\u00fc": str(mp.get("name") or ""),
+            "_durum": anahtar,
+        })
+        sayim[IDEFIX_DURUM.get(anahtar, durum) or "Bilinmiyor"] = sayim.get(IDEFIX_DURUM.get(anahtar, durum) or "Bilinmiyor", 0) + 1
+    ust = str(j.get("status") or "") if isinstance(j, dict) else ""
+    return {"ust": ust, "satirlar": satirlar, "sayim": sayim}
+
+
+def idefix_onayla(ayar, barkodlar):
+    """Katalogda eslesen (waiting_vendor_approve) urunleri onaylar: POST /pim/pool/{vendorId}/approve-item."""
+    h, v = idefix_header(ayar), kimlik(ayar, "idefix_satici_id")
+    kayit = [(str(b), {"barcode": str(b)}) for b in barkodlar]
+
+    def gonder(grup):
+        r = http("POST", f"{ID_BASE}/pim/pool/{urllib.parse.quote(str(v), safe='')}/approve-item", json={"items": grup},
+                 headers=h, timeout=60, tries=2)
+        return r.status_code in (200, 201, 202), yanit_ozet(r)
+
+    return paketle(kayit, 100, gonder, None, "\u0130defix onay")
 
 
 # --------------------------------------------------------------------------
@@ -2481,9 +2587,121 @@ def hb_kategori_bulucu():
             st.text(sm[3])
 
 
+def genel_kategori_ayikla(j):
+    """Kategori yanitini (ic ice 'children' ya da duz 'parentId' listesi) [{ID, Kategori, Uc kategori}] yapar."""
+    kok = j
+    if isinstance(j, dict):
+        for a in ("data", "content", "items", "categories", "result", "results"):
+            if isinstance(j.get(a), list):
+                kok = j[a]
+                break
+        else:
+            kok = [j]
+    kayit, goruldu = [], set()
+
+    def al(d, *anahtar):
+        for a in anahtar:
+            if d.get(a) not in (None, ""):
+                return d[a]
+        return None
+
+    def yuru(dugum, ust, derinlik=0):
+        if not isinstance(dugum, dict) or derinlik > 12:
+            return
+        cid = al(dugum, "id", "categoryId", "_id")
+        ad = al(dugum, "name", "title", "categoryName", "displayName")
+        alt = None
+        for a in ("children", "subCategories", "sub_categories", "categories", "subs"):
+            if isinstance(dugum.get(a), list):
+                alt = dugum[a]
+                break
+        yol = ust + ([str(ad)] if ad else [])
+        if cid is not None and ad and str(cid) not in goruldu:
+            goruldu.add(str(cid))
+            kayit.append({"ID": str(cid), "yol": yol, "ust": al(dugum, "parentId", "parent_id", "parentCategoryId"),
+                          "uc": not alt})
+        for x in (alt or []):
+            yuru(x, yol, derinlik + 1)
+
+    for d in (kok if isinstance(kok, list) else []):
+        yuru(d, [])
+    # duz listede ust-alt iliskisi parentId ile kurulur
+    by_id = {k["ID"]: k for k in kayit}
+    ustler = {str(k["ust"]) for k in kayit if k["ust"] not in (None, "", 0, "0")}
+    if ustler:
+        def zincir(k, n=0):
+            u = k["ust"]
+            if n > 12 or u in (None, "", 0, "0") or str(u) not in by_id:
+                return [k["yol"][-1]] if k["yol"] else []
+            return zincir(by_id[str(u)], n + 1) + [k["yol"][-1]]
+        for k in kayit:
+            if len(k["yol"]) <= 1:
+                k["yol"] = zincir(k)
+            k["uc"] = k["ID"] not in ustler
+    return [{"ID": k["ID"], "Kategori": " > ".join(k["yol"]), "Uc kategori": "evet" if k["uc"] else "hayir"} for k in kayit]
+
+
+def idefix_agac_yukle(ayar):
+    r = http("GET", f"{ID_BASE}/pim/product-category", headers=idefix_header(ayar), timeout=120, tries=2)
+    if r.status_code != 200:
+        raise RuntimeError("\u0130defix kategori listesi al\u0131namad\u0131: " + yanit_ozet(r))
+    try:
+        j = r.json()
+    except Exception:
+        raise RuntimeError("\u0130defix kategori yan\u0131t\u0131 okunamad\u0131: " + (r.text or "")[:400])
+    liste = genel_kategori_ayikla(j)
+    if not liste:
+        raise RuntimeError("\u0130defix kategori yan\u0131t\u0131 tan\u0131namad\u0131. Yan\u0131t\u0131n ba\u015f\u0131: " + (r.text or "")[:500])
+    return liste
+
+
+def idefix_oto_dugumler(ayar):
+    out = []
+    for k in idefix_agac_yukle(ayar):
+        if k["Uc kategori"] != "evet":
+            continue
+        out.append({"ID": k["ID"], "yol": k["Kategori"], "son": kat_belirtec(k["Kategori"].split(">")[-1]), "tum": kat_belirtec(k["Kategori"])})
+    return out
+
+
+def idefix_kategori_bulucu():
+    if not pazar_bagli(ayarlar, "idefix"):
+        st.caption("Kategori aramak i\u00e7in \u00f6nce \u0130defix API bilgilerini kaydedin.")
+        return
+    st.caption("\u00d6nce 'Kategorileri y\u00fckle'ye bas\u0131n, sonra \u00fcr\u00fcn tipini yaz\u0131p aray\u0131n. Yaln\u0131zca 'U\u00e7 kategori = evet' olanlar\u0131 se\u00e7in.")
+    if gen(st.button, "Kategorileri y\u00fckle", key="idk_yukle"):
+        try:
+            with st.spinner("\u0130defix kategorileri al\u0131n\u0131yor..."):
+                st.session_state["idk_liste"] = idefix_agac_yukle(ayarlar)
+        except Exception as e:
+            st.session_state["idk_liste"] = None
+            st.error(f"Hata: {e}")
+    liste = st.session_state.get("idk_liste")
+    if not liste:
+        return
+    st.caption(f"{len(liste):,} kategori y\u00fcklendi.")
+    ad = st.text_input("Kategori ad\u0131 (birden \u00e7ok kelime yazabilirsiniz)", key="idk_ara")
+    kel = tr_norm(ad).split()
+    if not kel:
+        return
+    bulunan = kategori_siralama([k for k in liste if all(w in tr_norm(k["Kategori"]) for w in kel)], ad)[:100]
+    if not bulunan:
+        st.warning("Sonu\u00e7 bulunamad\u0131; daha k\u0131sa ya da farkl\u0131 bir kelime deneyin.")
+        return
+    st.dataframe(pd.DataFrame(bulunan), hide_index=True)
+    secenek = [f"{k['ID']} \u2014 {k['Kategori']}" for k in bulunan]
+    sec = st.selectbox("Listeden se\u00e7", secenek, key="idk_sec")
+    secilen = sec.split(" \u2014 ")[0].strip()
+    mevcut_vk = pa_al(ayarlar, "idefix").get("category_id") or "(bo\u015f)"
+    st.caption(f"\u015eu an kay\u0131tl\u0131 varsay\u0131lan kategori ID: {mevcut_vk}")
+    kategoriye_ata_paneli("idefix", secilen)
+    if gen(st.button, "Varsay\u0131lan kategori yap", key="idk_varsayilan"):
+        varsayilan_kategori_yaz("idefix", secilen)
+
+
 def oto_esleme(pid, pa, adet, mevcut):
     st.markdown("**Otomatik \u00f6neri**")
-    pazar_ad = {"trendruum": "Trendruum", "hb": "Hepsiburada"}.get(pid, pid)
+    pazar_ad = {"trendruum": "Trendruum", "hb": "Hepsiburada", "idefix": "\u0130defix"}.get(pid, pid)
     st.caption(f"{pazar_ad} kategori listesini \u00e7ekip tedarik\u00e7i kategorilerinize en yak\u0131n kategoriyi \u00f6nerir. "
                "Hi\u00e7bir \u015fey kendili\u011finden kaydedilmez; i\u015faretledi\u011finiz sat\u0131rlar kaydedilir.")
     bildirim = st.session_state.pop(f"oto_bildirim_{pid}", None)
@@ -2493,7 +2711,7 @@ def oto_esleme(pid, pa, adet, mevcut):
     if gen(st.button, "\u00d6nerileri haz\u0131rla (\u00f6nce ben bakay\u0131m)", key=f"oto_hazirla_{pid}") or tek_tus:
         try:
             with st.spinner("Kategori listesi al\u0131n\u0131yor..."):
-                dugumler = trendruum_agac_yukle(ayarlar) if pid == "trendruum" else hb_oto_dugumler(ayarlar)
+                dugumler = {"trendruum": trendruum_agac_yukle, "hb": hb_oto_dugumler, "idefix": idefix_oto_dugumler}[pid](ayarlar)
             satirlar = []
             for k in adet.index:
                 if mevcut.get(k):
@@ -2555,7 +2773,7 @@ def kategori_esleme_editoru(pid):
     ana = df["kategori"].dropna().astype(str).map(lambda k: k.split(">>>")[0].strip())
     adet = ana[ana != ""].value_counts()
     st.caption(f"{len(adet)} farkl\u0131 tedarik\u00e7i kategorisi var; e\u015fle\u015fmemi\u015f \u00fcr\u00fcnler (varsay\u0131lan kapal\u0131yken) g\u00f6nderilmez.")
-    if pid in ("trendruum", "hb"):
+    if pid in ("trendruum", "hb", "idefix"):
         oto_esleme(pid, pa, adet, mevcut)
     st.markdown("**Elle e\u015fle\u015ftirme**")
     ara = st.text_input("Kategori ara (filtre)", key=f"kat_ara_{pid}")
@@ -3131,6 +3349,44 @@ def pazar_islemler(pid):
     elif islem == "toplu":
         toplu_urun_paneli(pid)
 
+    if pid == "idefix" and bagli:
+        with st.expander("\U0001f4cb \u0130defix g\u00f6nderim sonucunu sorgula (batchRequestId)", expanded=True):
+            st.caption("\u0130defix \u00fcr\u00fcn olu\u015fturmay\u0131 hemen yapmaz; \u00fcr\u00fcn \u00f6nce havuza al\u0131n\u0131r. Neden g\u00f6r\u00fcnmedi\u011fini bu sonu\u00e7 s\u00f6yler.")
+            kayitli = list(reversed(ayarlar.get("idefix_takip") or []))
+            sec = st.selectbox("Son g\u00f6nderimlerin batchRequestId'leri", [""] + kayitli, key="idefix_takip_sec")
+            elle = st.text_input("veya batchRequestId yap\u0131\u015ft\u0131r\u0131n", key="idefix_takip_elle")
+            if gen(st.button, "\U0001f50e Sonucu getir", key="idefix_takip_btn"):
+                try:
+                    bid = (elle or sec).strip()
+                    if not bid:
+                        raise ValueError("Bir batchRequestId se\u00e7in ya da yap\u0131\u015ft\u0131r\u0131n.")
+                    kod, j, ham = idefix_batch_sorgula(ayarlar, bid)
+                    st.session_state["idefix_sonuc"] = (bid, kod, j, ham)
+                except Exception as e:
+                    st.session_state["idefix_sonuc"] = None
+                    st.error(f"Hata: {e}")
+            gs = st.session_state.get("idefix_sonuc")
+            if gs:
+                bid, kod, j, ham = gs
+                (st.success if kod == 200 else st.error)(f"HTTP {kod} (batch {bid})")
+                oz = idefix_sonuc_ozet(j)
+                if oz["ust"]:
+                    st.write(f"Batch durumu: **{oz['ust']}**")
+                if oz["sayim"]:
+                    st.write(", ".join(f"{k}: {n}" for k, n in oz["sayim"].items()))
+                if oz["satirlar"]:
+                    st.dataframe(pd.DataFrame(oz["satirlar"]).drop(columns=["_durum"]), hide_index=True)
+                    bekleyen = [r["Barkod"] for r in oz["satirlar"] if r["_durum"] == "waiting_vendor_approve" and r["Barkod"]]
+                    if bekleyen:
+                        st.warning(f"{len(bekleyen)} \u00fcr\u00fcn \u0130defix katalo\u011funda zaten var ve onay\u0131n\u0131z\u0131 bekliyor. Onaylamadan \u00f6nce e\u015fle\u015fen \u00fcr\u00fcn\u00fcn do\u011fru oldu\u011funu \u0130defix panelinden kontrol edin.")
+                        onay_a = st.checkbox("E\u015fle\u015fmeleri kontrol ettim, bu \u00fcr\u00fcnleri onayl\u0131yorum", key="idefix_onay_cb")
+                        if gen(st.button, f"\u2705 Bekleyen {len(bekleyen)} \u00fcr\u00fcn\u00fc onayla", key="idefix_onay_btn", disabled=not onay_a):
+                            ok_k, hata_k, lg = idefix_onayla(ayarlar, bekleyen)
+                            log_yaz("\u0130defix", "OK" if not hata_k else "KISM\u0130", f"\u00dcr\u00fcn onay\u0131: {len(ok_k)} onayland\u0131, {len(hata_k)} hata.")
+                            (st.success if not hata_k else st.warning)(f"{len(ok_k)} \u00fcr\u00fcn onayland\u0131, {len(hata_k)} hata. " + " ".join(lg[-2:]))
+                with st.expander("Ham yan\u0131t"):
+                    st.code(ham)
+
     if pid == "ptt" and bagli:
         with st.expander("\U0001f4cb PTT g\u00f6nderim sonucunu sorgula (trackingId)"):
             kayitli = list(ayarlar.get("ptt_takip") or [])
@@ -3210,6 +3466,9 @@ def pazar_ayar(pid):
     if pid == "ptt":
         with st.expander("\U0001f50e PTT kategori ID bulucu (kategori ad\u0131ndan ID bul)"):
             ptt_kategori_bulucu()
+    if pid == "idefix":
+        with st.expander("\U0001f50e \u0130defix kategori ID bulucu (kategori ad\u0131ndan ID bul)"):
+            idefix_kategori_bulucu()
     if pid == "hb":
         with st.expander("\U0001f50e Hepsiburada kategori ID bulucu (kategori ad\u0131ndan ID bul)"):
             hb_kategori_bulucu()
