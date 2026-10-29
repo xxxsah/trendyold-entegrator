@@ -76,6 +76,7 @@ VARSAYILAN = {
     "pazar_ayarlari": {},
     "kara_liste": "",
     "stok_sifir": {},
+    "fiyat_sabit": {},
     "son_yedek": "",
     "ptt_takip": [],
 }
@@ -731,6 +732,7 @@ def tedarikci_senkron(ad, bilgi, kritik_esik=0, stok_ust=50):
     kilit = stok_sifir_kume(ayar_oku())
     if kilit:  # elle sifirlanan urunler tedarikci stogu gelse bile 0 kalir
         df.loc[df["barkod"].astype(str).isin(kilit), "stok"] = 0
+    df = fiyat_override_uygula(ayar_oku(), df)  # elle belirlenen satis fiyatlari senkronda ezilmez
     sutunlar = ["gorsel", "tedarikci", "barkod", "urun_adi", "stok", "alis_fiyati", "satis_fiyati", "kategori"]
     with closing(baglan()) as c:
         try:
@@ -750,7 +752,7 @@ def tedarikci_senkron(ad, bilgi, kritik_esik=0, stok_ust=50):
 # --------------------------------------------------------------------------
 # Fiyat kurallar\u0131 ve ortak yard\u0131mc\u0131lar
 # --------------------------------------------------------------------------
-def fiyat_artis_uygula(ayar, pid, df):
+def _fiyat_artis_ham(ayar, pid, df):
     pa = (ayar.get("pazar_ayarlari") or {}).get(pid) or {}
     marj = _f(pa.get("kar_marji"))
     kargo = _f(pa.get("sabit_kargo"))
@@ -781,6 +783,79 @@ def fiyat_artis_uygula(ayar, pid, df):
         df["satis_fiyati"] = df["satis_fiyati"] * (1 + artis / 100)
     df["satis_fiyati"] = df["satis_fiyati"].round(2)
     return df
+
+
+def fiyat_sabit_sozluk(ayar):
+    out = {}
+    for b, f in (ayar.get("fiyat_sabit") or {}).items():
+        try:
+            v = float(f)
+        except (TypeError, ValueError):
+            continue
+        if v > 0:
+            out[str(b)] = v
+    return out
+
+
+def fiyat_override_uygula(ayar, df):
+    """Elle belirlenen (sabit) satis fiyatlari, marj/kargo/artis hesabindan sonra kesin fiyat olur."""
+    soz = fiyat_sabit_sozluk(ayar)
+    if not soz or df.empty or "satis_fiyati" not in df.columns or "barkod" not in df.columns:
+        return df
+    anahtar = df["barkod"].astype(str)
+    maske = anahtar.isin(soz)
+    if not maske.any():
+        return df
+    df = df.copy()
+    df.loc[maske, "satis_fiyati"] = anahtar[maske].map(soz).astype(float).round(2)
+    return df
+
+
+def fiyat_artis_uygula(ayar, pid, df):
+    return fiyat_override_uygula(ayar, _fiyat_artis_ham(ayar, pid, df))
+
+
+def fiyat_sabitle(ayar, barkodlar, fiyat, pazarlara_gonder=True):
+    """Secilen urunlerin satis fiyatini elle sabitler; istenirse bagli pazar yerlerine hemen gonderir."""
+    fiyat = round(float(fiyat), 2)
+    if fiyat <= 0:
+        raise ValueError("Sat\u0131\u015f fiyat\u0131 0'dan b\u00fcy\u00fck olmal\u0131.")
+    barkodlar = sorted({str(b).strip() for b in barkodlar if str(b).strip()})
+    if not barkodlar:
+        return []
+    sabit = ayar.setdefault("fiyat_sabit", {})
+    for b in barkodlar:
+        sabit[b] = fiyat
+    ayar_yaz(ayar)
+    with closing(baglan()) as c:
+        for i in range(0, len(barkodlar), 500):
+            parca = barkodlar[i:i + 500]
+            c.execute(f"UPDATE urunler SET satis_fiyati = ? WHERE barkod IN ({','.join('?' * len(parca))})", [fiyat] + parca)
+        c.commit()
+    sonuc = []
+    if pazarlara_gonder:
+        df = urunleri_oku()
+        df = df[df["barkod"].isin(barkodlar)].drop_duplicates("barkod").reset_index(drop=True)
+        for pid in GUNCELLEYICI:
+            if not pazar_bagli(ayar, pid):
+                continue
+            try:
+                ok, hata, _ = pazara_gonder(ayar, pid, df)
+                sonuc.append((PAZAR_AD.get(pid, pid), ok, hata))
+            except Exception as e:
+                sonuc.append((PAZAR_AD.get(pid, pid), 0, str(e)))
+    log_yaz("Sistem", "OK", f"{len(barkodlar)} \u00fcr\u00fcn\u00fcn sat\u0131\u015f fiyat\u0131 elle {fiyat:.2f} TL yap\u0131ld\u0131.")
+    return sonuc
+
+
+def fiyat_sabit_kaldir(ayar, barkodlar):
+    sabit = ayar.setdefault("fiyat_sabit", {})
+    n = 0
+    for b in barkodlar:
+        if sabit.pop(str(b), None) is not None:
+            n += 1
+    ayar_yaz(ayar)
+    return n
 
 
 def objectid_mi(v):
@@ -2805,7 +2880,6 @@ def kategori_esleme_editoru(pid):
         ayar_yaz(ayarlar)
         st.success(f"Toplam {len(yeni)} kategori e\u015fle\u015ftirmesi kay\u0131tl\u0131.")
 
-
 def varsayilan_kategori_yaz(pid, cid):
     """Varsayilan kategori ID'sini kaydeder; formun yeni degeri gostermesi icin sayfayi yeniler."""
     pa_al(ayarlar, pid)["category_id"] = str(cid).strip()
@@ -3526,6 +3600,7 @@ def urunler_sayfasi():
             st.rerun()
         return
     kilit = stok_sifir_kume(ayarlar)
+    fiyat_kilit = fiyat_sabit_sozluk(ayarlar)
     esik = _i(ayarlar.get("kritik_esik")) or 3
     c1, c2 = st.columns([1, 2])
     secenek = ["T\u00fcm Bayiler"] + sorted(df["tedarikci"].dropna().unique().tolist())
@@ -3572,7 +3647,8 @@ def urunler_sayfasi():
             "G\u00f6rsel": f["gorsel"].where(f["gorsel"].astype(str).str.startswith("http"), None),
             "\u00dcr\u00fcn": f["urun_adi"], "Barkod": f["barkod"], "Tedarik\u00e7i": f["tedarikci"], "Stok": f["stok"],
             "Al\u0131\u015f": f["alis_fiyati"].map(_f).round(2), "Sat\u0131\u015f": f["satis_fiyati"].map(_f).round(2),
-            "Kilit": f["barkod"].astype(str).isin(kilit).map({True: "\U0001f512", False: ""}),
+            "Kilit": [("\U0001f512" if b in kilit else "") + ("\U0001f4b2" if b in fiyat_kilit else "")
+                      for b in f["barkod"].astype(str)],
         })
         ayar_kol = {
             "G\u00f6rsel": st.column_config.ImageColumn("G\u00f6rsel", width="small"),
@@ -3607,6 +3683,35 @@ def urunler_sayfasi():
                 if gen(k2.button, "\U0001f513 Kilidi kald\u0131r", key="kilit_kaldir_btn"):
                     n = stok_kilidi_kaldir(ayarlar, sec_barkod)
                     st.session_state["urun_sifir_sonuc"] = [f"{n} \u00fcr\u00fcn\u00fcn kilidi kald\u0131r\u0131ld\u0131. Stok, bir sonraki tedarik\u00e7i \u00e7eki\u015finde geri gelir ('Stoklar\u0131 tedarik\u00e7iden \u00e7ek')."]
+                    st.rerun()
+        if sec_barkod:
+            with st.container(border=True):
+                st.markdown("**\U0001f4b2 Sat\u0131\u015f fiyat\u0131n\u0131 de\u011fi\u015ftir**")
+                ilk = f[f["barkod"].astype(str).isin(sec_barkod)]
+                mevcut_fiyat = float(_f(ilk["satis_fiyati"].iloc[0])) if len(ilk) else 0.0
+                alis_en_yuksek = float(ilk["alis_fiyati"].map(_f).max()) if len(ilk) else 0.0
+                yeni_fiyat = st.number_input("Yeni sat\u0131\u015f fiyat\u0131 (\u20ba) \u2014 pazar yerlerine bu fiyat gider", min_value=0.0,
+                                             value=round(mevcut_fiyat, 2), step=1.0, format="%.2f", key="fiyat_yeni")
+                st.caption(f"Se\u00e7ili {len(sec_barkod)} \u00fcr\u00fcn \u00b7 en y\u00fcksek al\u0131\u015f fiyat\u0131 {alis_en_yuksek:.2f} \u20ba. "
+                           "Bu fiyat marj, kargo ve komisyon hesab\u0131ndan sonra kesin fiyatt\u0131r; tedarik\u00e7i senkronunda da korunur.")
+                zarar = yeni_fiyat > 0 and yeni_fiyat < alis_en_yuksek
+                zarar_onay = True
+                if zarar:
+                    st.warning("Yeni fiyat al\u0131\u015f fiyat\u0131n\u0131n alt\u0131nda; bu fiyatla satarsan\u0131z zarar edersiniz.")
+                    zarar_onay = st.checkbox("Zarar\u0131na sat\u0131\u015f\u0131 onayl\u0131yorum", key="fiyat_zarar")
+                fg = st.checkbox("Ba\u011fl\u0131 pazar yerlerine de hemen g\u00f6nder", value=True, key="fiyat_gonder")
+                p1, p2 = st.columns(2)
+                if gen(p1.button, "\U0001f4b2 Fiyat\u0131 kaydet", key="fiyat_btn", disabled=(yeni_fiyat <= 0 or not zarar_onay)):
+                    try:
+                        sonuc = fiyat_sabitle(ayarlar, sec_barkod, yeni_fiyat, fg)
+                        st.session_state["urun_sifir_sonuc"] = [f"{len(sec_barkod)} \u00fcr\u00fcn\u00fcn sat\u0131\u015f fiyat\u0131 {yeni_fiyat:.2f} \u20ba yap\u0131ld\u0131."] + [
+                            f"{ad}: {ok} g\u00f6nderildi" + (f", hata: {h}" if h else "") for ad, ok, h in sonuc]
+                    except ValueError as e:
+                        st.session_state["urun_sifir_sonuc"] = [str(e)]
+                    st.rerun()
+                if gen(p2.button, "\u21a9\ufe0f Elle fiyat\u0131 kald\u0131r", key="fiyat_kaldir_btn"):
+                    n = fiyat_sabit_kaldir(ayarlar, sec_barkod)
+                    st.session_state["urun_sifir_sonuc"] = [f"{n} \u00fcr\u00fcn\u00fcn elle fiyat\u0131 kald\u0131r\u0131ld\u0131. Otomatik fiyat, bir sonraki tedarik\u00e7i \u00e7eki\u015finde ('Stoklar\u0131 tedarik\u00e7iden \u00e7ek') geri gelir."]
                     st.rerun()
     else:
         st.caption("K\u00fc\u00e7\u00fck g\u00f6rselli kart g\u00f6r\u00fcn\u00fcm\u00fc; daha fazlas\u0131 i\u00e7in a\u015fa\u011f\u0131daki d\u00fc\u011fmeyi kullan\u0131n.")
@@ -3738,3 +3843,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
