@@ -609,6 +609,35 @@ def kademeli_marj(alis, kademe, varsayilan):
     return sonuc
 
 
+VARSAYILAN_HEDEF = [[100, 40.0], [500, 80.0], [2000, 150.0], [None, 300.0]]
+
+
+def hedef_parametreleri(bilgi):
+    c = _f(bilgi.get("h_komisyon"), 20.0) / 100
+    t = _f(bilgi.get("h_vergi"), 0.0) / 100
+    kdv = _f(bilgi.get("h_kdv"), 20.0) / 100
+    gider = _f(bilgi.get("h_kargo"), 150.0) + _f(bilgi.get("h_bayi_kargo"), 15.0) + _f(bilgi.get("h_ek_gider"), 0.0)
+    if c >= 0.95 or t >= 0.95:
+        raise ValueError("Komisyon ya da vergi oran\u0131 \u00e7ok y\u00fcksek.")
+    return c, t, kdv, gider
+
+
+def hedef_fiyat(alis, bilgi):
+    """Hedef NET kar icin satis fiyati: P = (alis + giderler + hedef*(1+kdv)/(1-vergi)) / (1-komisyon).
+    Alis fiyati KDV dahil kabul edilir; komisyon KDV dahil orandir."""
+    c, t, kdv, gider = hedef_parametreleri(bilgi)
+    hedef = kademeli_marj(alis, bilgi.get("hedef_kademe") or VARSAYILAN_HEDEF, _f(bilgi.get("hedef_net"), 100.0))
+    return ((alis + gider + hedef * (1 + kdv) / (1 - t)) / (1 - c)).round(2)
+
+
+def net_kar_hesapla(satis, alis, bilgi):
+    """Verilen satis fiyatinda komisyon, kargo, KDV ve vergi dusuldukten sonra kalan net kar (TL)."""
+    c, t, kdv, gider = hedef_parametreleri(bilgi)
+    m = satis * (1 - c) - alis - gider
+    vergi_sonrasi = m / (1 + kdv)
+    return vergi_sonrasi.where(m <= 0, vergi_sonrasi * (1 - t)).round(2)
+
+
 def ad_temizle(x):
     t = html.unescape(html.unescape(str(x)))
     return re.sub(r"\s+", " ", t).strip()
@@ -688,7 +717,10 @@ def normalle(tedarikci, df, harita, marj, sabit_ek, kritik_esik=0, stok_ust=50, 
         ozet["ornek_usd"] = [f"{str(r)[:60]} | {f:.2f} TL" for r, f in zip(kol("ad")[usd].head(3), alis[usd].head(3))]
     alis = alis.where(~bilinmeyen, 0.0)
     marj_s = kademeli_marj(alis, bilgi.get("kademe") if bilgi.get("kademe_aktif") else None, marj)
-    satis = (alis * (1 + marj_s / 100) + sabit_ek).where(~bilinmeyen, 0.0)
+    if bilgi.get("hedef_aktif"):
+        satis = hedef_fiyat(alis, bilgi).where((~bilinmeyen) & (alis > 0), 0.0)
+    else:
+        satis = (alis * (1 + marj_s / 100) + sabit_ek).where(~bilinmeyen, 0.0)
     stok = kol("stok").map(sayi).clip(lower=0, upper=max(1, int(stok_ust))).astype(int)
     if kritik_esik and kritik_esik > 0:
         stok = stok.where(stok > kritik_esik, 0)
@@ -783,6 +815,41 @@ def _fiyat_artis_ham(ayar, pid, df):
         df["satis_fiyati"] = df["satis_fiyati"] * (1 + artis / 100)
     df["satis_fiyati"] = df["satis_fiyati"].round(2)
     return df
+
+
+def fiyat_yeniden_hesapla(ad, bilgi):
+    """Tedarikcinin guncel marj/kargo/kademe ayariyla satis fiyatlarini, XML indirmeden, kayitli alis fiyatindan yeniden hesaplar."""
+    df = urunleri_oku()
+    d = df[df["tedarikci"] == ad].copy()
+    if d.empty:
+        return 0
+    alis = d["alis_fiyati"].map(_f)
+    marj_s = kademeli_marj(alis, bilgi.get("kademe") if bilgi.get("kademe_aktif") else None, _f(bilgi.get("marj"), 30.0))
+    if bilgi.get("hedef_aktif"):
+        yeni = hedef_fiyat(alis, bilgi)
+    else:
+        yeni = (alis * (1 + marj_s / 100) + _f(bilgi.get("sabit_ek"))).round(2)
+    d["satis_fiyati"] = yeni.where(alis > 0, d["satis_fiyati"])
+    d = fiyat_override_uygula(ayar_oku(), d)  # elle belirlenen fiyatlar korunur
+    eski = df.loc[d.index, "satis_fiyati"].map(_f)
+    degisen = d[(d["satis_fiyati"].map(_f) - eski).abs() > 0.004]
+    with closing(baglan()) as c:
+        c.executemany("UPDATE urunler SET satis_fiyati = ? WHERE tedarikci = ? AND barkod = ?",
+                      [(float(r["satis_fiyati"]), ad, str(r["barkod"])) for _, r in degisen.iterrows()])
+        c.commit()
+    return len(degisen)
+
+
+def urun_ara(f, ara):
+    """Ad, tedarikci barkodu ya da PAZAR YERINE GIDEN barkod (uretilen/duzeltilen) ile arar."""
+    n = tr_norm(ara)
+    if not n:
+        return f
+    pb = f["barkod"].astype(str).map(lambda k: sabit_barkod(k, True) or "")
+    esles = (f["urun_adi"].astype(str).map(tr_norm).str.contains(n, regex=False)
+             | f["barkod"].astype(str).map(tr_norm).str.contains(n, regex=False)
+             | pb.map(tr_norm).str.contains(n, regex=False))
+    return f[esles]
 
 
 def fiyat_sabit_sozluk(ayar):
@@ -1433,13 +1500,27 @@ def hb_urun_gonder(ayar, liste, ilerleme=None):
     return len(ok_k), len(hata_k), loglar
 
 
-def hb_siparisler(ayar):
+HB_OMS = "https://oms-external.hepsiburada.com"
+
+
+def hb_siparisler(ayar, saat=96, sayfa_boyu=50, en_fazla_sayfa=40):
+    """GET /packages/merchantid/{id}: Hepsiburada dokumani limit/offset kullanimini zorunlu kilar."""
     m = kimlik(ayar, "hb_merchant_id")
     if not m:
         return []
-    r = http("GET", f"https://orders-external.hepsiburada.com/packages/merchantid/{m}", headers=hb_header(ayar), timeout=30)
-    r.raise_for_status()
-    return r.json() or []
+    url = f"{HB_OMS}/packages/merchantid/{urllib.parse.quote(str(m), safe='')}"
+    hepsi = []
+    for sayfa in range(en_fazla_sayfa):
+        r = http("GET", url, params={"timespan": saat, "limit": sayfa_boyu, "Offset": sayfa * sayfa_boyu},
+                 headers=hb_header(ayar), timeout=30)
+        r.raise_for_status()
+        j = r.json() or []
+        if isinstance(j, dict):
+            j = j.get("items") or j.get("data") or j.get("packages") or j.get("content") or []
+        hepsi += j
+        if len(j) < sayfa_boyu:
+            break
+    return hepsi
 
 
 # --------------------------------------------------------------------------
@@ -1524,6 +1605,7 @@ def ptt_guncelle(ayar, df, ilerleme=None):
     if hata_k:
         loglar.append("\u2139\ufe0f PTT ayn\u0131 iste\u011fi 5 dakika i\u00e7inde tekrar kabul etmez; hata ald\u0131ysan\u0131z 5 dk bekleyip tekrar deneyin.")
     return _sonuc("ptt", ok_k, hata_k, loglar, atlanan)
+
 
 def ptt_urun_listesi(df, ayar):
     """PTT AVM '\u00dcr\u00fcn Ekleme G\u00fcncelleme' (POST /products/upsert) \u2014 varyants\u0131z \u00fcr\u00fcn.
@@ -2990,7 +3072,6 @@ def varsayilan_kategori_yaz(pid, cid):
     st.session_state[f"vk_bilgi_{pid}"] = str(cid).strip()
     st.rerun()
 
-
 def pazar_ayar_formu(pid):
     pa = pa_al(ayarlar, pid)
     bilgi = st.session_state.pop(f"vk_bilgi_{pid}", None)
@@ -3177,6 +3258,12 @@ def tedarikci_sayfasi():
             if not onizleme:
                 st.caption("Alan e\u015fle\u015ftirmesini d\u00fczenlemek i\u00e7in yukar\u0131daki d\u00fc\u011fmeyle XML'i y\u00fckleyin. Kay\u0131tl\u0131 e\u015fle\u015ftirme senkronizasyonda aynen kullan\u0131l\u0131r.")
                 continue
+            st.caption("XML'deki t\u00fcm alanlar: " + ", ".join(str(k) for k in onizleme["kolonlar"]))
+            marka_alani = [k for k in onizleme["kolonlar"] if any(w in str(k).lower() for w in ("brand", "marka", "manufactur", "vendor", "uretici"))]
+            if marka_alani:
+                st.success("Marka alan\u0131 bulundu: " + ", ".join(str(k) for k in marka_alani))
+            else:
+                st.warning("Bu XML'de marka/brand ad\u0131nda bir alan g\u00f6r\u00fcnm\u00fcyor.")
             with st.expander("Ham XML \u00f6nizleme (ilk 5 \u00fcr\u00fcn)"):
                 st.dataframe(onizleme["ornek"])
             kolonlar = ["(yok)"] + onizleme["kolonlar"]
@@ -3199,9 +3286,14 @@ def tedarikci_sayfasi():
             marj = st.number_input("K\u00e2r Marj\u0131 (%)", 0.0, 500.0, float(bilgi.get("marj", 30.0)), 1.0, key=f"{ad}_marj")
             sabit = st.number_input("Sabit Ek / Kargo (TL)", 0.0, 5000.0, float(bilgi.get("sabit_ek", 0.0)), 5.0, key=f"{ad}_sabit")
             if harita != eski or marj != bilgi.get("marj") or sabit != bilgi.get("sabit_ek"):
+                fiyat_degisti = marj != bilgi.get("marj") or sabit != bilgi.get("sabit_ek")
                 bilgi.update({"harita": harita, "marj": marj, "sabit_ek": sabit})
                 ayar_yaz(ayarlar)
-                st.success("Kaydedildi. Yeni de\u011ferler bir sonraki senkronizasyonda \u00fcr\u00fcnlere uygulan\u0131r.")
+                if fiyat_degisti:
+                    n_f = fiyat_yeniden_hesapla(ad, bilgi)
+                    st.success(f"Kaydedildi. {n_f:,} \u00fcr\u00fcn\u00fcn sat\u0131\u015f fiyat\u0131 yeni marj/kargo ile yeniden hesapland\u0131. Pazar yerlerine g\u00f6ndermek i\u00e7in 'T\u00fcm Stok/Fiyatlar\u0131 G\u00fcncelle'ye bas\u0131n.")
+                else:
+                    st.success("Kaydedildi. Alan e\u015fle\u015ftirmesi bir sonraki senkronizasyonda uygulan\u0131r.")
             st.markdown("**\U0001f4ca Kademeli k\u00e2r marj\u0131 (al\u0131\u015f fiyat\u0131na g\u00f6re)**")
             kad_a = st.checkbox("Kademeli marj\u0131 kullan (a\u00e7\u0131kken yukar\u0131daki tek marj yerine ge\u00e7er)", bool(bilgi.get("kademe_aktif")), key=f"{ad}_kad_a")
             mevcut = kademe_temizle(bilgi.get("kademe")) or [list(r) for r in VARSAYILAN_KADEME]
@@ -3211,10 +3303,58 @@ def tedarikci_sayfasi():
             if kad_a != bool(bilgi.get("kademe_aktif")) or yeni_k != kademe_temizle(bilgi.get("kademe")):
                 bilgi.update({"kademe_aktif": kad_a, "kademe": yeni_k or [list(r) for r in VARSAYILAN_KADEME]})
                 ayar_yaz(ayarlar)
-                st.success("Kademe kaydedildi. Senkronizasyondan sonra uygulan\u0131r.")
+                n_f = fiyat_yeniden_hesapla(ad, bilgi)
+                st.success(f"Kademe kaydedildi. {n_f:,} \u00fcr\u00fcn\u00fcn sat\u0131\u015f fiyat\u0131 yeniden hesapland\u0131. Pazar yerlerine g\u00f6ndermek i\u00e7in 'T\u00fcm Stok/Fiyatlar\u0131 G\u00fcncelle'ye bas\u0131n.")
             if kad_a:
                 ozet_k = ", ".join(("\u00fcst\u00fc" if r[0] is None else f"{int(r[0])} TL'ye kadar") + f" %{r[1]:g}" for r in kademe_temizle(bilgi.get("kademe")))
                 st.caption("\u00d6rnek: " + ozet_k)
+
+            st.markdown("**\U0001f3af Hedef net k\u00e2r ile fiyatlama (zarar etmeden)**")
+            st.caption("Komisyon, kargo ve vergiler d\u00fc\u015f\u00fcld\u00fckten sonra cebinizde kalacak NET k\u00e2r\u0131 siz belirlersiniz; sat\u0131\u015f fiyat\u0131 buna g\u00f6re hesaplan\u0131r. A\u00e7\u0131kken yukar\u0131daki marj ve kademe yerine ge\u00e7er. Al\u0131\u015f fiyat\u0131 KDV dahil kabul edilir; XML fiyat\u0131 KDV hari\u00e7se 'Fiyata KDV ekle'yi a\u00e7\u0131n.")
+            h_aktif = st.checkbox("Hedef net k\u00e2r ile fiyatla", bool(bilgi.get("hedef_aktif")), key=f"{ad}_h_aktif")
+            hc1, hc2, hc3 = st.columns(3)
+            h_kargo = hc1.number_input("Kargo maliyeti (TL)", 0.0, 3000.0, _f(bilgi.get("h_kargo"), 150.0), 5.0, key=f"{ad}_h_kargo")
+            h_bayi = hc2.number_input("Bayi kargo/i\u015flem (TL)", 0.0, 1000.0, _f(bilgi.get("h_bayi_kargo"), 15.0), 1.0, key=f"{ad}_h_bayi")
+            h_ek = hc3.number_input("Paketleme vb. gider (TL)", 0.0, 1000.0, _f(bilgi.get("h_ek_gider"), 0.0), 1.0, key=f"{ad}_h_ek")
+            hd1, hd2, hd3 = st.columns(3)
+            h_kom = hd1.number_input("Komisyon % (KDV dahil)", 0.0, 60.0, _f(bilgi.get("h_komisyon"), 20.0), 0.5, key=f"{ad}_h_kom")
+            h_kdv = hd2.number_input("Sat\u0131\u015f KDV %", 0.0, 40.0, _f(bilgi.get("h_kdv"), 20.0), 1.0, key=f"{ad}_h_kdv")
+            h_ver = hd3.number_input("K\u00e2r vergisi %", 0.0, 60.0, _f(bilgi.get("h_vergi"), 0.0), 1.0, key=f"{ad}_h_ver",
+                                     help="K\u00e2r \u00fczerinden \u00f6denecek gelir/kurumlar vergisi. Muhasebecinize sorun; 0 yazarsan\u0131z hesaba kat\u0131lmaz.")
+            hmev = kademe_temizle(bilgi.get("hedef_kademe")) or [list(r) for r in VARSAYILAN_HEDEF]
+            htablo = pd.DataFrame([{"Al\u0131\u015f fiyat\u0131 bu TL'ye kadar (bo\u015f = \u00fcst\u00fc hepsi)": r[0], "Hedef net k\u00e2r (TL)": r[1]} for r in hmev])
+            hduz = st.data_editor(htablo, num_rows="dynamic", hide_index=True, key=f"{ad}_h_t")
+            h_kad = kademe_temizle([[(None if r.iloc[0] != r.iloc[0] else r.iloc[0]), r.iloc[1]] for _, r in hduz.iterrows()])
+            yeni_h = {"hedef_aktif": h_aktif, "h_kargo": h_kargo, "h_bayi_kargo": h_bayi, "h_ek_gider": h_ek,
+                      "h_komisyon": h_kom, "h_kdv": h_kdv, "h_vergi": h_ver,
+                      "hedef_kademe": h_kad or [list(r) for r in VARSAYILAN_HEDEF]}
+            if any(bilgi.get(k) != v for k, v in yeni_h.items() if k != "hedef_kademe") or kademe_temizle(bilgi.get("hedef_kademe")) != kademe_temizle(yeni_h["hedef_kademe"]):
+                eski_aktif = bool(bilgi.get("hedef_aktif"))
+                bilgi.update(yeni_h)
+                ayar_yaz(ayarlar)
+                if h_aktif or eski_aktif:
+                    n_f = fiyat_yeniden_hesapla(ad, bilgi)
+                    st.success(f"Kaydedildi. {n_f:,} \u00fcr\u00fcn\u00fcn sat\u0131\u015f fiyat\u0131 yeniden hesapland\u0131. Pazar yerlerine g\u00f6ndermek i\u00e7in 'T\u00fcm Stok/Fiyatlar\u0131 G\u00fcncelle'ye bas\u0131n.")
+                else:
+                    st.success("Kaydedildi (hedef net k\u00e2r y\u00f6ntemi kapal\u0131).")
+            ornek_alis = pd.Series([50.0, 100.0, 300.0, 1000.0, 5000.0, 20000.0])
+            if bilgi.get("hedef_aktif"):
+                ornek_satis = hedef_fiyat(ornek_alis, bilgi)
+                yontem = "Hedef net k\u00e2r"
+            else:
+                ornek_marj = kademeli_marj(ornek_alis, bilgi.get("kademe") if bilgi.get("kademe_aktif") else None, _f(bilgi.get("marj"), 30.0))
+                ornek_satis = (ornek_alis * (1 + ornek_marj / 100) + _f(bilgi.get("sabit_ek"))).round(2)
+                yontem = "\u015eu anki marj/kargo"
+            ornek_net = net_kar_hesapla(ornek_satis, ornek_alis, bilgi)
+            st.caption(f"\u00d6rnek hesap ({yontem} y\u00f6ntemi). Net k\u00e2r: komisyon, kargo, KDV ve vergi d\u00fc\u015f\u00fcld\u00fckten sonra kalan tutar.")
+            st.dataframe(pd.DataFrame({"Al\u0131\u015f (TL)": ornek_alis, "Sat\u0131\u015f (TL)": ornek_satis, "Net k\u00e2r (TL)": ornek_net}), hide_index=True)
+            if (ornek_net < 0).any():
+                st.error("Baz\u0131 al\u0131\u015f fiyatlar\u0131nda bu ayarla ZARAR ediyorsunuz (Net k\u00e2r negatif). Hedef net k\u00e2r y\u00f6ntemini a\u00e7\u0131n ya da marj\u0131 art\u0131r\u0131n.")
+
+            if gen(st.button, "\U0001f4b2 Fiyatlar\u0131 \u015fimdi yeniden hesapla", key=f"{ad}_fiyat_hesapla",
+                   help="Kay\u0131tl\u0131 al\u0131\u015f fiyatlar\u0131ndan, yukar\u0131daki g\u00fcncel marj/kargo/kademe ile sat\u0131\u015f fiyatlar\u0131n\u0131 yeniden hesaplar. XML indirmez, h\u0131zl\u0131d\u0131r."):
+                n_f = fiyat_yeniden_hesapla(ad, bilgi)
+                st.success(f"{n_f:,} \u00fcr\u00fcn\u00fcn sat\u0131\u015f fiyat\u0131 g\u00fcncel ayarla yeniden hesapland\u0131. Pazar yerlerine g\u00f6ndermek i\u00e7in pazar yerinin i\u015flemler sayfas\u0131nda 'T\u00fcm Stok/Fiyatlar\u0131 G\u00fcncelle'ye bas\u0131n.")
 
 
 def ayarlari_geri_yukle(veri_y):
@@ -3724,8 +3864,7 @@ def urunler_sayfasi():
     if secili != "T\u00fcm Bayiler":
         f = f[f["tedarikci"] == secili]
     if ara:
-        n = tr_norm(ara)
-        f = f[f["urun_adi"].astype(str).map(tr_norm).str.contains(n, regex=False) | f["barkod"].astype(str).map(tr_norm).str.contains(n, regex=False)]
+        f = urun_ara(f, ara)
     if durum == "Stokta":
         f = f[f["stok"] > 0]
     elif durum == "T\u00fckenen":
@@ -3755,7 +3894,9 @@ def urunler_sayfasi():
     if gorunum.startswith("Tablo"):
         v = pd.DataFrame({
             "G\u00f6rsel": f["gorsel"].where(f["gorsel"].astype(str).str.startswith("http"), None),
-            "\u00dcr\u00fcn": f["urun_adi"], "Barkod": f["barkod"], "Tedarik\u00e7i": f["tedarikci"], "Stok": f["stok"],
+            "\u00dcr\u00fcn": f["urun_adi"], "Barkod": f["barkod"],
+            "Pazar barkodu": [(b if b and b != k else "") for k, b in zip(f["barkod"].astype(str), f["barkod"].astype(str).map(lambda k: sabit_barkod(k, True) or ""))],
+            "Tedarik\u00e7i": f["tedarikci"], "Stok": f["stok"],
             "Al\u0131\u015f": f["alis_fiyati"].map(_f).round(2), "Sat\u0131\u015f": f["satis_fiyati"].map(_f).round(2),
             "Kilit": [("\U0001f512" if b in kilit else "") + ("\U0001f4b2" if b in fiyat_kilit else "")
                       for b in f["barkod"].astype(str)],
