@@ -1180,6 +1180,7 @@ IDEFIX_HATA = {
     "BRAND_EXCLUSIVE_NOT_AUTHORIZED": "Bu markaya \u00fcr\u00fcn ekleme yetkiniz yok",
     "PRODUCT_NOT_FOUND": "Barkod \u00fcr\u00fcn havuzunuzda yok",
     "NO_PRICE": "Fiyat yok",
+    "VENDOR_BRAND_ACCESS_DENIED": "Bu markaya \u00fcr\u00fcn ekleme yetkiniz yok (Marka ID yanl\u0131\u015f ya da marka yetkisi gerekli)",
     "CATALOG_PRICE_LOCKED": "Fiyat kilitli (\u0130defix destek ile g\u00f6r\u00fc\u015f\u00fcn)",
 }
 IDEFIX_DURUM = {
@@ -1191,6 +1192,25 @@ IDEFIX_DURUM = {
     "manuel_matched": "Elle e\u015fle\u015fti",
     "decline": "Hata (y\u00fcklenemedi)",
 }
+
+
+def idefix_sebep_kodlari(v, derinlik=0):
+    """failureReasons metin, liste ya da {message, description} sozlugu olabilir; hata kodlarini duz listeler."""
+    if derinlik > 4 or v in (None, "", [], {}):
+        return []
+    if isinstance(v, str):
+        return [k.strip() for k in re.split(r"[,;\s]+", v) if k.strip()]
+    if isinstance(v, dict):
+        cikti = []
+        for a in ("message", "code", "reason", "description"):
+            cikti += idefix_sebep_kodlari(v.get(a), derinlik + 1)
+        return cikti
+    if isinstance(v, (list, tuple)):
+        cikti = []
+        for e in v:
+            cikti += idefix_sebep_kodlari(e, derinlik + 1)
+        return cikti
+    return [str(v)]
 
 
 def idefix_batch_id(metin):
@@ -1226,11 +1246,7 @@ def idefix_sonuc_ozet(j):
         if not isinstance(x, dict):
             continue
         durum = str(x.get("poolState") or x.get("status") or x.get("state") or "").strip()
-        sebep = x.get("failureReasons") or x.get("failureReason") or x.get("errors") or ""
-        if isinstance(sebep, list):
-            sebep = ", ".join(str(e) for e in sebep)
-        sebep = str(sebep or "").strip()
-        kodlar = [k.strip() for k in re.split(r"[,;\s]+", sebep) if k.strip()]
+        kodlar = idefix_sebep_kodlari(x.get("failureReasons") or x.get("failureReason") or x.get("errors") or "")
         sebep_tr = "; ".join(IDEFIX_HATA.get(k.split(":")[0], k) for k in kodlar)
         mp = x.get("matchedProduct") if isinstance(x.get("matchedProduct"), dict) else {}
         anahtar = durum.lower().replace(" ", "_")
@@ -1508,7 +1524,6 @@ def ptt_guncelle(ayar, df, ilerleme=None):
     if hata_k:
         loglar.append("\u2139\ufe0f PTT ayn\u0131 iste\u011fi 5 dakika i\u00e7inde tekrar kabul etmez; hata ald\u0131ysan\u0131z 5 dk bekleyip tekrar deneyin.")
     return _sonuc("ptt", ok_k, hata_k, loglar, atlanan)
-
 
 def ptt_urun_listesi(df, ayar):
     """PTT AVM '\u00dcr\u00fcn Ekleme G\u00fcncelleme' (POST /products/upsert) \u2014 varyants\u0131z \u00fcr\u00fcn.
@@ -2739,6 +2754,93 @@ def idefix_oto_dugumler(ayar):
     return out
 
 
+def _idefix_marka_listesi(j):
+    ogeler = j if isinstance(j, list) else ([j] if isinstance(j, dict) else [])
+    out = []
+    for x in ogeler:
+        if isinstance(x, dict) and x.get("id") not in (None, ""):
+            out.append({"ID": str(x["id"]), "Marka": str(x.get("title") or ""),
+                        "\u00d6zel marka": "evet" if x.get("exclusiveBrand") else "hay\u0131r",
+                        "T\u00fcr": "Yay\u0131nevi" if x.get("bookPublisher") else "Marka"})
+    return out
+
+
+def idefix_marka_ara(ayar, ad):
+    """Dokumandaki marka servisleri: /pim/brand/by-name, olmazsa /pim/brand/search-by-name."""
+    ad = str(ad or "").strip()
+    if len(ad) < 2:
+        raise ValueError("Aramak i\u00e7in en az 2 harf yaz\u0131n.")
+    h = idefix_header(ayar)
+    for yol in ("by-name", "search-by-name"):
+        r = http("GET", f"{ID_BASE}/pim/brand/{yol}", params={"title": ad}, headers=h, timeout=60, tries=1)
+        if r.status_code == 200:
+            try:
+                liste = _idefix_marka_listesi(r.json())
+            except Exception:
+                liste = []
+            if liste:
+                return liste
+        elif r.status_code not in (400, 404):
+            raise RuntimeError("\u0130defix marka aramas\u0131 ba\u015far\u0131s\u0131z: " + yanit_ozet(r))
+    return []
+
+
+def idefix_marka_getir(ayar, marka_id):
+    r = http("GET", f"{ID_BASE}/pim/brand/{urllib.parse.quote(str(marka_id).strip(), safe='')}",
+             headers=idefix_header(ayar), timeout=60, tries=1)
+    if r.status_code != 200:
+        raise RuntimeError("Bu Marka ID \u0130defix'te bulunamad\u0131: " + yanit_ozet(r))
+    liste = _idefix_marka_listesi(r.json())
+    if not liste:
+        raise RuntimeError("Marka bilgisi okunamad\u0131.")
+    return liste[0]
+
+
+def marka_id_yaz(pid, marka_id):
+    pa_al(ayarlar, pid)["brand_id"] = str(marka_id).strip()
+    ayar_yaz(ayarlar)
+    st.session_state[f"marka_bilgi_{pid}"] = str(marka_id).strip()
+    st.rerun()
+
+
+def idefix_marka_bulucu():
+    if not pazar_bagli(ayarlar, "idefix"):
+        st.caption("Marka aramak i\u00e7in \u00f6nce \u0130defix API bilgilerini kaydedin.")
+        return
+    st.caption("\u00dcr\u00fcnler bu markayla y\u00fcklenir. '\u00d6zel marka = evet' olan markalara yetkiniz yoksa \u0130defix \u00fcr\u00fcn\u00fc VENDOR_BRAND_ACCESS_DENIED ile reddeder.")
+    kayitli = str(pa_al(ayarlar, "idefix").get("brand_id", "") or "").strip()
+    if kayitli and gen(st.button, f"Kay\u0131tl\u0131 Marka ID ({kayitli}) hangi marka?", key="idm_kontrol"):
+        try:
+            m = idefix_marka_getir(ayarlar, kayitli)
+            ozel_m, tur_m = m["\u00d6zel marka"], m["T\u00fcr"]
+            st.info(f"{m['ID']} = {m['Marka']} (\u00f6zel marka: {ozel_m}, t\u00fcr: {tur_m})")
+        except Exception as e:
+            st.error(f"Hata: {e}")
+    ad = st.text_input("Marka ad\u0131", key="idm_ara")
+    if gen(st.button, "Marka ara", key="idm_ara_btn"):
+        try:
+            st.session_state["idm_sonuc"] = idefix_marka_ara(ayarlar, ad)
+            st.session_state["idm_aranan"] = ad
+        except Exception as e:
+            st.session_state["idm_sonuc"] = None
+            st.error(f"Hata: {e}")
+    liste = st.session_state.get("idm_sonuc")
+    if liste is None:
+        return
+    if not liste:
+        st.warning("Bu isimle marka bulunamad\u0131. Marka \u0130defix'te kay\u0131tl\u0131 de\u011filse \u0130defix destekten marka ekletmeniz gerekir.")
+        return
+    st.dataframe(pd.DataFrame(liste), hide_index=True)
+    secenek = []
+    for m in liste:
+        ozel_m = m["\u00d6zel marka"]
+        secenek.append(f"{m['ID']} \u2014 {m['Marka']} (\u00f6zel: {ozel_m})")
+    sec = st.selectbox("Listeden se\u00e7", secenek, key="idm_sec")
+    secilen = sec.split(" \u2014 ")[0].strip()
+    if gen(st.button, "Bu markay\u0131 Marka ID olarak kaydet", key="idm_kaydet"):
+        marka_id_yaz("idefix", secilen)
+
+
 def idefix_kategori_bulucu():
     if not pazar_bagli(ayarlar, "idefix"):
         st.caption("Kategori aramak i\u00e7in \u00f6nce \u0130defix API bilgilerini kaydedin.")
@@ -2880,6 +2982,7 @@ def kategori_esleme_editoru(pid):
         ayar_yaz(ayarlar)
         st.success(f"Toplam {len(yeni)} kategori e\u015fle\u015ftirmesi kay\u0131tl\u0131.")
 
+
 def varsayilan_kategori_yaz(pid, cid):
     """Varsayilan kategori ID'sini kaydeder; formun yeni degeri gostermesi icin sayfayi yeniler."""
     pa_al(ayarlar, pid)["category_id"] = str(cid).strip()
@@ -2893,6 +2996,9 @@ def pazar_ayar_formu(pid):
     bilgi = st.session_state.pop(f"vk_bilgi_{pid}", None)
     if bilgi:
         st.success(f"Varsay\u0131lan kategori ID kaydedildi: {bilgi}")
+    mb = st.session_state.pop(f"marka_bilgi_{pid}", None)
+    if mb:
+        st.success(f"Marka ID kaydedildi: {mb}")
     with st.form(f"ayar_form_{pid}"):
         st.markdown("**Fiyat kurallar\u0131 (bu pazar yeri i\u00e7in)**")
         c1, c2, c3 = st.columns(3)
@@ -2914,7 +3020,8 @@ def pazar_ayar_formu(pid):
                 help="Kapal\u0131yken (\u00f6nerilen) yaln\u0131zca 'Kategori e\u015fle\u015ftirme'de ID'si girilmi\u015f \u00fcr\u00fcnler g\u00f6nderilir; "
                      "di\u011ferleri atlan\u0131r. A\u00e7\u0131kken t\u00fcm \u00fcr\u00fcnler varsay\u0131lan kategoriye d\u00fc\u015fer.")
             if pid in ("idefix", "trendruum"):
-                yeni["brand_id"] = c2.text_input("Marka ID", value=str(pa.get("brand_id", "") or (kimlik(ayarlar, "trendruum_brand") if pid == "trendruum" else "")))
+                yeni["brand_id"] = c2.text_input("Marka ID", value=str(pa.get("brand_id", "") or (kimlik(ayarlar, "trendruum_brand") if pid == "trendruum" else "")),
+                                                 key=f"marka_alan_{pid}_{pa.get('brand_id', '')}")
             kdv_liste = [20, 10, 1, 0]
             kdv_now = _i(pa.get("kdv"), 20)
             yeni["kdv"] = c3.selectbox("KDV %", kdv_liste, index=kdv_liste.index(kdv_now) if kdv_now in kdv_liste else 0)
@@ -3540,6 +3647,9 @@ def pazar_ayar(pid):
     if pid == "ptt":
         with st.expander("\U0001f50e PTT kategori ID bulucu (kategori ad\u0131ndan ID bul)"):
             ptt_kategori_bulucu()
+    if pid == "idefix":
+        with st.expander("\U0001f3f7\ufe0f \u0130defix marka ID bulucu (marka ad\u0131ndan ID bul)"):
+            idefix_marka_bulucu()
     if pid == "idefix":
         with st.expander("\U0001f50e \u0130defix kategori ID bulucu (kategori ad\u0131ndan ID bul)"):
             idefix_kategori_bulucu()
