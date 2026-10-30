@@ -66,6 +66,10 @@ VARSAYILAN = {
     "kritik_esik": 0,
     "stok_ust_sinir": 0,
     "senkron_saat": 6,
+    "senkron_dk": 10,
+    "stok_guvenlik_payi": 0,
+    "pazar_stok_tavani": 0,
+    "acil_durdur": False,
     "oto_senkron": True,
     "tr_oto_guncelle": False,
     "ty_oto_guncelle": False,
@@ -136,6 +140,9 @@ def ayar_oku():
         }
     for k, v in VARSAYILAN.items():
         veri.setdefault(k, json.loads(json.dumps(v)))
+    if not veri.get("senkron_dk_v1"):  # tek seferlik: 6 saatlik aralik yerine 10 dakika
+        veri["senkron_dk"] = 10
+        veri["senkron_dk_v1"] = True
     if not veri.get("stok_sinirsiz_v1"):  # tek seferlik: eski 50'lik stok s\u0131n\u0131r\u0131 kalkt\u0131 (0 = s\u0131n\u0131rs\u0131z)
         veri["stok_ust_sinir"] = 0
         veri["stok_sinirsiz_v1"] = True
@@ -1638,6 +1645,7 @@ def ptt_guncelle(ayar, df, ilerleme=None):
         loglar.append("\u2139\ufe0f PTT ayn\u0131 iste\u011fi 5 dakika i\u00e7inde tekrar kabul etmez; hata ald\u0131ysan\u0131z 5 dk bekleyip tekrar deneyin.")
     return _sonuc("ptt", ok_k, hata_k, loglar, atlanan)
 
+
 def ptt_urun_listesi(df, ayar):
     """PTT AVM '\u00dcr\u00fcn Ekleme G\u00fcncelleme' (POST /products/upsert) \u2014 varyants\u0131z \u00fcr\u00fcn.
     Alan adlar\u0131 PTT dok\u00fcman\u0131ndaki \u00f6rnek istekten al\u0131nm\u0131\u015ft\u0131r. Do\u011frulanamayanlar (hangi alan zorunlu,
@@ -2330,6 +2338,17 @@ def pazara_gonder(ayar, pid, df, ilerleme=None):
         if kara.any():  # kara listedeki \u00fcr\u00fcnler pazarda sat\u0131\u015ftan kalks\u0131n (stok 0)
             df = df.copy()
             df.loc[kara, "stok"] = 0
+        pay, tavan, acil = _i(ayar.get("stok_guvenlik_payi")), _i(ayar.get("pazar_stok_tavani")), bool(ayar.get("acil_durdur"))
+        if "stok" in df.columns and (pay > 0 or tavan > 0 or acil):
+            df = df.copy()
+            sk = df["stok"].map(_i).clip(lower=0)
+            if pay > 0:
+                sk = (sk - pay).clip(lower=0)
+            if tavan > 0:
+                sk = sk.clip(upper=tavan)
+            if acil:
+                sk = sk * 0
+            df["stok"] = sk.astype(int)
         ok, hata, loglar = GUNCELLEYICI[pid](ayar, df, ilerleme)
     except Exception as e:
         log_yaz(ad, "HATA", f"G\u00f6nderilemedi: {e}")
@@ -2345,6 +2364,77 @@ def pazara_gonder(ayar, pid, df, ilerleme=None):
         durum = "HATA"
     log_yaz(ad, durum, f"{ok} g\u00f6nderildi, {hata} hata. {son}")
     return ok, hata, "\n".join(loglar[-8:])
+
+
+def son_senkron_zamani():
+    """Son basarili tedarikci senkronunun zamani (senkron_log'dan)."""
+    with closing(baglan()) as c:
+        r = c.execute("SELECT MAX(zaman) FROM senkron_log WHERE durum = 'OK' AND mesaj LIKE '% \u00fcr\u00fcn g\u00fcncellendi'").fetchone()
+    try:
+        return datetime.strptime(r[0], "%Y-%m-%d %H:%M:%S") if r and r[0] else None
+    except (TypeError, ValueError):
+        return None
+
+
+def senkron_gecikme_dk(ayar, simdi=None):
+    """(dakika, bayat_mi). Hic senkron yoksa (None, True)."""
+    z = son_senkron_zamani()
+    if z is None:
+        return None, True
+    dk = ((simdi or datetime.now()) - z).total_seconds() / 60
+    return dk, dk > max(2 * senkron_dk_degeri(ayar), 30.0)
+
+
+def acil_durdur_uygula(ayar, aktif):
+    """Acil durdur: tum bagli pazar yerlerine stok 0 gonderir. Kapatinca gercek stoklar yeniden gider."""
+    ayar["acil_durdur"] = bool(aktif)
+    ayar_yaz(ayar)
+    df = urunleri_oku()
+    sonuc = []
+    for _, _, pid in OTO_ANAHTAR:
+        if pid in GUNCELLEYICI and pazar_bagli(ayar, pid):
+            try:
+                ok, hata, _ = pazara_gonder(ayar, pid, df)
+                sonuc.append((PAZAR_AD.get(pid, pid), ok, hata))
+            except Exception as e:
+                sonuc.append((PAZAR_AD.get(pid, pid), 0, str(e)))
+    log_yaz("Sistem", "UYARI" if aktif else "OK", "AC\u0130L DURDURMA a\u00e7\u0131ld\u0131: t\u00fcm pazar yerlerinde stok 0." if aktif else "Acil durdurma kapat\u0131ld\u0131: ger\u00e7ek stoklar yeniden g\u00f6nderildi.")
+    return sonuc
+
+
+def guvenlik_paneli():
+    """Her sayfanin ustunde: acil durdurma ve bayat stok uyarilari."""
+    for m in st.session_state.pop("acil_sonuc", []) or []:
+        st.info(m)
+    if ayarlar.get("acil_durdur"):
+        st.error("\U0001f6a8 AC\u0130L DURDURMA A\u00c7IK: pazar yerlerine t\u00fcm \u00fcr\u00fcnlerde stok 0 g\u00f6nderiliyor, sat\u0131\u015f al\u0131nmaz. Kapatmak i\u00e7in kenar \u00e7ubu\u011fundaki d\u00fc\u011fmeyi kullan\u0131n.")
+    if ayarlar.get("tedarikciler"):
+        dk, bayat = senkron_gecikme_dk(ayarlar)
+        if not ayarlar.get("oto_senkron", True):
+            st.warning("\u26a0\ufe0f Otomatik stok senkronu KAPALI. Stoklar tedarik\u00e7iden otomatik gelmiyor, stoksuz sat\u0131\u015f riski var. Ayarlar > Tedarik\u00e7iler'den a\u00e7\u0131n.")
+        elif bayat:
+            gecen = "hi\u00e7 yap\u0131lmam\u0131\u015f" if dk is None else (f"{int(dk)} dakika \u00f6nce" if dk < 120 else f"{dk / 60:.1f} saat \u00f6nce")
+            st.warning(f"\u26a0\ufe0f Son ba\u015far\u0131l\u0131 stok senkronu {gecen}. Stoklar eski olabilir. Ayarlar > Tedarik\u00e7iler'den 'T\u00fcm\u00fcn\u00fc \u015eimdi Senkronla'ya bas\u0131n.")
+
+
+def acil_kontrol_kenar():
+    st.sidebar.markdown("---")
+    if ayarlar.get("acil_durdur"):
+        st.sidebar.error("\U0001f6a8 AC\u0130L DURDURMA A\u00c7IK")
+        if gen(st.sidebar.button, "\u2705 Sat\u0131\u015fa geri a\u00e7", key="acil_kapat"):
+            with st.spinner("Ger\u00e7ek stoklar pazar yerlerine g\u00f6nderiliyor..."):
+                sonuc = acil_durdur_uygula(ayarlar, False)
+            st.session_state["acil_sonuc"] = ["Acil durdurma kapat\u0131ld\u0131."] + [f"{ad}: {ok} g\u00f6nderildi" + (f", hata: {h}" if h else "") for ad, ok, h in sonuc]
+            st.rerun()
+    else:
+        with st.sidebar.expander("\U0001f6a8 Acil durdur"):
+            st.caption("T\u00fcm pazar yerlerinde t\u00fcm \u00fcr\u00fcnlerin sto\u011funu 0 yapar (sat\u0131\u015f al\u0131nmaz). Stok g\u00fcvenilmezken kullan\u0131n.")
+            onay = st.checkbox("Onayl\u0131yorum", key="acil_onay")
+            if gen(st.button, "T\u00fcm pazarlarda sto\u011fu 0'la", key="acil_ac", disabled=not onay):
+                with st.spinner("Stoklar s\u0131f\u0131rlan\u0131yor..."):
+                    sonuc = acil_durdur_uygula(ayarlar, True)
+                st.session_state["acil_sonuc"] = ["Acil durdurma A\u00c7ILDI."] + [f"{ad}: {ok} g\u00f6nderildi" + (f", hata: {h}" if h else "") for ad, ok, h in sonuc]
+                st.rerun()
 
 
 def tumunu_senkronla(oto=True):
@@ -2373,18 +2463,22 @@ def tumunu_senkronla(oto=True):
         SENKRON_KILIDI.release()
 
 
+def senkron_dk_degeri(ayar):
+    return max(5.0, _f(ayar.get("senkron_dk"), 10.0) or 10.0)
+
+
 def arka_plan_dongusu():
     time.sleep(30)
     while True:
-        saat = 6.0
+        dk = 10.0
         try:
             ayar = ayar_oku()
-            saat = max(1.0, _f(ayar.get("senkron_saat"), 6.0))
+            dk = senkron_dk_degeri(ayar)
             if ayar.get("oto_senkron", True):
                 tumunu_senkronla()
         except Exception:
             pass
-        time.sleep(saat * 3600)
+        time.sleep(dk * 60)
 
 
 @st.cache_resource
@@ -3101,7 +3195,6 @@ def oto_esleme(pid, pa, adet, mevcut):
         st.rerun()
     st.divider()
 
-
 def kategori_esleme_editoru(pid):
     pa = pa_al(ayarlar, pid)
     df = urunleri_oku()
@@ -3143,6 +3236,7 @@ def kategori_esleme_editoru(pid):
         pa["kategori_eslesme"] = yeni
         ayar_yaz(ayarlar)
         st.success(f"Toplam {len(yeni)} kategori e\u015fle\u015ftirmesi kay\u0131tl\u0131.")
+
 
 def varsayilan_kategori_yaz(pid, cid):
     """Varsayilan kategori ID'sini kaydeder; formun yeni degeri gostermesi icin sayfayi yeniler."""
@@ -3266,12 +3360,16 @@ def tedarikci_sayfasi():
 
     st.markdown("---")
     st.markdown("### \u23f1\ufe0f Otomatik G\u00fcncelleme")
-    saat = st.number_input("Senkronizasyon aral\u0131\u011f\u0131 (saat)", 1, 24, int(_f(ayarlar.get("senkron_saat"), 6.0)))
-    st.caption("Aral\u0131k de\u011fi\u015fikli\u011fi bir sonraki d\u00f6ng\u00fcde ge\u00e7erli olur.")
+    dk = st.number_input("Senkronizasyon aral\u0131\u011f\u0131 (dakika)", 5, 1440, int(senkron_dk_degeri(ayarlar)))
+    st.caption("Her turda tedarik\u00e7i XML'i yenilenir ve stok/fiyat pazar yerlerine g\u00f6nderilir. Aral\u0131k de\u011fi\u015fikli\u011fi bir sonraki d\u00f6ng\u00fcde ge\u00e7erli olur. \u00c7ok k\u0131sa aral\u0131k pazar yerinde s\u0131n\u0131r a\u015f\u0131m\u0131na yol a\u00e7abilir.")
     ust = st.number_input("Stok \u00fcst s\u0131n\u0131r\u0131 (0 = s\u0131n\u0131rs\u0131z; tedarik\u00e7inin sto\u011fu aynen gider)", 0, 1000000, stok_ust_degeri(ayarlar))
-    oto = st.toggle(f"\U0001f916 Otomatik senkronizasyon ({int(saat)} saatte bir)", value=ayarlar.get("oto_senkron", True))
-    if (oto, int(saat), int(ust)) != (ayarlar.get("oto_senkron", True), _i(ayarlar.get("senkron_saat"), 6), stok_ust_degeri(ayarlar)):
-        ayarlar.update({"oto_senkron": oto, "senkron_saat": int(saat), "stok_ust_sinir": int(ust)})
+    pay = st.number_input("G\u00fcvenlik pay\u0131 (pazar yerine giden stoktan d\u00fc\u015f\u00fclecek adet)", 0, 100, _i(ayarlar.get("stok_guvenlik_payi")),
+                          help="Tedarik\u00e7ide 3 varsa ve pay 2 ise pazar yerine 1 gider; stok pay\u0131n alt\u0131na d\u00fc\u015f\u00fcnce 0 gider. Stoksuz sat\u0131\u015f riskini azalt\u0131r.")
+    tavan = st.number_input("Pazar yerinde en fazla g\u00f6sterilecek stok (0 = s\u0131n\u0131rs\u0131z)", 0, 100000, _i(ayarlar.get("pazar_stok_tavani")),
+                            help="Tedarik\u00e7ide 100 olsa da pazar yerinde en fazla bu kadar g\u00f6r\u00fcn\u00fcr. Tedarik\u00e7i sto\u011fu aniden biterse en fazla bu kadar stoksuz sat\u0131\u015f olur.")
+    oto = st.toggle(f"\U0001f916 Otomatik senkronizasyon ({int(dk)} dakikada bir)", value=ayarlar.get("oto_senkron", True))
+    if (oto, int(dk), int(ust), int(pay), int(tavan)) != (ayarlar.get("oto_senkron", True), int(senkron_dk_degeri(ayarlar)), stok_ust_degeri(ayarlar), _i(ayarlar.get("stok_guvenlik_payi")), _i(ayarlar.get("pazar_stok_tavani"))):
+        ayarlar.update({"oto_senkron": oto, "senkron_dk": int(dk), "stok_ust_sinir": int(ust), "stok_guvenlik_payi": int(pay), "pazar_stok_tavani": int(tavan)})
         ayar_yaz(ayarlar)
 
     if st.button("\U0001f504 T\u00fcm\u00fcn\u00fc \u015eimdi Senkronla", type="primary"):
@@ -4151,6 +4249,8 @@ def main():
                     type="primary" if st.session_state["sayfa"] == sid else "secondary", on_click=git, args=(sid,))
     gen(st.sidebar.button, "\u2699\ufe0f Ayarlar", key="nav_Ayarlar", type="primary" if st.session_state["sayfa"] == "Ayarlar" else "secondary", on_click=git, args=("Ayarlar",))
 
+    acil_kontrol_kenar()
+    guvenlik_paneli()
     sayfa = st.session_state["sayfa"]
     if sayfa == "Anasayfa":
         anasayfa()
@@ -4184,5 +4284,4 @@ def main():
 
 if __name__ == "__main__":
     main()
-
 
