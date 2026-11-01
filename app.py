@@ -4915,6 +4915,54 @@ def pazar_siparis(pid):
         st.rerun()
 
 
+def _satir_yuksekligi():
+    """Streamlit sürümü destekliyorsa tablo satırlarını yükseltir (görseller büyük ve net görünür)."""
+    try:
+        import inspect
+        if "row_height" in inspect.signature(st.dataframe).parameters:
+            return {"row_height": 76}
+    except Exception:
+        pass
+    return {}
+
+
+def galeri_goster(f, kilit, sayfa_boy=24):
+    """Büyük, ortalanmış, net ve canlı görselli ürün ızgarası (yalnızca gösterim)."""
+    import html as _html
+    if f.empty:
+        st.info("Gösterilecek ürün yok.")
+        return
+    toplam = len(f)
+    sayfa_say = max((toplam + sayfa_boy - 1) // sayfa_boy, 1)
+    sayfa = int(st.number_input("Sayfa", min_value=1, max_value=sayfa_say, value=1, step=1, key="galeri_sayfa"))
+    parca = f.iloc[(sayfa - 1) * sayfa_boy: sayfa * sayfa_boy]
+    st.markdown("""<style>
+.sg{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:14px}
+.sk{background:#fff;border:1px solid #e5e7eb;border-radius:14px;padding:10px;text-align:center;box-shadow:0 1px 4px rgba(0,0,0,.06)}
+.sk .im{height:170px;display:flex;align-items:center;justify-content:center;background:#f8fafc;border-radius:10px;overflow:hidden}
+.sk img{max-width:100%;max-height:100%;object-fit:contain;image-rendering:auto;filter:saturate(1.18) contrast(1.06) brightness(1.03)}
+.sk .ad{font-size:.82rem;font-weight:600;margin:8px 0 2px;line-height:1.25;height:2.5em;overflow:hidden;color:#111827}
+.sk .bk{font-size:.74rem;color:#2563eb}
+.sk .st{font-size:.78rem;color:#374151;margin-top:3px}
+.sk .t{color:#dc2626;font-weight:700}
+</style>""", unsafe_allow_html=True)
+    kartlar = []
+    for _, row in parca.iterrows():
+        img = str(row.get("gorsel", "") or "")
+        im = (f'<img src="{_html.escape(img, quote=True)}" loading="lazy" referrerpolicy="no-referrer">'
+              if img.startswith("http") else "📷")
+        stok = _i(row.get("stok"))
+        stok_h = f'<span class="t">TÜKENDİ</span>' if stok <= 0 else f"Stok <b>{stok}</b>"
+        kil = " 🔒" if str(row.get("barkod")) in kilit else ""
+        kartlar.append(
+            f'<div class="sk"><div class="im">{im}</div>'
+            f'<div class="ad">{_html.escape(str(row.get("urun_adi") or "İsimsiz Ürün"))}{kil}</div>'
+            f'<div class="bk">{_html.escape(str(row.get("barkod", "-")))}</div>'
+            f'<div class="st">{stok_h} · {_f(row.get("satis_fiyati")):.2f} ₺</div></div>')
+    st.markdown('<div class="sg">' + "".join(kartlar) + "</div>", unsafe_allow_html=True)
+    st.caption(f"Sayfa {sayfa}/{sayfa_say} · {toplam:,} ürün")
+
+
 def urunler_sayfasi():
     st.title("📦 Sistemdeki Ürünler")
     for mesaj in st.session_state.pop("urun_senk_sonuc", []) or []:
@@ -4937,7 +4985,7 @@ def urunler_sayfasi():
     ara = c2.text_input("🔍 Ürün adı veya barkod ara", "")
     d1, d2 = st.columns([1, 2])
     durum = d1.selectbox("Stok durumu", ["Tümü", "Stokta", "Tükenen", f"Kritik (≤{esik})", "Elle sıfırlananlar"])
-    gorunum = d2.radio("Görünüm", ["Tablo (kaydırmalı)", "Kart (küçük görsel)"], horizontal=True)
+    gorunum = d2.radio("Görünüm", ["Tablo (kaydırmalı)", "Galeri (büyük görsel)", "Kart (küçük görsel)"], horizontal=True)
 
     f = df
     if secili != "Tüm Bayiler":
@@ -4989,7 +5037,7 @@ def urunler_sayfasi():
         secilen = []
         try:
             olay = st.dataframe(v, hide_index=True, height=620, column_config=ayar_kol,
-                                on_select="rerun", selection_mode="multi-row", key="urun_tablo")
+                                on_select="rerun", selection_mode="multi-row", key="urun_tablo", **_satir_yuksekligi())
             secilen = list(olay.selection.rows)
         except TypeError:
             st.dataframe(v, hide_index=True, height=620, column_config=ayar_kol)
@@ -5043,6 +5091,8 @@ def urunler_sayfasi():
                     n = fiyat_sabit_kaldir(ayarlar, sec_barkod)
                     st.session_state["urun_sifir_sonuc"] = [f"{n} ürünün elle fiyatı kaldırıldı. Otomatik fiyat, bir sonraki tedarikçi çekişinde ('Stokları tedarikçiden çek') geri gelir."]
                     st.rerun()
+    elif gorunum.startswith("Galeri"):
+        galeri_goster(f, kilit)
     else:
         st.caption("Küçük görselli kart görünümü; daha fazlası için aşağıdaki düğmeyi kullanın.")
         sayi = st.session_state.setdefault("urun_kart_sayi", 24)
