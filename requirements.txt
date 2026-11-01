@@ -1,5 +1,5 @@
-streamstreamlit>=1.40
-pandas>=2.0
-requests>=2.31
-defusedxml>=0.7.1
-cryptography>=42.0
+   streamlit
+   pandas
+   requests
+   defusedxml
+   cryptography
