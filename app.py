@@ -1264,6 +1264,12 @@ def _sonuc(pid, ok_k, hata_k, loglar, atlanan=0, tukenen_atlanan=0):
     return len(ok_k), len(hata_k), loglar
 
 
+def https_yap(url):
+    """http:// adreslerini https:// yapar (N11/HB/İdefix yalnızca https görsel kabul eder; çoğu CDN iki biçimi de sunar)."""
+    u = str(url or "").strip()
+    return "https://" + u[7:] if u.lower().startswith("http://") else u
+
+
 def kayit_listesi(df):
     return df.to_dict("records") if not df.empty else []
 
@@ -1389,7 +1395,7 @@ def n11_urun_listesi(df, ayar):
         raise ValueError("N11 için 'Kargo şablonu' ayarı boş. Genel Ayarlar'dan girin.")
     liste, atlanan = [], 0
     for r in kayit_listesi(df):
-        gorsel = str(r.get("gorsel", "")).strip()
+        gorsel = https_yap(str(r.get("gorsel", "")).strip())
         kod = str(r["barkod"]).strip()
         fiyat = round(_f(r.get("satis_fiyati")), 2)
         cat = _i(kat_sec(pa, ayar, r.get("kategori"), "n11"))
@@ -1433,7 +1439,7 @@ def n11_urun_gonder(ayar, liste, ilerleme=None):
                 ozet += f" | görev no: {tid} (kabul = ürün onayı değildir; sonucu 'N11 görev sonucu'ndan sorgulayın)"
         return ok, ozet
 
-    ok_k, hata_k, loglar = paketle(kayit, 100, gonder, ilerleme, "N11", durdur=3)
+    ok_k, hata_k, loglar = paketle(kayit, 100, gonder, ilerleme, "N11", durdur=6)
     return len(ok_k), len(hata_k), loglar
 
 
@@ -1514,7 +1520,7 @@ def idefix_urun_listesi(df, ayar):
     sure = _i(pa.get("teslim_suresi"), 3) or 1
     liste, atlanan = [], 0
     for r in kayit_listesi(df):
-        gorsel = str(r.get("gorsel", "")).strip()
+        gorsel = https_yap(str(r.get("gorsel", "")).strip())
         kod = str(r["barkod"]).strip()
         bk = idefix_barkod(kod, ayar)
         fiyat = round(_f(r.get("satis_fiyati")), 2)
@@ -1803,7 +1809,7 @@ def hb_urun_listesi(df, ayar):
     uret = bool(pa.get("gecici_barkod", True))
     liste, atlanan = [], 0
     for r in kayit_listesi(df):
-        gorsel = str(r.get("gorsel", "")).strip()
+        gorsel = https_yap(str(r.get("gorsel", "")).strip())
         kod = str(r["barkod"]).strip()
         barkod = sabit_barkod(kod, uret)
         fiyat = round(_f(r.get("satis_fiyati")), 2)
@@ -1881,6 +1887,36 @@ def hb_siparisler(ayar, saat=96, sayfa_boyu=50, en_fazla_sayfa=40):
     if not m:
         return []
     return _hb_liste_cek(ayar, "packages", {"timespan": saat}, "paketler", sayfa_boyu, en_fazla_sayfa)
+
+
+def hb_paketleri_topla(ayar, saat=96):
+    """Paketlenmiş (Gönderime Hazır) siparişleri farklı parametre biçimleriyle dener ve birleştirir.
+    HB bazı hesaplarda 'timespan' ile boş döner; tarih penceresi (begindate/enddate, 'yyyy-MM-dd HH:mm') ya da
+    parametresiz çağrı sonuç verebilir. Her denemenin sonucu SIPARIS_TANI'ya yazılır."""
+    if not kimlik(ayar, "hb_merchant_id"):
+        return []
+    bulunan = {}
+
+    def dene(ad, prm):
+        try:
+            liste = _hb_liste_cek(ayar, "packages", prm, f"paketler:{ad}")
+        except Exception as e:
+            SIPARIS_TANI[f"paketler:{ad}"] = {"hata": str(e)[:300]}
+            return
+        for p in liste:
+            if isinstance(p, dict):
+                anahtar = str(p.get("packageNumber") or p.get("packageId") or p.get("id") or id(p))
+                bulunan.setdefault(anahtar, p)
+
+    dene("timespan", {"timespan": min(max(int(saat), 1), 96)})
+    dene("parametresiz", {})
+    simdi = simdi_tr()
+    for g in range(min(max(int(saat) // 24 + 1, 3), 8)):  # 24 saatlik pencereler, bugünden geriye
+        bit = simdi - timedelta(days=g)
+        bas = bit - timedelta(days=1)
+        dene(f"pencere{g}", {"begindate": bas.strftime("%Y-%m-%d %H:%M"), "enddate": bit.strftime("%Y-%m-%d %H:%M")})
+    SIPARIS_TANI["paketler"] = {"toplam_benzersiz_paket": len(bulunan)}
+    return list(bulunan.values())
 
 
 def hb_yeni_siparis_kalemleri(ayar, sayfa_boyu=100, en_fazla_sayfa=40):
@@ -1995,7 +2031,7 @@ def ptt_urun_listesi(df, ayar):
     aktif = bool(pa.get("aktif_gonder", False))
     liste, atlanan = [], 0
     for r in kayit_listesi(df):
-        gorsel = str(r.get("gorsel", "")).strip()
+        gorsel = https_yap(str(r.get("gorsel", "")).strip())
         kod = str(r["barkod"]).strip()
         barkod = sabit_barkod(kod, uret)
         fiyat = round(_f(r.get("satis_fiyati")), 2)
@@ -2316,7 +2352,7 @@ def trendruum_urun_listesi(df, ayar):
         raise ValueError("Trendruum 'Marka ID' geçersiz/boş (24 karakterlik ID olmalı). Genel Ayarlar'dan girin.")
     liste, atlanan = [], 0
     for r in kayit_listesi(df):
-        gorsel = str(r.get("gorsel", "")).strip()
+        gorsel = https_yap(str(r.get("gorsel", "")).strip())
         kod = str(r["barkod"]).strip()
         barkod = sabit_barkod(kod, uret)
         fiyat = _f(r.get("satis_fiyati"))
@@ -3266,16 +3302,8 @@ def siparis_cek(ayar, pid, saat=None):
         return sonuc
     if pid == "hb":
         SIPARIS_TANI.clear()
-        sonuc, paketler = [], []
-        for deneme in dict.fromkeys([int(saat) if saat else 96, 96, 48]):  # uzun aralik kabul edilmez ya da bos donerse kisaltarak dener
-            try:
-                paketler = hb_siparisler(ayar, saat=deneme)
-            except requests.RequestException as e:
-                SIPARIS_TANI["paketler_hata"] = f"timespan={deneme}: {e}"
-                continue
-            if paketler:
-                SIPARIS_TANI["kullanilan_timespan_saat"] = deneme
-                break
+        sonuc = []
+        paketler = hb_paketleri_topla(ayar, int(saat) if saat else 96)
         for x in paketler:
             sonuc += siparis_normalle_hb_coklu(x)
         try:  # henuz paketlenmemis yeni siparisler ayri servisten gelir
@@ -4398,8 +4426,8 @@ def atlama_nedenleri(df, pid):
     for r in kayit_listesi(df):
         if not str(r.get("gorsel", "")).strip():
             ekle("görseli yok")
-        elif pid == "hb" and not str(r.get("gorsel", "")).strip().startswith("https"):
-            ekle("görsel adresi https değil")
+        elif not str(r.get("gorsel", "")).strip().lower().startswith("http"):
+            ekle("görsel adresi geçersiz (http/https değil)")
         if _f(r.get("satis_fiyati")) <= 0:
             ekle("fiyatı 0")
         cat = kat_sec(pa, ayarlar, r.get("kategori"), pid)
@@ -4459,13 +4487,17 @@ def toplu_urun_paneli(pid):
         return
     st.info("Marka/kategori/KDV ayarları ve kategori eşleştirmesi için 'Genel Ayarları' sayfasını kullanın.")
     df = secili_urunler(urunleri_oku(), pid)
+    huni = [("Seçili tedarikçilerdeki ürün", len(df))]
     if not df.empty and st.checkbox("Sadece stokta olanlar", value=True, key=f"{pid}_stoklu"):
         df = df[df["stok"] > 0]
+        huni.append(("Stoğu olanlar ('Sadece stokta olanlar' açık)", len(df)))
     kara = kara_liste_maskesi(ayarlar, df)
     if kara.any():
         st.caption(f"🚫 Kara listedeki {int(kara.sum())} ürün gönderim dışı bırakıldı.")
         df = df[~kara]
+        huni.append(("Kara liste dışında kalanlar", len(df)))
     df = kategori_secimi_uygula(pid, df)
+    huni.append(("İşaretli kategorilerdeki ürün", len(df)))
     mod = st.selectbox("Gönderim Modu", ["Tek ürün (Test)", "Tüm Ürünler"], key=f"{pid}_mod")
     df = fiyat_artis_uygula(ayarlar, pid, df)
     uretici = {
@@ -4503,6 +4535,12 @@ def toplu_urun_paneli(pid):
         st.error(str(e))
         return
     st.write(f"Gönderilecek ürün: **{len(liste):,}** (Atlanan: {atlanan} — görsel/fiyat/barkod/kategori eksik)")
+    huni.append(("Eksiksiz, gönderilebilir ürün", len(liste)))
+    if not mod.startswith("Tek"):
+        with st.expander(f"📉 Ürünler neden azalıyor? ({huni[0][1]:,} → {len(liste):,})", expanded=len(liste) < 0.9 * max(huni[0][1], 1)):
+            for ad_, n_ in huni:
+                st.write(f"• {ad_}: **{n_:,}**")
+            st.caption("Her adımda sayı düşüyorsa nedeni o satırdadır: stoğu biten ürünler, işaretlenmeyen/eşleşmeyen kategoriler ve fiyatı, görseli ya da barkodu eksik ürünler gönderilmez.")
     if atlanan:
         neden = atlama_nedenleri(df, pid)
         if neden:
@@ -4803,36 +4841,203 @@ def siparis_stok_metni(u, stok_harita, onek):
     return f"tedarikçi stoğu: {int(n)}"
 
 
-def siparis_karti(o, stok_harita, onek):
-    yok = "(bilgi yok)"
-    with st.container(border=True):
-        etiket = DURUM_ETIKET.get(o["durum"], o["durum"])
-        no = o.get("no") or o.get("paket_no") or "-"
-        st.markdown(f"**{etiket}**  ·  Sipariş **{no}**")
-        alt = [o.get("tarih") or ""]
-        if o.get("paket_no"):
-            alt.append(f"Paket {o['paket_no']}")
-        st.caption(" · ".join(x for x in alt if x))
-        if o.get("uyari"):
-            st.warning(o["uyari"])
-        st.markdown(f"👤 **{o.get('alici') or yok}**")
-        adres_m = o.get("adres") or yok
-        st.markdown(f"📍 {adres_m}")
-        if o.get("telefon"):
-            st.markdown(f"📞 {o['telefon']}")
-        kargo_m = " ".join(x for x in (o.get("kargo", ""), o.get("barkod", "")) if x)
-        if kargo_m:
-            st.markdown(f"🚚 {kargo_m}")
-        if o.get("teslim_son"):
-            st.markdown(f"⏰ Kargoya verme son tarihi: **{o['teslim_son']}**")
-        st.markdown(f"💰 **{para_metni(o.get('tutar'))}**")
-        st.divider()
-        for u in o.get("urunler", []):
-            fiyat_m = f" · {para_metni(u['fiyat'])}" if u.get("fiyat") else ""
-            st.markdown(f"• {u['ad']}  \n`{u.get('sku', '')}` × **{u['adet']}**{fiyat_m}  \n{siparis_stok_metni(u, stok_harita, onek)}")
-        if o.get("ham"):
-            with st.expander("Ham veri (kontrol için)"):
-                st.json(o["ham"])
+KUTU_RENK = {
+    "hb": ("#ff5a1f", "#ff9a3c"), "trendyol": ("#f59e0b", "#fcd34d"), "n11": ("#5b21b6", "#8b5cf6"),
+    "idefix": ("#059669", "#34d399"), "ptt": ("#0369a1", "#38bdf8"), "trendruum": ("#db2777", "#f472b6"),
+}
+DURUM_RENK = {"yeni": "#2563eb", "hazir": "#ea580c", "kargoda": "#7c3aed", "teslim": "#16a34a", "iptal": "#dc2626"}
+PANEL_ADRES = {
+    "hb": "https://merchant.hepsiburada.com/", "trendyol": "https://partner.trendyol.com/",
+    "n11": "https://so.n11.com/", "trendruum": "https://www.trendruum.com/", "idefix": "https://merchant.idefix.com/",
+    "ptt": "https://merchant.pttavm.com/",
+}
+SIPARIS_PAZARLARI = ("hb", "trendyol", "n11", "trendruum")
+
+
+def _e(x):
+    return html.escape(str(x if x is not None else ""))
+
+
+def siparis_karti_css():
+    return """<style>
+.sc{border-radius:16px;overflow:hidden;background:#fff;border:1px solid #e2e8f0;box-shadow:0 4px 14px rgba(15,23,42,.10);margin-bottom:6px}
+.sc .bas{padding:12px 16px;color:#fff}
+.sc .bas b{font-size:1.15rem;letter-spacing:.3px}
+.sc .bas small{display:block;opacity:.92;margin-top:2px}
+.sc .chip{display:inline-block;color:#fff;border-radius:999px;padding:3px 12px;font-weight:700;font-size:.8rem;margin-top:6px}
+.sc .alici{padding:12px 16px;background:#eff6ff;border-bottom:1px solid #dbeafe;font-size:.9rem;line-height:1.5}
+.sc .alici span{display:inline-block;min-width:58px;font-weight:700;color:#1e3a8a}
+.sc .urun{margin:12px 16px;padding:10px 12px;border-left:5px solid #2563eb;background:#f8fafc;border-radius:8px;font-size:.88rem}
+.sc .urun b{color:#0f172a}
+.sc .urun .sku{color:#475569;font-size:.8rem}
+.sc .ok{color:#15803d;font-weight:600}.sc .kotu{color:#b91c1c;font-weight:700}
+.sc .alt{padding:4px 16px 12px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px}
+.sc .tutar{font-size:1.3rem;font-weight:800;color:#c2410c}
+.sc .son{background:#fff7ed;color:#9a3412;border-radius:8px;padding:3px 10px;font-weight:600;font-size:.82rem}
+.sc .kargo{padding:0 16px 8px;font-size:.9rem;color:#334155}
+.sc .uy{margin:0 16px 10px;padding:8px 10px;background:#fef9c3;border-radius:8px;color:#854d0e;font-size:.82rem}
+.ab{display:inline-block;padding:7px 12px;border-radius:9px;color:#fff!important;font-weight:700;font-size:.82rem;text-decoration:none!important;margin:2px 4px 2px 0}
+.kutu{border-radius:16px;padding:14px 16px;color:#fff;box-shadow:0 4px 14px rgba(15,23,42,.18);margin-bottom:6px}
+.kutu h4{margin:0;color:#fff;font-size:1.05rem;letter-spacing:.5px}
+.kutu .say{margin-top:8px;font-size:.9rem;line-height:1.55}
+.kutu .say b{background:rgba(255,255,255,.25);border-radius:8px;padding:2px 9px;margin-right:4px}
+</style>"""
+
+
+def siparis_stok_html(u, stok_harita, onek):
+    t = siparis_stok_metni(u, stok_harita, onek).replace("**", "").replace("⚠️ ", "")
+    sinif = "ok" if (": " in t and t.split(": ")[-1].strip().isdigit() and int(t.split(": ")[-1]) > 0) else "kotu"
+    return f'<span class="{sinif}">{_e(t)}</span>'
+
+
+def siparis_aktar_metni(o):
+    """Başka bir sisteme (ör. Colezium) elle aktarmak için sipariş özeti."""
+    satir = [f"Pazar: {PAZAR_AD.get(o.get('pid'), o.get('pid'))}", f"Sipariş no: {o.get('no')}", f"Paket no: {o.get('paket_no', '')}",
+             f"Tarih: {o.get('tarih')}", f"Alıcı: {o.get('alici')}", f"Telefon: {o.get('telefon', '')}", f"Adres: {o.get('adres')}",
+             f"Kargo: {o.get('kargo', '')}", f"Kargo barkodu: {o.get('barkod', '')}", f"Tutar: {para_metni(o.get('tutar'))}", "Ürünler:"]
+    for u in o.get("urunler", []):
+        satir.append(f"  - {u.get('ad')} | SKU {u.get('sku', '')} | adet {u.get('adet')}")
+    return "\n".join(satir)
+
+
+def siparis_karti(o, stok_harita, onek, anahtar="k"):
+    pid = o.get("pid") or "hb"
+    c1, c2 = KUTU_RENK.get(pid, ("#334155", "#64748b"))
+    durum = o.get("durum", "yeni")
+    etiket = DURUM_ETIKET.get(durum, durum)
+    no = o.get("no") or o.get("paket_no") or "-"
+    urunler = ""
+    for u in o.get("urunler", []):
+        fiyat = f" · {_e(para_metni(u['fiyat']))}" if u.get("fiyat") else ""
+        urunler += (f'<div class="urun"><b>{_e(u.get("ad"))}</b><br>'
+                    f'<span class="sku">SKU: {_e(u.get("sku", ""))} | Adet: <b>{_e(u.get("adet"))}</b>{fiyat}</span><br>'
+                    f'{siparis_stok_html(u, stok_harita, onek)}</div>')
+    kargo = " · ".join(x for x in (o.get("kargo", ""),) if x)
+    uyari = f'<div class="uy">⚠️ {_e(o["uyari"])}</div>' if o.get("uyari") else ""
+    son = f'<span class="son">⏰ {_e(o["teslim_son"])}</span>' if o.get("teslim_son") else ""
+    kart = (
+        f'<div class="sc"><div class="bas" style="background:linear-gradient(135deg,{c1},{c2})">'
+        f'<b>📦 {_e(no)}</b><small>{_e(PAZAR_AD.get(pid, pid))} · {_e(o.get("tarih"))}'
+        f'{(" · Paket " + _e(o["paket_no"])) if o.get("paket_no") and o.get("paket_no") != no else ""}</small>'
+        f'<span class="chip" style="background:{DURUM_RENK.get(durum, "#334155")}">{_e(etiket)}</span></div>'
+        f'<div class="alici"><span>Alıcı:</span> <b>{_e(o.get("alici") or "(bilgi yok)")}</b><br>'
+        f'<span>Adres:</span> {_e(o.get("adres") or "(bilgi yok)")}'
+        f'{("<br><span>Telefon:</span> " + _e(o["telefon"])) if o.get("telefon") else ""}</div>'
+        f'{uyari}{urunler}'
+        f'<div class="alt"><span class="tutar">{_e(para_metni(o.get("tutar")))}</span>{son}</div>'
+        f'{("<div class=kargo>🚚 " + _e(kargo) + "</div>") if kargo else ""}</div>'
+    )
+    st.markdown(siparis_karti_css(), unsafe_allow_html=True)
+    st.markdown(kart, unsafe_allow_html=True)
+    if o.get("barkod"):
+        st.caption("Kargo barkodu (sağdaki simgeyle kopyalayın)")
+        st.code(str(o["barkod"]), language=None)
+    panel = PANEL_ADRES.get(pid, "#")
+    ad_p = PAZAR_AD.get(pid, pid)
+    dugmeler = "".join(
+        f'<a class="ab" style="background:{renk}" href="{panel}" target="_blank" rel="noopener">{etk}</a>'
+        for etk, renk in (("🏷️ Kargo Etiketi", "#ea580c"), ("🚚 Kargo Değiştir", "#0ea5e9"),
+                          ("✂️ Paketi Böl", "#a16207"), ("✖ İptal", "#dc2626")))
+    st.markdown(dugmeler, unsafe_allow_html=True)
+    st.caption(f"Bu işlemler şimdilik {ad_p} satıcı panelinde yapılır (düğmeler paneli açar). Paket no: {o.get('paket_no') or no}")
+    st.download_button("📋 Siparişi Aktar (metin dosyası)", siparis_aktar_metni(o).encode("utf-8"),
+                       file_name=f"siparis_{pid}_{no}.txt", mime="text/plain", key=f"aktar_{anahtar}_{pid}_{no}")
+    if o.get("ham"):
+        with st.expander("Ham veri (kontrol için)"):
+            st.json(o["ham"])
+
+
+def ana_siparisleri_yukle(zorla=False):
+    """Bağlı pazarların siparişlerini oturumda önbelleğe alır (5 dk); hata bir pazarı diğerlerinden ayırmaz."""
+    onbellek = st.session_state.setdefault("ana_sip", {})
+    simdi = time.time()
+    bekleyen = [p for p in SIPARIS_PAZARLARI if pazar_bagli(ayarlar, p)
+                and (zorla or p not in onbellek or simdi - onbellek[p]["t"] > 300)]
+    if not bekleyen:
+        return onbellek
+    with st.spinner("Siparişler çekiliyor..."):
+        for pid in bekleyen:
+            try:
+                onbellek[pid] = {"liste": siparis_cek(ayarlar, pid, 72), "hata": None, "t": simdi}
+            except Exception as e:
+                onbellek[pid] = {"liste": [], "hata": str(e)[:200], "t": simdi}
+    return onbellek
+
+
+def ana_siparis_kutulari():
+    st.markdown(siparis_karti_css(), unsafe_allow_html=True)
+    b1, b2 = st.columns([4, 1])
+    b1.markdown("### 🧾 Siparişler")
+    zorla = bool(gen(b2.button, "🔄 Yenile", key="ana_sip_yenile"))
+    veri = ana_siparisleri_yukle(zorla)
+    stok_harita = {}
+    try:
+        _u = urunleri_oku()
+        if not _u.empty:
+            stok_harita = _u.groupby("barkod")["stok"].max().to_dict()
+    except Exception:
+        pass
+    kutular = list(PAZAR.keys())
+    secili = st.session_state.get("ana_sec")
+    for i in range(0, len(kutular), 3):
+        kol = st.columns(3)
+        for j, pid in enumerate(kutular[i:i + 3]):
+            with kol[j]:
+                c1, c2 = KUTU_RENK[pid]
+                ad = PAZAR_AD[pid]
+                ikon = PAZAR[pid]["ikon"]
+                d = veri.get(pid)
+                if pid not in SIPARIS_PAZARLARI:
+                    icerik = "Sipariş çekme bu pazar için desteklenmiyor."
+                    aktif = []
+                elif not pazar_bagli(ayarlar, pid):
+                    icerik = "API bilgileri eksik."
+                    aktif = []
+                elif d and d["hata"]:
+                    icerik = f"⚠️ Hata: {_e(d['hata'])}"
+                    aktif = []
+                else:
+                    liste = d["liste"] if d else []
+                    yeni = [o for o in liste if o["durum"] in ("yeni", "hazir")]
+                    kargo = [o for o in liste if o["durum"] == "kargoda"]
+                    aktif = yeni
+                    if not liste:
+                        icerik = "Sipariş yok"
+                    else:
+                        parcalar = []
+                        n_y = sum(1 for o in liste if o["durum"] == "yeni")
+                        n_h = sum(1 for o in liste if o["durum"] == "hazir")
+                        if n_y:
+                            parcalar.append(f"<b>{n_y}</b> Yeni")
+                        if n_h:
+                            parcalar.append(f"<b>{n_h}</b> Gönderime Hazır")
+                        if kargo:
+                            parcalar.append(f"<b>{len(kargo)}</b> Kargoda")
+                        icerik = "<br>".join(parcalar) or "Bekleyen sipariş yok"
+                st.markdown(f'<div class="kutu" style="background:linear-gradient(135deg,{c1},{c2})"><h4>{ikon} {_e(ad.upper())}</h4>'
+                            f'<div class="say">{icerik}</div></div>', unsafe_allow_html=True)
+                for k, o in enumerate(aktif[:8]):
+                    anahtar = f"{pid}|{o.get('id')}|{o.get('no')}"
+                    ozet = f"{o.get('no') or o.get('paket_no')} · {str(o.get('alici') or '')[:18]} · {para_metni(o.get('tutar'))}"
+                    if gen(st.button, ozet, key=f"ana_sip_{pid}_{k}", type="primary" if secili == anahtar else "secondary"):
+                        st.session_state["ana_sec"] = anahtar
+                        st.rerun()
+                if len(aktif) > 8:
+                    st.caption(f"+{len(aktif) - 8} sipariş daha: {ad} > Siparişlerim")
+    if secili:
+        bulunan = None
+        for pid, d in veri.items():
+            for o in d["liste"]:
+                if f"{pid}|{o.get('id')}|{o.get('no')}" == secili:
+                    bulunan = o
+        if bulunan:
+            with st.container(border=True):
+                kapat = gen(st.button, "✖ Detayı kapat", key="ana_sip_kapat")
+                onek = str(pa_al(ayarlar, "hb").get("sku_prefix", "") or "") if bulunan.get("pid") == "hb" else ""
+                siparis_karti(bulunan, stok_harita, onek, anahtar="ana")
+                if kapat:
+                    st.session_state.pop("ana_sec", None)
+                    st.rerun()
 
 
 def pazar_siparis(pid):
@@ -4909,7 +5114,7 @@ def pazar_siparis(pid):
         kol = st.columns(2)
         for j, o in enumerate(gorunen[i:i + 2]):
             with kol[j]:
-                siparis_karti(o, stok_harita, onek)
+                siparis_karti(o, stok_harita, onek, anahtar=f"{pid}_{i}_{j}")
     if len(sirali) > sayi and gen(st.button, f"⬇️ Daha fazla göster ({sayi}/{len(sirali)})", key=f"sip_daha_{pid}"):
         st.session_state[f"sip_say_{pid}"] = sayi + 24
         st.rerun()
@@ -5127,6 +5332,7 @@ def anasayfa():
     c2.metric("Stokta Olanlar", f"{int((df['stok'] > 0).sum()):,}" if not df.empty else "0")
     c3.metric(f"Kritik Stok (≤{esik})", f"{int(df['stok'].between(1, esik).sum()):,}" if not df.empty else "0")
     c4.metric("Tedarikçi", len(ayarlar["tedarikciler"]))
+    ana_siparis_kutulari()
     st.markdown("### 🛒 Pazar Yeri Bağlantı Durumları")
     liste = list(PAZAR.items())
     for i in range(0, len(liste), 2):
