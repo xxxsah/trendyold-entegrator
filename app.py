@@ -269,7 +269,7 @@ def log_yaz(tedarikci, durum, mesaj=""):
     with closing(baglan()) as c:
         c.execute(
             "INSERT INTO senkron_log (zaman, tedarikci, durum, mesaj) VALUES (?,?,?,?)",
-            (datetime.now().strftime("%Y-%m-%d %H:%M:%S"), tedarikci, durum, str(mesaj)[:500]),
+            (simdi_tr().strftime("%Y-%m-%d %H:%M:%S"), tedarikci, durum, str(mesaj)[:500]),
         )
         c.execute("DELETE FROM senkron_log WHERE id <= (SELECT MAX(id) FROM senkron_log) - 3000")
         c.commit()
@@ -292,7 +292,7 @@ def stok_sifirla(ayar, barkodlar, pazarlara_gonder=True):
     barkodlar = sorted({str(b).strip() for b in barkodlar if str(b).strip()})
     if not barkodlar:
         return []
-    z = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    z = simdi_tr().strftime("%Y-%m-%d %H:%M:%S")
     kilit = ayar.setdefault("stok_sifir", {})
     for b in barkodlar:
         kilit[b] = z
@@ -329,7 +329,7 @@ def stok_kilidi_kaldir(ayar, barkodlar):
 
 
 def pazar_isaretle(pazar, ok_list, hata_list):
-    z = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    z = simdi_tr().strftime("%Y-%m-%d %H:%M:%S")
     rows = [(pazar, str(b), "ok", z) for b in ok_list] + [
         (pazar, str(b), "hata", z) for b in hata_list
     ]
@@ -811,11 +811,11 @@ def bildir(mesaj, tekil=None, bekleme_dk=60):
             son = kv_oku(f"bildirim:{tekil}")
             if son:
                 try:
-                    if (datetime.now() - datetime.strptime(son, "%Y-%m-%d %H:%M:%S")).total_seconds() < bekleme_dk * 60:
+                    if (simdi_tr() - datetime.strptime(son, "%Y-%m-%d %H:%M:%S")).total_seconds() < bekleme_dk * 60:
                         return False
                 except ValueError:
                     pass
-            kv_yaz(f"bildirim:{tekil}", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+            kv_yaz(f"bildirim:{tekil}", simdi_tr().strftime("%Y-%m-%d %H:%M:%S"))
         r = requests.post(f"https://api.telegram.org/bot{token}/sendMessage",
                           json={"chat_id": chat, "text": f"ŞahEntegre: {mesaj}"[:3500]}, timeout=15)
         return r.status_code == 200
@@ -874,7 +874,7 @@ def son_log_uyari(parca, saat=24):
         with closing(baglan()) as c:
             r = c.execute("SELECT zaman, tedarikci, mesaj FROM senkron_log WHERE durum = 'UYARI' AND mesaj LIKE ? ORDER BY id DESC LIMIT 1",
                           (f"%{parca}%",)).fetchone()
-        if r and (datetime.now() - datetime.strptime(r[0], "%Y-%m-%d %H:%M:%S")).total_seconds() < saat * 3600:
+        if r and (simdi_tr() - datetime.strptime(r[0], "%Y-%m-%d %H:%M:%S")).total_seconds() < saat * 3600:
             return r
     except Exception:
         pass
@@ -904,7 +904,7 @@ def senkron_ozeti_yaz(ad, df, ornek, sonuc):
     try:
         with closing(baglan()) as c:
             c.execute("INSERT INTO senkron_ozet (zaman, tedarikci, urun, stoklu, toplam_stok, ornek, sonuc) VALUES (?,?,?,?,?,?,?)",
-                      (datetime.now().strftime("%Y-%m-%d %H:%M:%S"), ad, int(len(df)), int((df["stok"] > 0).sum()),
+                      (simdi_tr().strftime("%Y-%m-%d %H:%M:%S"), ad, int(len(df)), int((df["stok"] > 0).sum()),
                        int(df["stok"].sum()), str(ornek)[:200], str(sonuc)[:300]))
             c.execute("DELETE FROM senkron_ozet WHERE id NOT IN (SELECT id FROM senkron_ozet ORDER BY id DESC LIMIT 300)")
             c.commit()
@@ -916,7 +916,7 @@ def stok_yedegi_al(ad, df):
     """Saglikli (urunlerin en az %20'si stoklu) senkron sonrasi stoklarin yedegini alir."""
     if len(df) < 50 or int((df["stok"] > 0).sum()) < 0.2 * len(df):
         return False
-    z = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    z = simdi_tr().strftime("%Y-%m-%d %H:%M:%S")
     with closing(baglan()) as c:
         c.execute("DELETE FROM stok_yedek WHERE tedarikci = ?", (ad,))
         c.executemany("INSERT OR REPLACE INTO stok_yedek (tedarikci, barkod, stok, zaman) VALUES (?,?,?,?)",
@@ -2720,7 +2720,7 @@ def oncelik_sirala(d):
 def degisenleri_sec(ayar, pid, df, simdi=None):
     """Otomatik turda yalnizca son basarili gonderimden BERI DEGISEN urunleri secer (pazar yeri hiz limitine takilmamak icin).
     Donus: (df, tam_tur_mu, frenlenen_sayi). Ilk tur ve her 6 saatte bir TAM gonderim yapilir."""
-    simdi = simdi or datetime.now()
+    simdi = simdi or simdi_tr()
     snap = snapshot_oku(pid)
     tam_z = son_tam_zamani(pid)
     if not snap or (tam_z is not None and (simdi - tam_z) > timedelta(hours=6)):
@@ -2758,7 +2758,7 @@ def snapshot_guncelle(pid, df_gonder, baslangic, tam_tur, hata):
         return 0
     with closing(baglan()) as c:
         okset = {str(r[0]) for r in c.execute("SELECT barkod FROM pazar_durum WHERE pazar = ? AND durum = 'ok' AND zaman >= ?", (pid, baslangic))}
-        z = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        z = simdi_tr().strftime("%Y-%m-%d %H:%M:%S")
         eski_fiyat = {str(r[0]): float(r[1]) for r in c.execute("SELECT barkod, fiyat FROM pazar_son WHERE pazar = ?", (pid,))}
         satirlar = [(pid, str(b), _i(sk), (round(_f(fy), 2) if _f(fy) > 0 else eski_fiyat.get(str(b), 0.0)), z)
                     for b, sk, fy in zip(df_gonder["barkod"], df_gonder["stok"], df_gonder["satis_fiyati"]) if str(b) in okset]
@@ -2794,7 +2794,7 @@ def pazara_gonder(ayar, pid, df, ilerleme=None, tam=True):
             if acil:
                 sk = sk * 0
             df["stok"] = sk.astype(int)
-        baslangic = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        baslangic = simdi_tr().strftime("%Y-%m-%d %H:%M:%S")
         tam_tur, df_gonder = True, df
         if tam is None:  # otomatik tur: yalnizca degisenler
             df_gonder, tam_tur, _fren = degisenleri_sec(ayar, pid, df)
@@ -2837,7 +2837,7 @@ def senkron_gecikme_dk(ayar, simdi=None):
     z = son_senkron_zamani()
     if z is None:
         return None, True
-    dk = ((simdi or datetime.now()) - z).total_seconds() / 60
+    dk = ((simdi or simdi_tr()) - z).total_seconds() / 60
     return dk, dk > max(2 * senkron_dk_degeri(ayar), 30.0)
 
 
@@ -2862,7 +2862,7 @@ def son_fren_uyarisi():
     with closing(baglan()) as c:
         r = c.execute("SELECT zaman, mesaj FROM senkron_log WHERE durum = 'UYARI' AND mesaj LIKE 'Toplu stok%' ORDER BY id DESC LIMIT 1").fetchone()
     try:
-        if r and (datetime.now() - datetime.strptime(r[0], "%Y-%m-%d %H:%M:%S")).total_seconds() < 86400:
+        if r and (simdi_tr() - datetime.strptime(r[0], "%Y-%m-%d %H:%M:%S")).total_seconds() < 86400:
             return r[1]
     except (TypeError, ValueError):
         pass
@@ -3235,7 +3235,7 @@ def siparis_stok_kontrol(ayar):
             anahtar = f"{o.get('id') or ''}|{o.get('no') or ''}"
             if anahtar not in gorulen:
                 yeni.append((anahtar, o))
-        z = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        z = simdi_tr().strftime("%Y-%m-%d %H:%M:%S")
         if yeni:
             with closing(baglan()) as c:
                 c.executemany("INSERT OR IGNORE INTO siparis_goruldu (pazar, siparis, zaman) VALUES (?,?,?)", [(pid, a, z) for a, _ in yeni])
@@ -4330,7 +4330,7 @@ def ayarlari_geri_yukle(veri_y):
 
 
 def yedek_isaretle():
-    ayarlar["son_yedek"] = datetime.now().strftime("%Y-%m-%d %H:%M")
+    ayarlar["son_yedek"] = simdi_tr().strftime("%Y-%m-%d %H:%M")
     ayar_yaz(ayarlar)
 
 
@@ -4381,7 +4381,7 @@ def genel_ayarlar(sifre):
             st.info("Parola en az 8 karakter olmalı ve iki alan aynı olmalı.")
         elif p1:
             st.download_button("⬇️ Şifreli yedeği indir", yedek_sifrele(ayarlar, p1),
-                               f"sahentegre_sifreli_yedek_{datetime.now():%Y%m%d}.json", "application/json",
+                               f"sahentegre_sifreli_yedek_{simdi_tr():%Y%m%d}.json", "application/json",
                                on_click=yedek_isaretle)
             st.caption("Parolayı kaybederseniz yedek açılamaz; parola bu dosyada saklanmaz.")
     guvenli = {k: v for k, v in ayarlar.items() if k != "kimlik"}
