@@ -4448,7 +4448,7 @@ def ilk_gonderilebilir(df, pid, uretici, en_fazla=500):
     return None, -1
 
 
-def kategori_secimi_uygula(pid, df):
+def kategori_secimi_uygula(pid, df, varsayilan_isaret=True):
     """Gonderilecek kategorileri alt alta isaretlettirir; df'yi buna gore suzer."""
     if df.empty or "kategori" not in df.columns:
         return df
@@ -4465,7 +4465,7 @@ def kategori_secimi_uygula(pid, df):
         st.warning("Eşleştirilmiş kategori yok. Genel Ayarlar > Kategori eşleştirme bölümünden eşleştirin.")
         return df.iloc[0:0]
     st.markdown("**Gönderilecek kategoriler**")
-    tumu = st.checkbox("Tüm kategorileri işaretle", value=True, key=f"{pid}_kat_tumu")
+    tumu = st.checkbox("Tüm kategorileri işaretle", value=varsayilan_isaret, key=f"{pid}_kat_tumu_{varsayilan_isaret}")
     tablo = pd.DataFrame({
         "Gönder": [bool(tumu)] * len(gosterilen),
         "Kategori": gosterilen,
@@ -4476,6 +4476,8 @@ def kategori_secimi_uygula(pid, df):
                          disabled=["Kategori", "Ürün", "Eşleşme"], key=f"{pid}_kat_ed_{bool(tumu)}")
     secilen = set(duz.loc[duz["Gönder"], "Kategori"])
     st.caption(f"{len(secilen)}/{len(gosterilen)} kategori işaretli. Yalnızca işaretlenenler gönderilir.")
+    if not secilen:
+        st.info("Göndermek istediğiniz kategorilerin 'Gönder' kutusunu işaretleyin.")
     return df[ana.isin(secilen).values]
 
 
@@ -4496,9 +4498,11 @@ def toplu_urun_paneli(pid):
         st.caption(f"🚫 Kara listedeki {int(kara.sum())} ürün gönderim dışı bırakıldı.")
         df = df[~kara]
         huni.append(("Kara liste dışında kalanlar", len(df)))
-    df = kategori_secimi_uygula(pid, df)
-    huni.append(("İşaretli kategorilerdeki ürün", len(df)))
-    mod = st.selectbox("Gönderim Modu", ["Tek ürün (Test)", "Tüm Ürünler"], key=f"{pid}_mod")
+    mod = st.selectbox("Gönderim Modu", ["Tek ürün (Test)", "Kategori seç", "Tüm Ürünler"], key=f"{pid}_mod",
+                       help="Kategori seç: yalnızca işaretlediğiniz kategorilerdeki ürünler gönderilir. Tüm Ürünler: kategorisi eşleşmiş bütün ürünler.")
+    if mod.startswith("Kategori"):
+        df = kategori_secimi_uygula(pid, df, varsayilan_isaret=False)
+    huni.append(("İşaretli kategorilerdeki ürün" if mod.startswith("Kategori") else "Kategori seçimi sonrası", len(df)))
     df = fiyat_artis_uygula(ayarlar, pid, df)
     uretici = {
         "n11": n11_urun_listesi, "idefix": idefix_urun_listesi, "trendruum": trendruum_urun_listesi,
