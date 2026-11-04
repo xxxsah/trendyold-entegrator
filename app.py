@@ -4222,8 +4222,9 @@ def tedarikci_sayfasi():
             with st.expander("📉 Bu tedarikçinin ürünlerini satıştan kaldır (stok sıfırla ve kilitle)"):
                 st.caption("Tedarikçinin TÜM ürünlerinin stoğu 0 yapılır ve kilitlenir (senkron stoğu geri açmaz). Seçtiğin pazar yerlerine 0 stok hemen gönderilir; ürünler satışa kapanır ama silinmez. "
                            "Geri açmak için 'Kilidi kaldır' düğmesini kullan.")
-                t_df = urunleri_oku()
-                t_bk = sorted({str(b) for b in t_df.loc[t_df["tedarikci"] == ad, "barkod"]}) if not t_df.empty else []
+                with closing(baglan()) as c_t:
+                    t_bk = [str(r_[0]) for r_ in c_t.execute("SELECT DISTINCT barkod FROM urunler WHERE tedarikci=?", (ad,))]
+                kilit_t = stok_sifir_kume(ayarlar)
                 bagli_p = [pid for pid in GUNCELLEYICI if pazar_bagli(ayarlar, pid)]
                 sec_p = st.multiselect("Hangi pazar yerlerinde sıfırlansın?", bagli_p, default=[p_ for p_ in ("hb",) if p_ in bagli_p],
                                        format_func=lambda x: PAZAR_AD.get(x, x), key=f"{ad}_sifir_pazar")
@@ -4236,7 +4237,7 @@ def tedarikci_sayfasi():
                     st.success(f"{len(t_bk):,} ürünün stoğu sıfırlandı ve kilitlendi.")
                     for ad_p, ok_p, h_p in sonuc_t:
                         (st.error if h_p else st.info)(f"{ad_p}: {ok_p} gönderildi" + (f", hata: {h_p}" if h_p else ""))
-                kilitli_t = [b for b in t_bk if b in stok_sifir_kume(ayarlar)]
+                kilitli_t = [b for b in t_bk if b in kilit_t]
                 if z2.button(f"🔓 Kilidi kaldır ({len(kilitli_t):,})", key=f"{ad}_kilit_btn", disabled=not kilitli_t):
                     n_k = stok_kilidi_kaldir(ayarlar, kilitli_t)
                     st.success(f"{n_k:,} ürünün kilidi kaldırıldı. 'Tümünü Şimdi Senkronla'ya bas; stoklar tedarikçiden geri gelir ve pazar yerine gider.")
