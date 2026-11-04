@@ -1509,11 +1509,28 @@ def idefix_guncelle(ayar, df, ilerleme=None):
     return _sonuc("idefix", ok_k, hata_k, loglar, atlanan, tukenen_atlanan)
 
 
+MARKA_ALANLARI = (("hb", "marka", "Hepsiburada marka adı"), ("ptt", "marka", "PTT AVM marka adı"),
+                  ("idefix", "brand_id", "İdefix marka ID"), ("trendruum", "brand_id", "Trendruum marka ID"))
+
+
+def tedarikci_marka(ayar, tedarikci, pid, alan, varsayilan=""):
+    """Tedarikçiye özel marka tanımlıysa onu, yoksa pazar yerinin genel markasını döndürür."""
+    bilgi = (ayar.get("tedarikciler") or {}).get(str(tedarikci)) or {}
+    v = ((bilgi.get("markalar") or {}).get(pid) or {}).get(alan)
+    v = str(v).strip() if v is not None else ""
+    return v or str(varsayilan or "").strip()
+
+
+def tedarikci_marka_var_mi(ayar, pid, alan):
+    return any(str((((b or {}).get("markalar") or {}).get(pid) or {}).get(alan) or "").strip()
+               for b in (ayar.get("tedarikciler") or {}).values())
+
+
 def idefix_urun_listesi(df, ayar):
     pa = pa_al(ayar, "idefix")
-    brand = _i(pa.get("brand_id"))
-    if brand <= 0:
-        raise ValueError("İdefix için 'Marka ID' ayarı boş. Genel Ayarlar'dan girin.")
+    brand_gen = _i(pa.get("brand_id"))
+    if brand_gen <= 0 and not tedarikci_marka_var_mi(ayar, "idefix", "brand_id"):
+        raise ValueError("İdefix için 'Marka ID' ayarı boş. Genel Ayarlar'dan ya da tedarikçi ayarından girin.")
     cat_varsayilan = _i(pa.get("category_id"))
     atr = pa.get("attributes") or []
     kdv = _i(pa.get("kdv"), 20)
@@ -1525,7 +1542,8 @@ def idefix_urun_listesi(df, ayar):
         bk = idefix_barkod(kod, ayar)
         fiyat = round(_f(r.get("satis_fiyati")), 2)
         cat = _i(kat_sec(pa, ayar, r.get("kategori"), "idefix"))
-        if not gorsel.startswith("https") or fiyat <= 0 or not bk or cat <= 0:
+        brand = _i(tedarikci_marka(ayar, r.get("tedarikci"), "idefix", "brand_id", pa.get("brand_id")))
+        if not gorsel.startswith("https") or fiyat <= 0 or not bk or cat <= 0 or brand <= 0:
             atlanan += 1
             continue
         ad = str(r["urun_adi"]).strip()
@@ -1798,9 +1816,9 @@ def hb_urun_listesi(df, ayar):
     merchant = kimlik(ayar, "hb_merchant_id")
     if not merchant:
         raise ValueError("Hepsiburada Merchant ID kayıtlı değil.")
-    marka = str(pa.get("marka", "") or "").strip()
-    if not marka:
-        raise ValueError("Hepsiburada için Marka adı gerekli (Genel Ayarlar > Marka adı).")
+    marka_gen = str(pa.get("marka", "") or "").strip()
+    if not marka_gen and not tedarikci_marka_var_mi(ayar, "hb", "marka"):
+        raise ValueError("Hepsiburada için Marka adı gerekli (Genel Ayarlar > Marka adı ya da tedarikçi ayarı).")
     ek = hb_ek_ozellikler(pa)
     onek = str(pa.get("sku_prefix", "") or "")
     kdv = _i(pa.get("kdv"), 20)
@@ -1814,7 +1832,8 @@ def hb_urun_listesi(df, ayar):
         barkod = sabit_barkod(kod, uret)
         fiyat = round(_f(r.get("satis_fiyati")), 2)
         cat = kat_sec(pa, ayar, r.get("kategori"), "hb")
-        if not gorsel.startswith("https") or fiyat <= 0 or not barkod or not cat:
+        marka = tedarikci_marka(ayar, r.get("tedarikci"), "hb", "marka", marka_gen)
+        if not gorsel.startswith("https") or fiyat <= 0 or not barkod or not cat or not marka:
             atlanan += 1
             continue
         ad = str(r["urun_adi"]).strip()
@@ -2024,7 +2043,7 @@ def ptt_urun_listesi(df, ayar):
                          "Genel Ayarlar'dan düzeltin.")
     kdv = _i(pa.get("kdv"), 20)
     uret = bool(pa.get("gecici_barkod", True))
-    marka = str(pa.get("marka", "") or "").strip()
+    marka_gen = str(pa.get("marka", "") or "").strip()
     desi = _f(pa.get("desi"), 1.0) or 1.0
     desi = int(desi) if float(desi).is_integer() else desi
     kargo = str(pa.get("kargo_profil", "") or "").strip()
@@ -2050,6 +2069,7 @@ def ptt_urun_listesi(df, ayar):
         if gecerli_barkod(kod):  # yalnızca gerçek barkodlarda GTIN/EAN gönder
             u["ean"] = kod
             u["gtin"] = kod
+        marka = tedarikci_marka(ayar, r.get("tedarikci"), "ptt", "marka", marka_gen)
         if marka:
             u["brand"] = marka
         if kargo:
@@ -2347,9 +2367,9 @@ def trendruum_ayar(ayar):
 
 def trendruum_urun_listesi(df, ayar):
     pa = pa_al(ayar, "trendruum")
-    brand, cat_varsayilan, uret, kdv = trendruum_ayar(ayar)
-    if not objectid_mi(brand):
-        raise ValueError("Trendruum 'Marka ID' geçersiz/boş (24 karakterlik ID olmalı). Genel Ayarlar'dan girin.")
+    brand_gen, cat_varsayilan, uret, kdv = trendruum_ayar(ayar)
+    if not objectid_mi(brand_gen) and not tedarikci_marka_var_mi(ayar, "trendruum", "brand_id"):
+        raise ValueError("Trendruum 'Marka ID' geçersiz/boş (24 karakterlik ID olmalı). Genel Ayarlar'dan ya da tedarikçi ayarından girin.")
     liste, atlanan = [], 0
     for r in kayit_listesi(df):
         gorsel = https_yap(str(r.get("gorsel", "")).strip())
@@ -2357,7 +2377,8 @@ def trendruum_urun_listesi(df, ayar):
         barkod = sabit_barkod(kod, uret)
         fiyat = _f(r.get("satis_fiyati"))
         cat = kat_sec(pa, ayar, r.get("kategori"), "trendruum")
-        if not gorsel or fiyat <= 0 or not barkod or not objectid_mi(cat):
+        brand = tedarikci_marka(ayar, r.get("tedarikci"), "trendruum", "brand_id", brand_gen)
+        if not gorsel or fiyat <= 0 or not barkod or not objectid_mi(cat) or not objectid_mi(brand):
             atlanan += 1
             continue
         liste.append({
@@ -4184,6 +4205,20 @@ def tedarikci_sayfasi():
             if float(zs) != _f(bilgi.get("zaman_asimi"), 300.0):
                 bilgi["zaman_asimi"] = float(zs)
                 ayar_yaz(ayarlar)
+            st.markdown("**🏷️ Bu tedarikçinin ürünleri hangi markayla gitsin?**")
+            st.caption("Boş bırakılan alan için pazar yerinin genel markası kullanılır. Yalnızca YENİ ürün oluşturmada geçerlidir; pazarda zaten açılmış ürünün markası değişmez.")
+            mk_eski = bilgi.get("markalar") or {}
+            mk_yeni = {}
+            mc = st.columns(2)
+            for i_m, (pid_m, alan_m, etk_m) in enumerate(MARKA_ALANLARI):
+                mevcut_m = str(((mk_eski.get(pid_m) or {}).get(alan_m)) or "")
+                v_m = mc[i_m % 2].text_input(etk_m, value=mevcut_m, key=f"{ad}_mk_{pid_m}").strip()
+                if v_m:
+                    mk_yeni.setdefault(pid_m, {})[alan_m] = v_m
+            if mk_yeni != {k: v for k, v in mk_eski.items() if v}:
+                bilgi["markalar"] = mk_yeni
+                ayar_yaz(ayarlar)
+                st.success("Marka ayarı kaydedildi. Yeni ürün gönderiminden itibaren geçerli.")
             st.markdown("**💱 Fiyat / Para Birimi**")
             kdv_e = st.checkbox("Fiyata KDV ekle (XML'deki KDV alanından, yoksa %20)", bool(bilgi.get("kdv_ekle")), key=f"{ad}_kdv_ekle")
             dv_k = st.checkbox("Para birimi kontrolü (urun_doviz: TL / USD)", bool(bilgi.get("doviz_kontrol")), key=f"{ad}_dvk",
