@@ -286,7 +286,7 @@ def stok_sifir_maskesi(ayar, df):
     return df["barkod"].astype(str).isin(stok_sifir_kume(ayar))
 
 
-def stok_sifirla(ayar, barkodlar, pazarlara_gonder=True):
+def stok_sifirla(ayar, barkodlar, pazarlara_gonder=True, pazarlar=None):
     """Barkodlari kilitler, veritabaninda stogu 0 yapar ve istenirse bagli pazar yerlerine hemen gonderir.
     Donus: [(pazar_adi, ok, hata_ya_da_mesaj), ...]"""
     barkodlar = sorted({str(b).strip() for b in barkodlar if str(b).strip()})
@@ -306,7 +306,7 @@ def stok_sifirla(ayar, barkodlar, pazarlara_gonder=True):
     if pazarlara_gonder:
         df = urunleri_oku()
         df = df[df["barkod"].isin(barkodlar)].drop_duplicates("barkod").reset_index(drop=True)
-        for pid in GUNCELLEYICI:
+        for pid in (pazarlar or GUNCELLEYICI):
             if not pazar_bagli(ayar, pid):
                 continue
             try:
@@ -4219,6 +4219,27 @@ def tedarikci_sayfasi():
                 bilgi["markalar"] = mk_yeni
                 ayar_yaz(ayarlar)
                 st.success("Marka ayarı kaydedildi. Yeni ürün gönderiminden itibaren geçerli.")
+            with st.expander("📉 Bu tedarikçinin ürünlerini satıştan kaldır (stok sıfırla ve kilitle)"):
+                st.caption("Tedarikçinin TÜM ürünlerinin stoğu 0 yapılır ve kilitlenir (senkron stoğu geri açmaz). Seçtiğin pazar yerlerine 0 stok hemen gönderilir; ürünler satışa kapanır ama silinmez. "
+                           "Geri açmak için 'Kilidi kaldır' düğmesini kullan.")
+                t_df = urunleri_oku()
+                t_bk = sorted({str(b) for b in t_df.loc[t_df["tedarikci"] == ad, "barkod"]}) if not t_df.empty else []
+                bagli_p = [pid for pid in GUNCELLEYICI if pazar_bagli(ayarlar, pid)]
+                sec_p = st.multiselect("Hangi pazar yerlerinde sıfırlansın?", bagli_p, default=[p_ for p_ in ("hb",) if p_ in bagli_p],
+                                       format_func=lambda x: PAZAR_AD.get(x, x), key=f"{ad}_sifir_pazar")
+                st.write(f"Etkilenecek ürün: **{len(t_bk):,}**")
+                t_onay = st.checkbox(f"{len(t_bk):,} ürünün stoğunu sıfırlamayı onaylıyorum", key=f"{ad}_sifir_onay")
+                z1, z2 = st.columns(2)
+                if z1.button("🔒 Hepsini sıfırla ve kilitle", key=f"{ad}_sifir_btn", disabled=not (t_onay and sec_p and t_bk)):
+                    with st.spinner("Sıfırlanıyor ve pazar yerlerine gönderiliyor..."):
+                        sonuc_t = stok_sifirla(ayarlar, t_bk, True, sec_p)
+                    st.success(f"{len(t_bk):,} ürünün stoğu sıfırlandı ve kilitlendi.")
+                    for ad_p, ok_p, h_p in sonuc_t:
+                        (st.error if h_p else st.info)(f"{ad_p}: {ok_p} gönderildi" + (f", hata: {h_p}" if h_p else ""))
+                kilitli_t = [b for b in t_bk if b in stok_sifir_kume(ayarlar)]
+                if z2.button(f"🔓 Kilidi kaldır ({len(kilitli_t):,})", key=f"{ad}_kilit_btn", disabled=not kilitli_t):
+                    n_k = stok_kilidi_kaldir(ayarlar, kilitli_t)
+                    st.success(f"{n_k:,} ürünün kilidi kaldırıldı. 'Tümünü Şimdi Senkronla'ya bas; stoklar tedarikçiden geri gelir ve pazar yerine gider.")
             st.markdown("**💱 Fiyat / Para Birimi**")
             kdv_e = st.checkbox("Fiyata KDV ekle (XML'deki KDV alanından, yoksa %20)", bool(bilgi.get("kdv_ekle")), key=f"{ad}_kdv_ekle")
             dv_k = st.checkbox("Para birimi kontrolü (urun_doviz: TL / USD)", bool(bilgi.get("doviz_kontrol")), key=f"{ad}_dvk",
