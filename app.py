@@ -82,6 +82,7 @@ VARSAYILAN = {
     "ptt_oto_guncelle": False,
     "pazar_ayarlari": {},
     "fiyat_sistemi": {},
+    "zarar_korumasi": True,
     "kara_liste": "",
     "stok_sifir": {},
     "fiyat_sabit": {},
@@ -2890,6 +2891,13 @@ def pazara_gonder(ayar, pid, df, ilerleme=None, tam=True):
         if kara.any():  # kara listedeki ürünler pazarda satıştan kalksın (stok 0)
             df = df.copy()
             df.loc[kara, "stok"] = 0
+        if ayar.get("zarar_korumasi", True) and "alis_fiyati" in df.columns and "stok" in df.columns and not df.empty:
+            zarar = (df["alis_fiyati"].map(_f) > 0) & (df["satis_fiyati"].map(_f) <= df["alis_fiyati"].map(_f) * 1.03) & (df["stok"].map(_i) > 0)
+            if zarar.any():  # satış fiyatı alış fiyatına (bayi fiyatına) eşit/altında: kargo+komisyon yüzünden zarar. Satıştan kaldır.
+                df = df.copy()
+                df.loc[zarar, "stok"] = 0
+                log_yaz(ad, "UYARI", f"ZARAR KORUMASI: {int(zarar.sum())} ürünün satış fiyatı alış fiyatına yakın/altında olduğu için stoğu 0 gönderildi. "
+                                     "Genel & Yedek > Fiyatlandırma'yı açıp kaydedin ve yeniden gönderin.")
         pay, tavan, acil = _i(ayar.get("stok_guvenlik_payi")), _i(ayar.get("pazar_stok_tavani")), bool(ayar.get("acil_durdur"))
         if "stok" in df.columns and (pay > 0 or tavan > 0 or acil):
             df = df.copy()
@@ -4515,10 +4523,14 @@ def fiyat_sistemi_paneli():
     st.dataframe(pd.DataFrame({"Alış ₺": ornek, "Net kâr ₺": net.round(0).values, "Kargo+gider ₺": [gider] * len(ornek),
                                "Komisyon ₺": (sat * kom_oran / 100).round(0).values, "Satış ₺": sat.values,
                                "Satış / alış": (sat / pd.Series(ornek, dtype=float)).round(2).values}), hide_index=True)
+    zk = st.checkbox("🛡️ Zarar koruması: satış fiyatı alış (bayi) fiyatına yakın ya da altındaysa o ürünün stoğunu 0 gönder",
+                     value=bool(ayarlar.get("zarar_korumasi", True)), key="fs_zarar")
     if st.button("💾 Fiyat sistemini kaydet", key="fs_kaydet", type="primary"):
         ayarlar["fiyat_sistemi"] = yeni
+        ayarlar["zarar_korumasi"] = bool(zk)
         ayar_yaz(ayarlar)
-        st.success("Kaydedildi. Pazara göndermek için her pazarın İşlemler sayfasında 'Tam Senkronizasyon'a bas (otomatik güncelleme açıksa sonraki turda gider).")
+        st.success("Kaydedildi. Aşağıdaki düğmeyle tüm pazarlara hemen gönderebilirsin.")
+    toplu_stok_fiyat_paneli("fiyat")
     st.divider()
 
 
@@ -4962,6 +4974,31 @@ def gonder_ve_goster(pid, tedarikciler=None):
             (st.success if hata == 0 else st.warning)(f"{ad}: {ok} ürün iletildi, {hata} hata. (API kabulü = pazar yerinde işlendi demek değildir.)")
     except Exception as e:
         st.error(f"Hata: {e}")
+
+
+def toplu_stok_fiyat_paneli(anahtar):
+    """Tüm (ya da seçili) pazar yerlerine stok + fiyatı tek düğmeyle gönderir."""
+    with st.container(border=True):
+        st.markdown("### 🚀 Tüm pazarlara stok + fiyat gönder")
+        bagli = [p_ for p_ in GUNCELLEYICI if pazar_bagli(ayarlar, p_)]
+        if not bagli:
+            st.info("Bağlı pazar yeri yok.")
+            return
+        if not fiyat_sistemi(ayarlar):
+            st.warning("⚠️ Fiyat sistemi KAPALI: pazarlara tedarikçideki satış fiyatı gider (marj 0 ise alış fiyatı!). "
+                       "Önce Genel & Yedek > Fiyatlandırma'yı aç ve kaydet.")
+        sec = st.multiselect("Hangi pazarlara gönderilsin?", bagli, default=bagli, format_func=lambda x: PAZAR_AD.get(x, x), key=f"tp_sec_{anahtar}")
+        yenile = st.checkbox("Önce tedarikçi XML'lerini yenile (daha uzun sürer)", value=False, key=f"tp_yenile_{anahtar}")
+        onay = st.checkbox("Onaylıyorum: seçili pazarlardaki tüm ürünlerin stok ve fiyatı güncellenecek", key=f"tp_onay_{anahtar}")
+        if st.button("🚀 Hepsini gönder", key=f"tp_btn_{anahtar}", type="primary", disabled=not (onay and sec)):
+            if yenile:
+                with st.spinner("Tedarikçiler güncelleniyor..."):
+                    for tad, ok_, msg in tumunu_senkronla(oto=False):
+                        (st.success if ok_ else st.error)(f"{tad}: {msg}")
+            for p_ in sec:
+                st.markdown(f"**{PAZAR_AD.get(p_, p_)}**")
+                gonder_ve_goster(p_)
+            st.info("Bitti. Sonuçlar Senkron Günlüğü'ne de yazıldı.")
 
 
 def pazar_ayar(pid):
@@ -5578,6 +5615,7 @@ def anasayfa():
     c3.metric(f"Kritik Stok (≤{esik})", f"{int(df['stok'].between(1, esik).sum()):,}" if not df.empty else "0")
     c4.metric("Tedarikçi", len(ayarlar["tedarikciler"]))
     ana_siparis_kutulari()
+    toplu_stok_fiyat_paneli("ana")
     st.markdown("### 🛒 Pazar Yeri Bağlantı Durumları")
     liste = list(PAZAR.items())
     for i in range(0, len(liste), 2):
