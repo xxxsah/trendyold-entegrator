@@ -5120,7 +5120,7 @@ def pazar_islemler(pid):
                 hb_sonuc_goster(ayarlar, (elle_hb or sec_hb))
             st.markdown("**Toplu özet:** son yüklemelerin hepsini tarar; kaç ürün başarılı, kaç ürün neden reddedilmiş gösterir.")
             adet_hb = st.number_input("Kaç yükleme taransın?", 1, 60, 15, key="hb_toplu_adet")
-            if gen(st.button, "📊 Toplu özeti çıkar", key="hb_toplu_btn"):
+            if st.button("📊 Toplu özeti çıkar", key="hb_toplu_ozet_dugme"):
                 pb_ = st.progress(0.0)
                 try:
                     st.session_state["hb_toplu_sonuc"] = hb_toplu_ozet(ayarlar, int(adet_hb), ilerleme=lambda p: pb_.progress(min(p, 1.0)))
