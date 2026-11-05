@@ -5378,10 +5378,62 @@ def urunler_sayfasi():
         if len(f) > sayi and gen(st.button, f"⬇️ Daha fazla göster ({min(sayi, len(f))}/{len(f)})", key="urun_daha_fazla"):
             st.session_state["urun_kart_sayi"] = sayi + 48
             st.rerun()
+    with st.expander("🔎 Stok neden 0? (teşhis)"):
+        st.caption("Tedarikçi başına stok dağılımı: 'Stok 0' çoksa ya XML'de stok gerçekten yok, ya kritik eşik/kilit/kara liste sıfırlıyor.")
+        dag = tedarikci_stok_dagilimi(_i(ayarlar.get("kritik_esik")))
+        if not dag.empty:
+            st.dataframe(dag)
+        bk_t = st.text_input("Barkod yaz, nedenini göstereyim", key="teshis_barkod")
+        if bk_t.strip():
+            for satir in stok_teshis(ayarlar, bk_t):
+                st.write("• " + satir)
     if kilit:
         with st.expander(f"🔒 Elle sıfırlanmış ürünler ({len(kilit)})"):
             kd = pd.DataFrame({"Barkod": sorted(kilit), "Kilit zamanı": [ayarlar["stok_sifir"][b] for b in sorted(kilit)]})
             st.dataframe(kd, hide_index=True)
+
+
+def stok_teshis(ayar, barkod):
+    """Bir ürünün stoğunun neden 0 görünebileceğini sıralar (bulgu listesi döndürür)."""
+    barkod = str(barkod).strip()
+    df = urunleri_oku()
+    r = df[df["barkod"] == barkod]
+    if r.empty:
+        return ["Bu barkod sistemde yok (tedarikçi XML'inde bulunmuyor ya da hiç çekilmemiş)."]
+    r = r.iloc[0]
+    bulgu = [f"Sistemdeki stok: {int(r['stok'])} · tedarikçi: {r.get('tedarikci')} · satış fiyatı: {_f(r.get('satis_fiyati')):.2f} ₺"]
+    if barkod in stok_sifir_kume(ayar):
+        bulgu.append(f"🔒 ELLE KİLİTLİ: stoğu sıfırlanıp kilitlenmiş ({ayar['stok_sifir'].get(barkod)}). Tedarikçi ayarında 'Kilidi kaldır'a bas.")
+    one = df.iloc[[r.name]] if r.name in df.index else df[df["barkod"] == barkod]
+    if kara_liste_maskesi(ayar, one).any():
+        bulgu.append("🚫 KARA LİSTE: adı/kategorisi/barkodu kara liste kelimesini içeriyor; pazara hep stok 0 gider (Genel & Yedek > Kara liste).")
+    if ayar.get("acil_durdur"):
+        bulgu.append("🛑 ACİL DURDUR AÇIK: tüm pazarlara stok 0 gönderiliyor.")
+    esik = _i(ayar.get("kritik_esik"))
+    if int(r["stok"]) == 0 and esik > 0:
+        bulgu.append(f"⚠️ Kritik stok eşiği {esik}: tedarikçide stoğu {esik} ve altında olan ürünler 0 sayılır. Ham stok {esik} veya altındaysa 0'ın nedeni bu.")
+    elif 0 < int(r["stok"]) <= _i(ayar.get("stok_guvenlik_payi")):
+        bulgu.append(f"⚠️ Güvenlik payı {_i(ayar.get('stok_guvenlik_payi'))}: pazara stoktan bu kadar eksik gider; sonuç 0.")
+    if _i(ayar.get("pazar_stok_tavani")) > 0:
+        bulgu.append(f"ℹ️ Pazar stok tavanı {_i(ayar.get('pazar_stok_tavani'))} adet uygulanıyor.")
+    with closing(baglan()) as c:
+        for pid in GUNCELLEYICI:
+            x = c.execute("SELECT stok, fiyat, zaman FROM pazar_son WHERE pazar=? AND barkod=?", (pid, barkod)).fetchone()
+            if x:
+                bulgu.append(f"{PAZAR_AD.get(pid, pid)}'e son gönderilen: stok {x[0]}, fiyat {x[1]} ({x[2]})")
+    if len(bulgu) == 1:
+        bulgu.append("Panelde stoğu sıfırlayan bir ayar bulunamadı. Stok sistemde sıfır değilse pazara gönderim yapılmamış olabilir: pazarın İşlemler sayfasında 'Tam Senkronizasyon'a bas.")
+    return bulgu
+
+
+def tedarikci_stok_dagilimi(esik):
+    df = urunleri_oku()
+    if df.empty:
+        return pd.DataFrame()
+    g = df.groupby("tedarikci")["stok"]
+    return pd.DataFrame({"Ürün": g.size(), "Stok 0": g.apply(lambda x: int((x <= 0).sum())),
+                         f"Stok 1-{max(esik, 1)}": g.apply(lambda x: int(((x > 0) & (x <= max(esik, 1))).sum())),
+                         f"Stok >{max(esik, 1)}": g.apply(lambda x: int((x > max(esik, 1)).sum()))})
 
 
 def anasayfa():
