@@ -4159,7 +4159,9 @@ def pazar_fiyat_paneli(pid):
                 ted_k[t] = {"ozel": True, "kademe": tablo(f"{t} kademesi", eski.get("kademe") or genel, f"pf_kdt_{pid}_{t}")}
         yeni = {"aktif": aktif, "komisyon": kom, "kargo": kargo, "ek_kesinti": ek, "kar_carpani": car, "kademe": genel, "tedarikciler": ted_k}
         # örnek
-        st.markdown("**Örnek fiyatlar**")
+        st.markdown("**Örnek fiyatlar** (yukarıdaki kâr tablosunun sonucu)")
+        st.caption("Kâr tablosuna yazdığın 'Net kâr' ile aşağıdaki 'Net kâr ₺' sütunu aynı olmalı; fark varsa seçtiğin örnek tedarikçinin ayrı tablosu ya da 'Kâr çarpanı %' (100 değilse kâr onunla çarpılır) yüzündendir. "
+                   "Satış ₺ ise bu kârın üstüne alış, kargo, ek kesinti ve komisyonun eklenmiş hâlidir.")
         ornek_ted = st.selectbox("Örnek tedarikçi", ["(genel)"] + sorted((ayarlar.get("tedarikciler") or {}).keys()), key=f"pf_ort_{pid}")
         alislar = [100, 300, 600, 1000, 2000, 5000, 10000]
         sat, net = pazar_fiyat_hesapla(alislar, [None if ornek_ted == "(genel)" else ornek_ted] * len(alislar), yeni)
@@ -4172,11 +4174,22 @@ def pazar_fiyat_paneli(pid):
             kayit[pid] = yeni
             ayar_yaz(ayarlar)
             st.success("Kaydedildi. Pazara göndermek için bu pazarın İşlemler sayfasında 'Tam Senkronizasyon'a bas (otomatik güncelleme açıksa sonraki turda gider).")
-        if b2.button("📋 Bu ayarı tüm pazarlara kopyala", key=f"pf_kopya_{pid}"):
+        if b2.button("📋 Yalnızca kâr tablolarını diğer pazarlara kopyala", key=f"pf_kopya_{pid}",
+                     help="Genel ve tedarikçi kâr tabloları kopyalanır. Her pazarın komisyonu, kargosu, ek kesintisi, kâr çarpanı ve açık/kapalı durumu aynen kalır."):
             for p_ in PAZAR:
-                kayit[p_] = json.loads(json.dumps(yeni))
+                if p_ == pid:
+                    continue
+                hedef = dict(kayit.get(p_) or {})
+                hedef["kademe"] = json.loads(json.dumps(yeni["kademe"]))
+                hedef["tedarikciler"] = json.loads(json.dumps(yeni["tedarikciler"]))
+                kayit[p_] = hedef
+            kayit[pid] = yeni
             ayar_yaz(ayarlar)
-            st.success("Tüm pazarlara kopyalandı. Her pazarın komisyonunu ve kargosunu kendi sayfasında ayrıca düzenleyebilirsin.")
+            for k_ in [k_ for k_ in list(st.session_state.keys()) if str(k_).startswith(("pf_kd_", "pf_kdt_", "pf_oz_"))]:
+                if not str(k_).endswith(f"_{pid}") and f"_{pid}_" not in str(k_):
+                    st.session_state.pop(k_, None)
+            st.success("Kâr tabloları diğer pazarlara kopyalandı (bu pazar da kaydedildi). Komisyon, kargo ve açık/kapalı ayarları her pazarda kendi değerinde kaldı. "
+                       "Diğer pazarların sayfasını açınca yeni tabloyu göreceksin.")
 
 
 def pazar_ayar_formu(pid):
