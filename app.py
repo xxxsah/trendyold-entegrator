@@ -2048,6 +2048,17 @@ def hb_fiyat_metni(fiyat):
     return f"{round(float(fiyat), 2):.2f}".replace(".", ",")
 
 
+HB_YASAKLI_VARSAYILAN = ["fiyat", "fiyatı", "fiyatına", "fiyatlı", "indirim", "indirimli", "kampanya", "kampanyalı", "ücretsiz", "bedava"]
+
+
+def hb_baslik_temizle(ad, ayar):
+    """Hepsiburada ürün adında yasaklı kelimeleri (ör. 'fiyat') çıkarır; 'Ürün adında yasaklı kelime(ler) bulunmaktadır' hatasını önler."""
+    ek = [x.strip() for x in str(pa_al(ayar, "hb").get("yasakli_kelimeler", "") or "").replace("\n", ",").split(",") if x.strip()]
+    kelimeler = {tr_norm(x) for x in HB_YASAKLI_VARSAYILAN + ek}
+    parca = [w for w in str(ad).split() if tr_norm(w.strip(".,;:!?()[]-/\"'")) not in kelimeler]
+    return " ".join(parca) or str(ad)
+
+
 def hb_urun_listesi(df, ayar):
     """Hepsiburada 'Urun Bilgisi Gonderme' (POST /product/api/products/import) bicimi:
     [{categoryId, merchant, attributes:{merchantSku, VaryantGroupID, Barcode, UrunAdi, UrunAciklamasi, Marka,
@@ -2077,7 +2088,7 @@ def hb_urun_listesi(df, ayar):
         if not gorsel.startswith("https") or fiyat <= 0 or not barkod or not cat or not marka:
             atlanan += 1
             continue
-        ad = str(r["urun_adi"]).strip()
+        ad = hb_baslik_temizle(str(r["urun_adi"]).strip(), ayar)
         sku = onek + kod
         oz = {
             "merchantSku": sku, "VaryantGroupID": "VG-" + sku, "Barcode": barkod,
@@ -2144,7 +2155,7 @@ def hb_toplu_ozet(ayar, adet=20, en_fazla_sayfa=12, ilerleme=None):
     """Son 'adet' yüklemenin tüm sayfalarını okuyup importStatus ve neden sayımı çıkarır; hbSku'su olanları (katalogda zaten var) ayırır."""
     kodlar = list(reversed(kv_oku("takip:hb", []) or []))[:adet]
     durum, mesaj, ornek = Counter(), Counter(), {}
-    var_olan, okunan, toplam_urun = {}, 0, 0
+    var_olan, okunan, toplam_urun, ham_ornek = {}, 0, 0, {}
     taban = hb_urun_adresi(ayar).rstrip("/")[:-len("/products/import")]
     for i, tid in enumerate(kodlar):
         for sayfa in range(en_fazla_sayfa):
@@ -2167,13 +2178,14 @@ def hb_toplu_ozet(ayar, adet=20, en_fazla_sayfa=12, ilerleme=None):
                     m1 = re.sub(r"\d{4,}", "#", m0)  # barkod/SKU numaraları nedeniyle aynı hata ayrı satırlara bölünmesin
                     mesaj[m1] += n0
                     ornek.setdefault(m1, o_.get(m0, ""))
+                    ham_ornek.setdefault(m1, u)
                 if u.get("hbSku") and any("matched or in catalog" in x for x in m_):
                     var_olan[str(u.get("merchantSku"))] = str(u.get("hbSku"))
             if j.get("last", True) or not veri:
                 break
         if ilerleme:
             ilerleme((i + 1) / max(len(kodlar), 1))
-    return {"durum": durum, "mesaj": mesaj, "ornek": ornek, "var_olan": var_olan, "kod": len(kodlar), "sayfa": okunan, "urun": toplam_urun}
+    return {"durum": durum, "mesaj": mesaj, "ornek": ornek, "var_olan": var_olan, "kod": len(kodlar), "sayfa": okunan, "urun": toplam_urun, "ham": ham_ornek}
 
 
 def hb_sonuc_goster(ayar, tid):
@@ -5164,6 +5176,9 @@ def pazar_islemler(pid):
                     st.write("Durumlar: " + ", ".join(f"**{k}**: {n:,}" for k, n in ts_["durum"].most_common()))
                 if ts_["mesaj"]:
                     st.dataframe(pd.DataFrame([{"Neden": m, "Adet": n, "Örnek SKU": ts_["ornek"].get(m, "")} for m, n in ts_["mesaj"].most_common(15)]), hide_index=True)
+                if ts_.get("ham"):
+                    sec_neden = st.selectbox("Bir nedenin örnek kaydını (ham) göster", list(ts_["ham"].keys()), key="hb_ham_neden")
+                    st.json(ts_["ham"].get(sec_neden))
                 if ts_["var_olan"]:
                     st.info(f"{len(ts_['var_olan']):,} ürün Hepsiburada'da zaten katalogla eşleşmiş ya da katalog işleminde. "
                             "Bu ürünler tekrar 'ürün oluştur' ile yüklenemez (hata: 'Can not update product in matched or in catalog progress status'). "
