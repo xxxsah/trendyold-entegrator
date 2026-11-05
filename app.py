@@ -1348,6 +1348,35 @@ def gecerli_barkod(kod):
     return k if k.isdigit() and 8 <= len(k) <= 14 else None
 
 
+_CAKISMA_ONBELLEK = {"zaman": 0.0, "kume": set()}
+
+
+def _barkod_cakisanlar():
+    """Rakamları ayıklanınca AYNI barkoda dönüşen farklı stok kodlarını bulur (ör. CLZ174-83034 ve CLZ17-483034 -> 17483034).
+    Pazar yerleri barkodun benzersiz olmasını ister; çakışanlara benzersiz (hash) barkod verilir."""
+    simdi = time.time()
+    if simdi - _CAKISMA_ONBELLEK["zaman"] < 600:
+        return _CAKISMA_ONBELLEK["kume"]
+    kume = set()
+    try:
+        with closing(baglan()) as c:
+            kodlar = [str(r[0]) for r in c.execute("SELECT DISTINCT barkod FROM urunler")]
+        harita = {}
+        for k in kodlar:
+            if gecerli_barkod(k):
+                continue
+            t = "".join(ch for ch in k if ch.isdigit())
+            if 8 <= len(t) <= 14:
+                harita.setdefault(t, []).append(k)
+        for lst in harita.values():
+            if len(lst) > 1:
+                kume.update(lst)
+    except Exception:
+        pass
+    _CAKISMA_ONBELLEK.update({"zaman": simdi, "kume": kume})
+    return kume
+
+
 def sabit_barkod(kod, uret=False):
     """Aynı koddan her zaman aynı barkodu üretir (Python hash() KULLANILMAZ)."""
     g = gecerli_barkod(kod)
@@ -1356,7 +1385,7 @@ def sabit_barkod(kod, uret=False):
     if not uret:
         return None
     temiz = "".join(ch for ch in str(kod) if ch.isdigit())
-    if 8 <= len(temiz) <= 14:
+    if 8 <= len(temiz) <= 14 and str(kod) not in _barkod_cakisanlar():
         return temiz
     h = int(hashlib.md5(str(kod).encode()).hexdigest(), 16) % 10**9
     return f"869{h:09d}"
@@ -2134,10 +2163,11 @@ def hb_toplu_ozet(ayar, adet=20, en_fazla_sayfa=12, ilerleme=None):
                 toplam_urun += 1
                 d_, m_, o_ = n11_gorev_ozet(u)
                 durum.update(d_)
-                mesaj.update(m_)
-                for k_, v_ in o_.items():
-                    ornek.setdefault(k_, v_)
-                if u.get("hbSku"):
+                for m0, n0 in m_.items():
+                    m1 = re.sub(r"\d{4,}", "#", m0)  # barkod/SKU numaraları nedeniyle aynı hata ayrı satırlara bölünmesin
+                    mesaj[m1] += n0
+                    ornek.setdefault(m1, o_.get(m0, ""))
+                if u.get("hbSku") and any("matched or in catalog" in x for x in m_):
                     var_olan[str(u.get("merchantSku"))] = str(u.get("hbSku"))
             if j.get("last", True) or not veri:
                 break
@@ -5135,7 +5165,7 @@ def pazar_islemler(pid):
                 if ts_["mesaj"]:
                     st.dataframe(pd.DataFrame([{"Neden": m, "Adet": n, "Örnek SKU": ts_["ornek"].get(m, "")} for m, n in ts_["mesaj"].most_common(15)]), hide_index=True)
                 if ts_["var_olan"]:
-                    st.info(f"{len(ts_['var_olan']):,} ürünün Hepsiburada'da zaten bir ürün kodu (hbSku) var: katalogla eşleşmiş ya da katalog işleminde. "
+                    st.info(f"{len(ts_['var_olan']):,} ürün Hepsiburada'da zaten katalogla eşleşmiş ya da katalog işleminde. "
                             "Bu ürünler tekrar 'ürün oluştur' ile yüklenemez (hata: 'Can not update product in matched or in catalog progress status'). "
                             "Bunlar için ürün oluşturmayı bırakıp fiyat/stok güncellemesini kullanın.")
     if pid == "n11" and bagli:
