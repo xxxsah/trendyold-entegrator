@@ -2137,6 +2137,13 @@ def hb_urun_gonder(ayar, liste, ilerleme=None):
     return len(ok_k), len(hata_k), loglar
 
 
+def hb_yukleme_durumu(ayar, tur, uid):
+    """Hepsiburada fiyat/stok yükleme sonucu: GET /listings/merchantid/{m}/{price|stock}-uploads/id/{id}. Dönüş: (http_kod, ham metin)."""
+    m = kimlik(ayar, "hb_merchant_id")
+    r = http("GET", f"{HB_BASE}/listings/merchantid/{m}/{'price' if tur == 'fiyat' else 'stock'}-uploads/id/{uid}", headers=hb_header(ayar), timeout=60, tries=1)
+    return r.status_code, (r.text or "")[:4000]
+
+
 def hb_urun_sonuc_sorgula(ayar, tid):
     """Hepsiburada ürün yükleme sonucu: GET <ürün adresi tabanı>/products/status/{trackingId}. Dönüş: (http_kod, json_ya_da_None, ham)."""
     tid = str(tid or "").strip()
@@ -5899,6 +5906,14 @@ def urunler_sayfasi():
                             st.code(v_y.get("yanit", ""))
                             with st.expander("Gönderilen istek (örnek)"):
                                 st.json(v_y.get("istek_ornek"))
+                        if pz_dene == "hb":
+                            time.sleep(6)  # Hepsiburada isteği sıraya alır; sonucu birkaç saniye sonra verir
+                            for ad_y, tur_ in (("hb_fiyat", "fiyat"), ("hb_stok", "stok")):
+                                mt_ = re.search(r'"id"\s*:\s*"([^"]+)"', (SON_YANIT.get(ad_y) or {}).get("yanit", ""))
+                                if mt_:
+                                    kod_s, ham_s = hb_yukleme_durumu(ayarlar, tur_, mt_.group(1))
+                                    st.write(f"**Hepsiburada {tur_} yükleme SONUCU** (HTTP {kod_s}) — gerçek sonuç bu:")
+                                    st.code(ham_s)
                 except Exception as e:
                     st.error(f"Hata: {e}")
     if kilit:
