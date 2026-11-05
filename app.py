@@ -156,6 +156,10 @@ def ayar_oku():
     for k in KIMLIK_ALANLARI:  # eski düz yapıdan göç
         if k in veri and isinstance(veri[k], str):
             veri["kimlik"].setdefault(k, veri.pop(k))
+    if not veri.get("fiyat_sistemi"):  # ayar dosyası bir şekilde eski haline döndüyse son kaydedilen fiyat sistemini geri getir
+        yedek = kv_oku("fiyat_sistemi_yedek")
+        if isinstance(yedek, dict) and yedek:
+            veri["fiyat_sistemi"] = yedek
     return veri
 
 
@@ -210,6 +214,16 @@ def ayar_yaz(ayar):
         except OSError:
             pass
         tmp.replace(AYAR_DOSYA)
+
+
+def ayar_kismi_yaz(degistir, ayar_bellek=None):
+    """Arka plan/uzun işlemlerde ESKİ kalmış 'ayar' nesnesini tümüyle diske yazmak, kullanıcının o sırada kaydettiği ayarları (ör. fiyat sistemi) ezer.
+    Bunun yerine diskteki güncel ayarı okur, yalnızca ilgili alanı değiştirir ve yazar."""
+    taze = ayar_oku()
+    degistir(taze)
+    ayar_yaz(taze)
+    if ayar_bellek is not None:
+        degistir(ayar_bellek)
 
 
 def kimlik(ayar, ad):
@@ -1655,10 +1669,11 @@ def idefix_gonder(ayar, liste, ilerleme=None):
         if ok:
             b = idefix_batch_id(r.text)
             if b:
-                takip = ayar.setdefault("idefix_takip", [])
-                takip.append(b)
-                del takip[:-50]
-                ayar_yaz(ayar)
+                def _d(a, b=b):
+                    takip = a.setdefault("idefix_takip", [])
+                    takip.append(b)
+                    del takip[:-50]
+                ayar_kismi_yaz(_d, ayar)
                 log_yaz("İdefix", "OK", f"Ürün yükleme batchRequestId: {b} (kabul = ürün onayı değildir; sonucu sorgulayın)")
                 ozet += f" | batchRequestId: {b}"
             else:
@@ -1810,8 +1825,7 @@ def hb_dene(ayar):
         except Exception:
             continue
         if r.status_code == 200:
-            pa_al(ayar, "hb")["kombi"] = i
-            ayar_yaz(ayar)
+            ayar_kismi_yaz(lambda a, i=i: pa_al(a, "hb").__setitem__("kombi", i), ayar)
             return True, "✅ Hepsiburada girişi başarılı."
     return False, "❌ Hepsiburada girişi reddedildi (kullanıcı adı / servis anahtarı / merchant ID kontrol edin)."
 
@@ -2194,9 +2208,10 @@ def ptt_takip_kaydet(ayar, idler):
     liste = [i for i in idler if i]
     if not liste:
         return
-    onceki = [i for i in (ayar.get("ptt_takip") or []) if i not in liste]
-    ayar["ptt_takip"] = (liste + onceki)[:20]
-    ayar_yaz(ayar)
+    def _d(a):
+        onceki = [i for i in (a.get("ptt_takip") or []) if i not in liste]
+        a["ptt_takip"] = (liste + onceki)[:20]
+    ayar_kismi_yaz(_d, ayar)
 
 
 def ptt_urun_gonder(ayar, liste, ilerleme=None):
@@ -4529,6 +4544,7 @@ def fiyat_sistemi_paneli():
         ayarlar["fiyat_sistemi"] = yeni
         ayarlar["zarar_korumasi"] = bool(zk)
         ayar_yaz(ayarlar)
+        kv_yaz("fiyat_sistemi_yedek", yeni)
         st.success("Kaydedildi. Aşağıdaki düğmeyle tüm pazarlara hemen gönderebilirsin.")
     toplu_stok_fiyat_paneli("fiyat")
     st.divider()
@@ -5578,6 +5594,19 @@ def stok_teshis(ayar, barkod):
         bulgu.append("🚫 KARA LİSTE: adı/kategorisi/barkodu kara liste kelimesini içeriyor; pazara hep stok 0 gider (Genel & Yedek > Kara liste).")
     if ayar.get("acil_durdur"):
         bulgu.append("🛑 ACİL DURDUR AÇIK: tüm pazarlara stok 0 gönderiliyor.")
+    alis_ = _f(r.get("alis_fiyati"))
+    fs_ = fiyat_sistemi(ayar)
+    bulgu.append(f"💲 Alış fiyatı: {alis_:.2f} ₺ · Fiyat sistemi: {'AÇIK' if fs_ else 'KAPALI (pazara tedarikçideki satış fiyatı gider)'} · "
+                 f"elle sabit fiyat: {ayar.get('fiyat_sabit', {}).get(barkod, 'yok')}")
+    if alis_ > 0:
+        d1 = df[df["barkod"] == barkod].head(1)
+        for pid_ in GUNCELLEYICI:
+            if pazar_bagli(ayar, pid_):
+                try:
+                    hf = _f(fiyat_artis_uygula(ayar, pid_, d1)["satis_fiyati"].iloc[0])
+                    bulgu.append(f"💲 {PAZAR_AD.get(pid_, pid_)}'e GİDECEK hesaplanan fiyat: {hf:.2f} ₺" + (" ⚠️ alış fiyatına yakın!" if hf <= alis_ * 1.03 else ""))
+                except Exception as e:
+                    bulgu.append(f"{PAZAR_AD.get(pid_, pid_)} fiyat hesabı yapılamadı: {e}")
     esik = _i(ayar.get("kritik_esik"))
     if int(r["stok"]) == 0 and esik > 0:
         bulgu.append(f"⚠️ Kritik stok eşiği {esik}: tedarikçide stoğu {esik} ve altında olan ürünler 0 sayılır. Ham stok {esik} veya altındaysa 0'ın nedeni bu.")
