@@ -1606,23 +1606,24 @@ def n11_gorev_ozet(j):
 
     def gez(x, bag=None):
         if isinstance(x, dict):
-            d = str(x.get("status") or x.get("state") or "").strip()
+            d = str(x.get("importStatus") or x.get("status") or x.get("state") or "").strip()
             ms = []
-            for k in ("reasons", "reason", "errors", "error", "message", "errorMessage", "failReasons", "failReason"):
+            for k in ("reasons", "reason", "errors", "error", "message", "errorMessage", "failReasons", "failReason", "importMessages", "validationResults", "rejectReasonsMessages"):
                 v = x.get(k)
                 if isinstance(v, str) and v.strip():
                     ms.append(v.strip())
                 elif isinstance(v, list):
                     for e in v:
                         ms.append(str(e.get("message") or e.get("reason") or e) if isinstance(e, dict) else str(e))
-            kod = str(x.get("itemCode") or x.get("stockCode") or x.get("sku") or "")
+            kod = str(x.get("itemCode") or x.get("stockCode") or x.get("merchantSku") or x.get("sku") or "")
             if d and (ms or kod):
                 durum[d] += 1
             for m in ms:
                 mesaj[m[:220]] += 1
                 ornek.setdefault(m[:220], kod)
-            for v in x.values():
-                if isinstance(v, (dict, list)):
+            _mesaj_anahtar = ("reasons", "reason", "errors", "error", "message", "errorMessage", "failReasons", "failReason", "importMessages", "validationResults", "rejectReasonsMessages")
+            for k_, v in x.items():
+                if k_ not in _mesaj_anahtar and isinstance(v, (dict, list)):
                     gez(v)
         elif isinstance(x, list):
             for e in x:
@@ -2108,6 +2109,41 @@ def hb_urun_sonuc_sorgula(ayar, tid):
     except Exception:
         j = None
     return r.status_code, j, (r.text or "")[:4000]
+
+
+def hb_toplu_ozet(ayar, adet=20, en_fazla_sayfa=12, ilerleme=None):
+    """Son 'adet' yüklemenin tüm sayfalarını okuyup importStatus ve neden sayımı çıkarır; hbSku'su olanları (katalogda zaten var) ayırır."""
+    kodlar = list(reversed(kv_oku("takip:hb", []) or []))[:adet]
+    durum, mesaj, ornek = Counter(), Counter(), {}
+    var_olan, okunan, toplam_urun = {}, 0, 0
+    taban = hb_urun_adresi(ayar).rstrip("/")[:-len("/products/import")]
+    for i, tid in enumerate(kodlar):
+        for sayfa in range(en_fazla_sayfa):
+            r = http("GET", f"{taban}/products/status/{tid}", params={"page": sayfa, "size": 100}, headers=hb_header(ayar), timeout=60, tries=1)
+            try:
+                j = r.json()
+            except Exception:
+                break
+            if r.status_code != 200 or not isinstance(j, dict):
+                break
+            veri = j.get("data") or []
+            okunan += 1
+            for u in veri:
+                if not isinstance(u, dict):
+                    continue
+                toplam_urun += 1
+                d_, m_, o_ = n11_gorev_ozet(u)
+                durum.update(d_)
+                mesaj.update(m_)
+                for k_, v_ in o_.items():
+                    ornek.setdefault(k_, v_)
+                if u.get("hbSku"):
+                    var_olan[str(u.get("merchantSku"))] = str(u.get("hbSku"))
+            if j.get("last", True) or not veri:
+                break
+        if ilerleme:
+            ilerleme((i + 1) / max(len(kodlar), 1))
+    return {"durum": durum, "mesaj": mesaj, "ornek": ornek, "var_olan": var_olan, "kod": len(kodlar), "sayfa": okunan, "urun": toplam_urun}
 
 
 def hb_sonuc_goster(ayar, tid):
@@ -5082,6 +5118,26 @@ def pazar_islemler(pid):
             elle_hb = st.text_input("veya izleme kodu yapıştırın", key="hb_takip_elle")
             if gen(st.button, "🔎 Sonucu getir", key="hb_takip_btn"):
                 hb_sonuc_goster(ayarlar, (elle_hb or sec_hb))
+            st.markdown("**Toplu özet:** son yüklemelerin hepsini tarar; kaç ürün başarılı, kaç ürün neden reddedilmiş gösterir.")
+            adet_hb = st.number_input("Kaç yükleme taransın?", 1, 60, 15, key="hb_toplu_adet")
+            if gen(st.button, "📊 Toplu özeti çıkar", key="hb_toplu_btn"):
+                pb_ = st.progress(0.0)
+                try:
+                    st.session_state["hb_toplu_sonuc"] = hb_toplu_ozet(ayarlar, int(adet_hb), ilerleme=lambda p: pb_.progress(min(p, 1.0)))
+                except Exception as e:
+                    st.session_state["hb_toplu_sonuc"] = None
+                    st.error(f"Hata: {e}")
+            ts_ = st.session_state.get("hb_toplu_sonuc")
+            if ts_:
+                st.write(f"{ts_['kod']} yükleme, {ts_['sayfa']} sayfa, **{ts_['urun']:,}** ürün kaydı tarandı.")
+                if ts_["durum"]:
+                    st.write("Durumlar: " + ", ".join(f"**{k}**: {n:,}" for k, n in ts_["durum"].most_common()))
+                if ts_["mesaj"]:
+                    st.dataframe(pd.DataFrame([{"Neden": m, "Adet": n, "Örnek SKU": ts_["ornek"].get(m, "")} for m, n in ts_["mesaj"].most_common(15)]), hide_index=True)
+                if ts_["var_olan"]:
+                    st.info(f"{len(ts_['var_olan']):,} ürünün Hepsiburada'da zaten bir ürün kodu (hbSku) var: katalogla eşleşmiş ya da katalog işleminde. "
+                            "Bu ürünler tekrar 'ürün oluştur' ile yüklenemez (hata: 'Can not update product in matched or in catalog progress status'). "
+                            "Bunlar için ürün oluşturmayı bırakıp fiyat/stok güncellemesini kullanın.")
     if pid == "n11" and bagli:
         with st.expander("📋 N11 görev sonucu (ürün gönderimi neden görünmüyor?)"):
             st.caption("N11 ürünleri hemen oluşturmaz; önce görev sırasına alır. Hata varsa burada görünür. "
