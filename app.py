@@ -1599,6 +1599,61 @@ def n11_urun_gonder(ayar, liste, ilerleme=None):
     return len(ok_k), len(hata_k), loglar
 
 
+def n11_gorev_ozet(j):
+    """N11 görev yanıtından (biçimi bilinmediği için genel tarama) durum sayıları ve en sık hata mesajları."""
+    durum, mesaj = Counter(), Counter()
+    ornek = {}
+
+    def gez(x, bag=None):
+        if isinstance(x, dict):
+            d = str(x.get("status") or x.get("state") or "").strip()
+            ms = []
+            for k in ("reasons", "reason", "errors", "error", "message", "errorMessage", "failReasons", "failReason"):
+                v = x.get(k)
+                if isinstance(v, str) and v.strip():
+                    ms.append(v.strip())
+                elif isinstance(v, list):
+                    for e in v:
+                        ms.append(str(e.get("message") or e.get("reason") or e) if isinstance(e, dict) else str(e))
+            kod = str(x.get("itemCode") or x.get("stockCode") or x.get("sku") or "")
+            if d and (ms or kod):
+                durum[d] += 1
+            for m in ms:
+                mesaj[m[:220]] += 1
+                ornek.setdefault(m[:220], kod)
+            for v in x.values():
+                if isinstance(v, (dict, list)):
+                    gez(v)
+        elif isinstance(x, list):
+            for e in x:
+                gez(e)
+
+    gez(j)
+    return durum, mesaj, ornek
+
+
+def n11_gorev_ozet_goster(ayar, tid):
+    try:
+        kod_, j_, ham_ = n11_gorev_sorgula(ayar, tid)
+    except Exception as e:
+        st.error(f"Görev sorgulanamadı: {e}")
+        return
+    (st.success if kod_ == 200 else st.error)(f"N11 görev {tid}: HTTP {kod_}")
+    if j_ is None:
+        st.code(ham_)
+        return
+    durum, mesaj, ornek = n11_gorev_ozet(j_)
+    if durum:
+        st.write("Durumlar: " + ", ".join(f"**{k}**: {n}" for k, n in durum.most_common()))
+    if mesaj:
+        st.error("N11'in ürünleri REDDETME nedenleri (en sık):")
+        st.dataframe(pd.DataFrame([{"Neden": m, "Adet": n, "Örnek stok kodu": ornek.get(m, "")} for m, n in mesaj.most_common(15)]), hide_index=True)
+    elif durum:
+        st.info("Hata mesajı görünmüyor; görev hâlâ işleniyor olabilir. Birkaç dakika sonra tekrar sorgulayın.")
+    with st.expander("Ham yanıt"):
+        st.json(j_)
+
+
 def n11_takip_ekle(tid, en_fazla=30):
     liste = [str(x) for x in (kv_oku("takip:n11", []) or []) if str(x) != str(tid)]
     kv_yaz("takip:n11", (liste + [str(tid)])[-en_fazla:])
@@ -2018,15 +2073,61 @@ def hb_urun_gonder(ayar, liste, ilerleme=None):
                  headers=baslik, timeout=120, tries=2)
         ok = r.status_code in (200, 201, 202)
         ozet = yanit_ozet(r)
+        try:
+            jj = r.json()
+        except Exception:
+            jj = None
+        if ok and isinstance(jj, dict) and (jj.get("success") is False or jj.get("errors")):
+            ok = False  # HTTP 200 olsa bile gövde 'başarısız' diyorsa başarılı sayma
         if ok:
             t = re.search(r'"trackingId"\s*:\s*"([^"]+)"', r.text or "")
             if t:
                 log_yaz("Hepsiburada", "OK", f"Ürün yükleme izleme kodu: {t.group(1)}")
                 ozet += f" | izleme kodu: {t.group(1)}"
+                liste_ = [str(x) for x in (kv_oku("takip:hb", []) or []) if str(x) != t.group(1)]
+                kv_yaz("takip:hb", (liste_ + [t.group(1)])[-30:])
+            else:
+                ok = False
+                ozet += " | UYARI: yanıtta izleme kodu (trackingId) yok; Hepsiburada dosyayı işleme almamış olabilir."
         return ok, ozet
 
     ok_k, hata_k, loglar = paketle(kayit, 100, gonder, ilerleme, "Hepsiburada", durdur=3)
     return len(ok_k), len(hata_k), loglar
+
+
+def hb_urun_sonuc_sorgula(ayar, tid):
+    """Hepsiburada ürün yükleme sonucu: GET <ürün adresi tabanı>/products/status/{trackingId}. Dönüş: (http_kod, json_ya_da_None, ham)."""
+    tid = str(tid or "").strip()
+    if not re.fullmatch(r"[A-Za-z0-9\-_]{6,80}", tid):
+        raise ValueError("Geçersiz izleme kodu.")
+    taban = hb_urun_adresi(ayar).rstrip("/")
+    taban = taban[: -len("/products/import")]
+    r = http("GET", f"{taban}/products/status/{tid}", headers=hb_header(ayar), timeout=60, tries=1)
+    try:
+        j = r.json()
+    except Exception:
+        j = None
+    return r.status_code, j, (r.text or "")[:4000]
+
+
+def hb_sonuc_goster(ayar, tid):
+    try:
+        kod_, j_, ham_ = hb_urun_sonuc_sorgula(ayar, tid)
+    except Exception as e:
+        st.error(f"Sorgulanamadı: {e}")
+        return
+    (st.success if kod_ == 200 else st.error)(f"Hepsiburada yükleme {tid}: HTTP {kod_}")
+    if j_ is None:
+        st.code(ham_)
+        return
+    durum, mesaj, ornek = n11_gorev_ozet(j_)
+    if durum:
+        st.write("Durumlar: " + ", ".join(f"**{k}**: {n}" for k, n in durum.most_common()))
+    if mesaj:
+        st.error("Hepsiburada'nın ürünleri REDDETME / uyarı nedenleri (en sık):")
+        st.dataframe(pd.DataFrame([{"Neden": m, "Adet": n, "Örnek SKU": ornek.get(m, "")} for m, n in mesaj.most_common(15)]), hide_index=True)
+    with st.expander("Ham yanıt", expanded=not mesaj):
+        st.json(j_)
 
 
 HB_OMS = "https://oms-external.hepsiburada.com"
@@ -4784,6 +4885,13 @@ def toplu_urun_paneli(pid):
         df = kategori_secimi_uygula(pid, df, varsayilan_isaret=False)
     huni.append(("İşaretli kategorilerdeki ürün" if mod.startswith("Kategori") else "Kategori seçimi sonrası", len(df)))
     df = fiyat_artis_uygula(ayarlar, pid, df)
+    if not df.empty and "alis_fiyati" in df.columns:  # ZARAR KORUMASI (ürün oluşturma): fiyatı alışa yakın/altında olan ürün asla yüklenmesin
+        _zarar = (df["alis_fiyati"].map(_f) > 0) & (df["satis_fiyati"].map(_f) <= df["alis_fiyati"].map(_f) * 1.15)
+        if _zarar.any():
+            st.error(f"🛡️ {int(_zarar.sum())} ürünün hesaplanan fiyatı alış fiyatına çok yakın/altında; zarar etmemek için bu ürünler gönderim listesinden ÇIKARILDI. "
+                     "Genel Ayarlar > Fiyatlandırma'yı açıp kaydedin.")
+            df = df[~_zarar]
+            huni.append(("Zarar koruması sonrası", len(df)))
     uretici = {
         "n11": n11_urun_listesi, "idefix": idefix_urun_listesi, "trendruum": trendruum_urun_listesi,
         "ptt": ptt_urun_listesi, "hb": hb_urun_listesi,
@@ -4829,6 +4937,17 @@ def toplu_urun_paneli(pid):
         neden = atlama_nedenleri(df, pid)
         if neden:
             st.caption("Atlanma nedenleri: " + neden)
+        try:
+            pa_ = pa_al(ayarlar, pid)
+            eslesmeyen = df[df["kategori"].map(lambda k: not kat_sec(pa_, ayarlar, k, pid))]
+            if len(eslesmeyen):
+                ana_ = eslesmeyen["kategori"].astype(str).map(lambda k: k.split(">>>")[0].strip())
+                tablo_ = ana_.value_counts().head(25).rename_axis("Eşleşmemiş ana kategori").reset_index(name="Ürün sayısı")
+                with st.expander(f"🧩 Kategorisi eşleşmeyen {len(eslesmeyen):,} ürün ({ana_.nunique()} ana kategori) — önce bunları eşleştirin", expanded=True):
+                    st.dataframe(tablo_, hide_index=True)
+                    st.caption("Kategori eşleştirmesini 'Kategori eşleştirme' bölümünden bu kategoriler için yapın; en çok ürünü olandan başlayın.")
+        except Exception:
+            pass
     if not liste:
         if mod.startswith("Tek"):
             st.warning("Gönderilebilir ürün bulunamadı. Kategori eşleştirmesini yapın ya da Genel Ayarlar'da 'Eşleşmesi olmayan ürünleri de varsayılan kategoriye koy'u açıp tek ürünle deneyin.")
@@ -4855,6 +4974,10 @@ def toplu_urun_paneli(pid):
             st.error(dur[0])
         log_yaz(ad, "OK" if hata == 0 else ("KISMİ" if ok else "HATA"), f"Ürün oluşturma: {ok} ürün iletildi, {hata} ürün hatalı.")
         (st.success if hata == 0 else st.warning)(f"{ok} ürün iletildi, {hata} ürün hatalı. (API kabulü = ürün onayı değildir; pazar yeri panelinden kontrol edin.)")
+        if pid == "n11" and ok:
+            son_g = (kv_oku("takip:n11", []) or [])[-1:]
+            if son_g:
+                st.info("N11 ürünleri hemen oluşturmaz. Birkaç dakika bekleyip aşağıdaki 'N11 görev sonucu' bölümünden sonucu getirin; reddedilen ürünlerin nedeni orada özetlenir.")
 
 
 def pazar_ozet(pid):
@@ -4950,6 +5073,15 @@ def pazar_islemler(pid):
     elif islem == "toplu":
         toplu_urun_paneli(pid)
 
+    if pid == "hb" and bagli:
+        with st.expander("📋 Hepsiburada ürün yükleme sonucu (ürünler neden düşmüyor?)", expanded=True):
+            st.caption("Hepsiburada dosyayı kabul etse bile ürünleri sonradan işler ve hatalı olanları reddeder. Neden düşmediği burada yazar. "
+                       "Ayrıca yeni ürünler Hepsiburada'da katalog onayından geçer; Satıcı Paneli > Ürünler / Katalog'da 'onay bekleyen' bölümüne de bakın.")
+            kayitli_hb = list(reversed(kv_oku("takip:hb", []) or []))
+            sec_hb = st.selectbox("Son yüklemelerin izleme kodları", [""] + kayitli_hb, key="hb_takip_sec")
+            elle_hb = st.text_input("veya izleme kodu yapıştırın", key="hb_takip_elle")
+            if gen(st.button, "🔎 Sonucu getir", key="hb_takip_btn"):
+                hb_sonuc_goster(ayarlar, (elle_hb or sec_hb))
     if pid == "n11" and bagli:
         with st.expander("📋 N11 görev sonucu (ürün gönderimi neden görünmüyor?)"):
             st.caption("N11 ürünleri hemen oluşturmaz; önce görev sırasına alır. Hata varsa burada görünür. "
@@ -4958,15 +5090,7 @@ def pazar_islemler(pid):
             sec_ = st.selectbox("Son gönderimlerin görev numaraları", [""] + kayitli_, key="n11_takip_sec")
             elle_ = st.text_input("veya görev no yazın", key="n11_takip_elle")
             if gen(st.button, "🔎 Sonucu getir", key="n11_takip_btn"):
-                try:
-                    kod_, j_, ham_ = n11_gorev_sorgula(ayarlar, (elle_ or sec_))
-                    (st.success if kod_ == 200 else st.error)(f"HTTP {kod_}")
-                    if j_ is not None:
-                        st.json(j_)
-                    else:
-                        st.code(ham_)
-                except Exception as e:
-                    st.error(f"Hata: {e}")
+                n11_gorev_ozet_goster(ayarlar, (elle_ or sec_))
     if pid == "idefix" and bagli:
         with st.expander("📋 İdefix gönderim sonucunu sorgula (batchRequestId)", expanded=True):
             st.caption("İdefix ürün oluşturmayı hemen yapmaz; ürün önce havuza alınır. Neden görünmediğini bu sonuç söyler.")
