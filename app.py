@@ -11,6 +11,7 @@ import hmac
 import html
 import ipaddress
 import json
+import math
 import os
 import re
 import socket
@@ -79,6 +80,7 @@ VARSAYILAN = {
     "idefix_oto_guncelle": False,
     "ptt_oto_guncelle": False,
     "pazar_ayarlari": {},
+    "pazar_fiyat": {},
     "kara_liste": "",
     "stok_sifir": {},
     "fiyat_sabit": {},
@@ -1042,7 +1044,88 @@ def tedarikci_senkron(ad, bilgi, kritik_esik=0, stok_ust=0, zorla=False):
 # --------------------------------------------------------------------------
 # Fiyat kuralları ve ortak yardımcılar
 # --------------------------------------------------------------------------
+VARSAYILAN_KADEME = [[150, 40, 0], [400, 80, 0], [1000, 150, 0], [3000, 250, 0], [None, 400, 0]]
+
+
+def fiyat_kademe_temizle(kademe):
+    """[[alış üst sınırı | None, net kâr TL, net kâr % (alış)], ...] -> sıralı, geçerli liste."""
+    satirlar = []
+    for r in (kademe or []):
+        try:
+            ust = r[0]
+            ust = None if ust is None or str(ust).strip() in ("", "nan", "None") else float(ust)
+            tl = float(r[1] or 0) if str(r[1]) not in ("nan", "None") else 0.0
+            yz = float(r[2] or 0) if len(r) > 2 and str(r[2]) not in ("nan", "None") else 0.0
+        except (TypeError, ValueError, IndexError):
+            continue
+        satirlar.append([ust, max(tl, 0.0), max(yz, 0.0)])
+    satirlar.sort(key=lambda x: (x[0] is None, x[0] or 0))
+    return satirlar or [list(x) for x in VARSAYILAN_KADEME]
+
+
+def kademe_net_kar(alis, kademe):
+    """Alış fiyatına göre hedef net kâr (TL): max(sabit TL, alış × yüzde)."""
+    kd = fiyat_kademe_temizle(kademe)
+    alis = pd.Series(alis, dtype=float)
+    tl = pd.Series(kd[-1][1], index=alis.index, dtype=float)
+    yz = pd.Series(kd[-1][2], index=alis.index, dtype=float)
+    atandi = pd.Series(False, index=alis.index)
+    for ust, t, y in kd:
+        if ust is None:
+            continue
+        m = (alis <= ust) & ~atandi
+        tl[m], yz[m] = t, y
+        atandi |= m
+    return pd.concat([tl, alis * yz / 100], axis=1).max(axis=1)
+
+
+def pazar_fiyat_kurali(ayar, pid):
+    k = (ayar.get("pazar_fiyat") or {}).get(pid) or {}
+    return k if k.get("aktif") else None
+
+
+def pazar_fiyat_hesapla(alis, tedarikci, k):
+    """Satış fiyatı = (alış + kargo + ek kesinti + net kâr) / (1 - komisyon). Komisyon satış fiyatı üzerinden kesildiği için
+    fiyatın içine baştan katılır; böylece net kâr gerçekten cebe kalır."""
+    alis = pd.Series(alis, dtype=float)
+    kom = min(max(_f(k.get("komisyon"), 20.0), 0.0), 80.0) / 100
+    gider = _f(k.get("kargo")) + _f(k.get("ek_kesinti"))
+    carpan = max(_f(k.get("kar_carpani"), 100.0), 0.0) / 100
+    net = pd.Series(0.0, index=alis.index)
+    ted_k = k.get("tedarikciler") or {}
+    tadi = pd.Series(tedarikci, index=alis.index) if tedarikci is not None else pd.Series("", index=alis.index)
+    for t in tadi.dropna().unique():
+        mk = tadi == t
+        kd = (ted_k.get(t) or {}).get("kademe") if (ted_k.get(t) or {}).get("ozel") else None
+        net[mk] = kademe_net_kar(alis[mk], kd or k.get("kademe") or VARSAYILAN_KADEME).values
+    net = net.where(tadi.notna(), kademe_net_kar(alis, k.get("kademe") or VARSAYILAN_KADEME))
+    fiyat = (alis + gider + net * carpan) / (1 - kom)
+    return fiyat.map(lambda x: float(math.ceil(x)) if x == x else x), net * carpan
+
+
+def _yeni_fiyat_kurali_uygula(ayar, k, df):
+    df = df.copy()
+    anahtar = df["barkod"].astype(str)
+    if "alis_fiyati" in df.columns and "tedarikci" in df.columns:
+        alis = df["alis_fiyati"].map(_f)
+        tadi = df["tedarikci"]
+    else:
+        with closing(baglan()) as c:
+            ref = pd.read_sql("SELECT barkod, tedarikci, alis_fiyati FROM urunler", c)
+        ref["barkod"] = ref["barkod"].astype(str)
+        ref = ref.drop_duplicates("barkod").set_index("barkod")
+        alis = anahtar.map(ref["alis_fiyati"]).map(_f)
+        tadi = anahtar.map(ref["tedarikci"])
+    yeni, _net = pazar_fiyat_hesapla(alis.values, tadi.values, k)
+    yeni.index = df.index
+    df["satis_fiyati"] = yeni.where(alis > 0, df["satis_fiyati"]).round(2)
+    return df
+
+
 def _fiyat_artis_ham(ayar, pid, df):
+    _k = pazar_fiyat_kurali(ayar, pid)
+    if _k and not df.empty and "satis_fiyati" in df.columns and "barkod" in df.columns:
+        return _yeni_fiyat_kurali_uygula(ayar, _k, df)
     pa = (ayar.get("pazar_ayarlari") or {}).get(pid) or {}
     marj = _f(pa.get("kar_marji"))
     kargo = _f(pa.get("sabit_kargo"))
@@ -4043,6 +4126,59 @@ def varsayilan_kategori_yaz(pid, cid):
     st.rerun()
 
 
+def pazar_fiyat_paneli(pid):
+    ad_p = PAZAR_AD.get(pid, pid)
+    kayit = ayarlar.setdefault("pazar_fiyat", {})
+    k = kayit.get(pid) or {}
+    with st.expander(f"💰 {ad_p} — Kademeli net kâr fiyatlaması" + (" ✅ AÇIK" if k.get("aktif") else " (kapalı)"), expanded=bool(k.get("aktif"))):
+        st.caption("Satış fiyatı = (alış + kargo + ek kesinti + net kâr) ÷ (1 − komisyon). Komisyon satış fiyatından kesildiği için fiyatın içine baştan katılır; "
+                   "tabloya yazdığın net kâr tüm kesintiler çıktıktan sonra cebinde kalan paradır. Açıkken bu pazarda tedarikçideki marj/kademe yerine bu kurallar kullanılır.")
+        aktif = st.checkbox("Bu pazar için kademeli net kâr fiyatlamasını kullan", value=bool(k.get("aktif")), key=f"pf_aktif_{pid}")
+        c1, c2, c3, c4 = st.columns(4)
+        kom = c1.number_input("Komisyon %", 0.0, 80.0, _f(k.get("komisyon"), 20.0), 0.5, key=f"pf_kom_{pid}")
+        kargo = c2.number_input("Kargo ₺", 0.0, 2000.0, _f(k.get("kargo"), 120.0), 5.0, key=f"pf_kargo_{pid}")
+        ek = c3.number_input("Ek kesinti ₺", 0.0, 2000.0, _f(k.get("ek_kesinti"), 20.0), 5.0, key=f"pf_ek_{pid}",
+                             help="Hizmet bedeli, iade/ambalaj payı gibi ürün başına sabit masraf.")
+        car = c4.number_input("Kâr çarpanı %", 0.0, 300.0, _f(k.get("kar_carpani"), 100.0), 5.0, key=f"pf_car_{pid}",
+                              help="Pazarda kampanya varsa fiyatı düşürmek için kârı küçült (ör. 70). 100 = tablodaki kâr.")
+
+        def tablo(baslik, kademe, anahtar):
+            st.markdown(f"**{baslik}**")
+            kd = fiyat_kademe_temizle(kademe)
+            d0 = pd.DataFrame({"Alış fiyatı en çok (₺) — boş = üstü": [x[0] for x in kd], "Net kâr (₺)": [x[1] for x in kd],
+                               "veya alışın % kadarı": [x[2] for x in kd]})
+            d1 = st.data_editor(d0, num_rows="dynamic", hide_index=True, key=anahtar, use_container_width=True)
+            return fiyat_kademe_temizle([[r.iloc[0], r.iloc[1], r.iloc[2]] for _, r in d1.iterrows()])
+
+        genel = tablo("Genel kademe (tedarikçiye özel tablo yoksa bu kullanılır)", k.get("kademe"), f"pf_kd_{pid}")
+        ted_k = {}
+        for t in sorted((ayarlar.get("tedarikciler") or {}).keys()):
+            eski = (k.get("tedarikciler") or {}).get(t) or {}
+            ozel = st.checkbox(f"{t} için ayrı kademe kullan", value=bool(eski.get("ozel")), key=f"pf_oz_{pid}_{t}")
+            if ozel:
+                ted_k[t] = {"ozel": True, "kademe": tablo(f"{t} kademesi", eski.get("kademe") or genel, f"pf_kdt_{pid}_{t}")}
+        yeni = {"aktif": aktif, "komisyon": kom, "kargo": kargo, "ek_kesinti": ek, "kar_carpani": car, "kademe": genel, "tedarikciler": ted_k}
+        # örnek
+        st.markdown("**Örnek fiyatlar**")
+        ornek_ted = st.selectbox("Örnek tedarikçi", ["(genel)"] + sorted((ayarlar.get("tedarikciler") or {}).keys()), key=f"pf_ort_{pid}")
+        alislar = [100, 300, 600, 1000, 2000, 5000, 10000]
+        sat, net = pazar_fiyat_hesapla(alislar, [None if ornek_ted == "(genel)" else ornek_ted] * len(alislar), yeni)
+        kom_t = sat * kom / 100
+        st.dataframe(pd.DataFrame({"Alış ₺": alislar, "Satış ₺": sat.values, "Komisyon ₺": kom_t.round(0).values,
+                                   "Kargo+kesinti ₺": [kargo + ek] * len(alislar), "Net kâr ₺": net.round(0).values,
+                                   "Net kâr %": (net / sat * 100).round(1).values}), hide_index=True)
+        b1, b2 = st.columns(2)
+        if b1.button("💾 Kaydet", key=f"pf_kaydet_{pid}", type="primary"):
+            kayit[pid] = yeni
+            ayar_yaz(ayarlar)
+            st.success("Kaydedildi. Pazara göndermek için bu pazarın İşlemler sayfasında 'Tam Senkronizasyon'a bas (otomatik güncelleme açıksa sonraki turda gider).")
+        if b2.button("📋 Bu ayarı tüm pazarlara kopyala", key=f"pf_kopya_{pid}"):
+            for p_ in PAZAR:
+                kayit[p_] = json.loads(json.dumps(yeni))
+            ayar_yaz(ayarlar)
+            st.success("Tüm pazarlara kopyalandı. Her pazarın komisyonunu ve kargosunu kendi sayfasında ayrıca düzenleyebilirsin.")
+
+
 def pazar_ayar_formu(pid):
     pa = pa_al(ayarlar, pid)
     bilgi = st.session_state.pop(f"vk_bilgi_{pid}", None)
@@ -4051,6 +4187,7 @@ def pazar_ayar_formu(pid):
     mb = st.session_state.pop(f"marka_bilgi_{pid}", None)
     if mb:
         st.success(f"Marka ID kaydedildi: {mb}")
+    pazar_fiyat_paneli(pid)
     with st.form(f"ayar_form_{pid}"):
         st.markdown("**Fiyat kuralları (bu pazar yeri için)**")
         c1, c2, c3 = st.columns(3)
