@@ -2007,6 +2007,7 @@ def hb_guncelle(ayar, df, ilerleme=None):
             if not liste:
                 continue
             r_ = istek(f"{url}/{'price' if ad_ == 'fiyat' else 'stock'}-uploads", liste)
+            SON_YANIT[f"hb_{ad_}"] = {"istek_ornek": liste[:3], "kod": r_.status_code, "yanit": (r_.text or "")[:3000]}
             if r_.status_code == 429:
                 return False, "HIZ_LIMITI " + yanit_ozet(r_)
             yanitlar.append((ad_, r_))
@@ -2945,6 +2946,9 @@ def trendruum_gonder(ayar, liste, ilerleme=None):
     return len(ok_k), len(hata_k), loglar
 
 
+SON_YANIT = {}  # pazar -> son güncelleme isteğinin ham yanıtı (teşhis için)
+
+
 def trendruum_guncelle(ayar, df, ilerleme=None):
     token = trendruum_token(kimlik(ayar, "trendruum_key"), kimlik(ayar, "trendruum_secret"))
     h = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
@@ -2968,6 +2972,7 @@ def trendruum_guncelle(ayar, df, ilerleme=None):
             if not parca:
                 continue
             r = http("POST", f"{TR_BASE}/products/bulk-update", json={"products": parca}, headers=h, timeout=120)
+            SON_YANIT["trendruum"] = {"istek_ornek": parca[:3], "kod": r.status_code, "yanit": (r.text or "")[:3000]}
             if r.status_code != 200:
                 return False, yanit_ozet(r)
             try:
@@ -5873,6 +5878,29 @@ def urunler_sayfasi():
         if bk_t.strip():
             for satir in stok_teshis(ayarlar, bk_t):
                 st.write("• " + satir)
+            st.markdown("**Canlı deneme:** bu tek ürünü seçtiğin pazara şimdi gönderir ve pazaryerinin verdiği ham yanıtı gösterir.")
+            pz_dene = st.selectbox("Pazar", [p_ for p_ in GUNCELLEYICI if pazar_bagli(ayarlar, p_)], format_func=lambda p_: PAZAR_AD.get(p_, p_), key="teshis_pazar")
+            if st.button("🧪 Bu ürünü şimdi bu pazara gönder", key="teshis_gonder_dugme"):
+                try:
+                    df_d = urunleri_oku()
+                    df_d = df_d[df_d["barkod"].astype(str) == bk_t.strip()].head(1)
+                    if df_d.empty:
+                        st.error("Bu barkod ürün listesinde yok.")
+                    else:
+                        planli = fiyat_artis_uygula(ayarlar, pz_dene, df_d)
+                        st.write(f"Gönderilecek fiyat: **{_f(planli['satis_fiyati'].iloc[0]):.2f} ₺** · stok: {_i(planli['stok'].iloc[0])}"
+                                 + (" (acil durdur açık: stok 0 gider)" if ayarlar.get("acil_durdur") else ""))
+                        SON_YANIT.pop("trendruum", None); SON_YANIT.pop("hb_fiyat", None); SON_YANIT.pop("hb_stok", None)
+                        ok_, hata_, ozet_ = pazara_gonder(ayarlar, pz_dene, df_d)
+                        st.write(f"Sonuç: {ok_} gönderildi, {hata_} hata")
+                        st.code(ozet_)
+                        for ad_y, v_y in SON_YANIT.items():
+                            st.write(f"**{ad_y}** ham yanıt (HTTP {v_y.get('kod')}):")
+                            st.code(v_y.get("yanit", ""))
+                            with st.expander("Gönderilen istek (örnek)"):
+                                st.json(v_y.get("istek_ornek"))
+                except Exception as e:
+                    st.error(f"Hata: {e}")
     if kilit:
         with st.expander(f"🔒 Elle sıfırlanmış ürünler ({len(kilit)})"):
             kd = pd.DataFrame({"Barkod": sorted(kilit), "Kilit zamanı": [ayarlar["stok_sifir"][b] for b in sorted(kilit)]})
