@@ -5469,6 +5469,16 @@ def urunler_sayfasi():
                 st.session_state["urun_senk_sonuc"] = tumunu_senkronla(oto=False)
         st.rerun()
 
+    _fs_acik = bool(fiyat_sistemi(ayarlar))
+    if not _fs_acik:
+        st.error("⚠️ FİYAT SİSTEMİ KAPALI: pazarlara tedarikçi (alış) fiyatı gider! Pazar Yerleri → Genel Ayarlar → Fiyat sistemi'ni açıp Kaydet'e basın.")
+    _gp = None
+    try:
+        _pz = next((x for x in GUNCELLEYICI if pazar_bagli(ayarlar, x)), None)
+        if _pz and len(f):
+            _gp = fiyat_artis_uygula(ayarlar, _pz, f.copy())["satis_fiyati"].map(_f).round(2).values
+    except Exception:
+        _gp = None
     if gorunum.startswith("Tablo"):
         v = pd.DataFrame({
             "Görsel": f["gorsel"].where(f["gorsel"].astype(str).str.startswith("http"), None),
@@ -5479,7 +5489,10 @@ def urunler_sayfasi():
             "Kilit": [("🔒" if b in kilit else "") + ("💲" if b in fiyat_kilit else "")
                       for b in f["barkod"].astype(str)],
         })
+        if _gp is not None:
+            v.insert(v.columns.get_loc("Satış") + 1, "Pazara giden", _gp)
         ayar_kol = {
+            "Pazara giden": st.column_config.NumberColumn("Pazara giden", format="%.2f ₺", help="Pazaryerine gönderilecek hesaplanmış satış fiyatı"),
             "Görsel": st.column_config.ImageColumn("Görsel", width="small"),
             "Ürün": st.column_config.TextColumn("Ürün", width="large"),
             "Alış": st.column_config.NumberColumn("Alış", format="%.2f ₺"),
