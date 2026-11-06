@@ -2722,6 +2722,8 @@ def trendruum_urun_listesi(df, ayar):
         fiyat = _f(r.get("satis_fiyati"))
         cat = kat_sec(pa, ayar, r.get("kategori"), "trendruum")
         brand = tedarikci_marka(ayar, r.get("tedarikci"), "trendruum", "brand_id", brand_gen)
+        if not objectid_mi(brand):
+            brand = brand_gen  # tedarikçiye özel marka geçersizse genel marka ID'sine dön
         if not gorsel or fiyat <= 0 or not barkod or not objectid_mi(cat) or not objectid_mi(brand):
             atlanan += 1
             continue
@@ -3002,7 +3004,7 @@ def trendruum_guncelle(ayar, df, ilerleme=None):
 def kat_sec(pa, ayar, kategori, pid):
     """Eslesmis kategori ID'si; yoksa varsayilan SADECE 'varsayilan kategoriyi kullan' acikken."""
     v = kategori_id(pa, ayar, kategori, pid)
-    if v:
+    if v and (pid != "trendruum" or objectid_mi(v)):  # geçersiz (24 karakterlik ID olmayan) eşleştirme yok sayılır, varsayılana düşer
         return v
     if pa.get("varsayilan_kategori_kullan"):
         return str(pa.get("category_id") or "").strip()
@@ -4905,7 +4907,13 @@ def atlama_nedenleri(df, pid):
         if not cat:
             ekle("kategorisi eşleştirilmemiş (varsayılan kategori kapalı)")
         elif pid == "trendruum" and not objectid_mi(cat):
-            ekle("kategori ID geçersiz")
+            ekle("kategori ID geçersiz (24 karakter olmalı)")
+        if pid == "trendruum":
+            _b = tedarikci_marka(ayarlar, r.get("tedarikci"), "trendruum", "brand_id", trendruum_ayar(ayarlar)[0])
+            if not objectid_mi(_b) and not objectid_mi(trendruum_ayar(ayarlar)[0]):
+                ekle("marka ID geçersiz/boş")
+            if not sabit_barkod(str(r.get("barkod", "")).strip(), trendruum_ayar(ayarlar)[2]):
+                ekle("barkodu yok (geçici barkod kapalı)")
     return ", ".join(f"{k}: {v}" for k, v in say.items())
 
 
