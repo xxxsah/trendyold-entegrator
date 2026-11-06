@@ -2709,6 +2709,19 @@ def trendruum_ayar(ayar):
     return str(brand or "").strip(), str(cat or "").strip(), uret, _i(pa.get("kdv"), 20)
 
 
+def _tr_aciklama(r):
+    """Trendruum 'açıklama' alanını zorunlu tutar: tedarikçi açıklaması varsa onu (HTML temizlenmiş), yoksa ürün adını kullanır."""
+    ad = str(r.get("urun_adi") or "").strip()
+    for alan in ("aciklama", "description", "detay"):
+        ham = str(r.get(alan) or "").strip()
+        if ham and ham.lower() != "nan":
+            temiz = re.sub(r"<[^>]+>", " ", ham)
+            temiz = re.sub(r"\s+", " ", html.unescape(temiz)).strip()
+            if len(temiz) >= 10:
+                return temiz[:4000]
+    return ad if len(ad) >= 10 else (ad + " - ürün açıklaması")
+
+
 def trendruum_urun_listesi(df, ayar):
     pa = pa_al(ayar, "trendruum")
     brand_gen, cat_varsayilan, uret, kdv = trendruum_ayar(ayar)
@@ -2728,7 +2741,7 @@ def trendruum_urun_listesi(df, ayar):
             atlanan += 1
             continue
         liste.append({
-            "name": str(r["urun_adi"]), "model_code": kod, "category_id": cat, "brand_id": brand,
+            "name": str(r["urun_adi"]), "description": _tr_aciklama(r), "model_code": kod, "category_id": cat, "brand_id": brand,
             "children_products": [{
                 "barcode": barkod, "stock_code": kod, "price": fiyat,
                 "stock": max(_i(r.get("stok")), 0), "tax": kdv, "images": [gorsel],
