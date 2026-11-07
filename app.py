@@ -1391,6 +1391,9 @@ def sabit_barkod(kod, uret=False):
     return f"869{h:09d}"
 
 
+SON_PAKET = {"ok": [], "hata": []}  # son paketle() çağrısının başarılı/hatalı anahtarları
+
+
 def paketle(kayitlar, paket, fn, ilerleme=None, ad="", durdur=0, bekle=0.0):
     """kayitlar: [(anahtar, veri)]. fn(veri_listesi) -> (basarili_mi, mesaj).
     Her paketin sonucu GERÇEK HTTP durumuna göre sayılır."""
@@ -1430,6 +1433,7 @@ def paketle(kayitlar, paket, fn, ilerleme=None, ad="", durdur=0, bekle=0.0):
             ilerleme(no / toplam, loglar)
         if bekle and i + paket < len(kayitlar):
             time.sleep(bekle)
+    SON_PAKET["ok"], SON_PAKET["hata"] = list(ok_k), list(hata_k)
     return ok_k, hata_k, loglar
 
 
@@ -5003,6 +5007,33 @@ def toplu_urun_paneli(pid):
                      "Genel Ayarlar > Fiyatlandırma'yı açıp kaydedin.")
             df = df[~_zarar]
             huni.append(("Zarar koruması sonrası", len(df)))
+    if not mod.startswith("Tek") and not df.empty:
+        gonderildi_ = {str(x) for x in (kv_oku(f"olusturuldu:{pid}", []) or [])}
+        onek_ = str(pa_al(ayarlar, "hb").get("sku_prefix", "") or "") if pid == "hb" else ""
+        if onek_:
+            gonderildi_ |= {k[len(onek_):] for k in gonderildi_ if k.startswith(onek_)}
+        with st.expander("🛠️ Daha önce gönderdiklerimi sisteme tanıt (tek seferlik)"):
+            st.caption("Bu özellikten önce gönderdiğin ürünler kayıtlı değil. Pazar yeri ilk N ürünü almışsa (ör. N11'de ilk ~6.000), listenin ilk N ürününü 'gönderilmiş' sayabilirsin. "
+                       "Sayıyı pazar yeri panelindeki ürün sayısına göre tahmin et; fazla yazarsan o ürünler atlanır, az yazarsan birkaç ürün tekrar gönderilir (zararsız).")
+            n_say = st.number_input("Listenin ilk kaç ürününü gönderilmiş sayayım?", min_value=0, value=0, step=500, key=f"{pid}_say_n")
+            if st.button("Gönderilmiş say", key=f"{pid}_say_btn") and n_say > 0:
+                ilk_ = {str(b_) for b_ in df["barkod"].astype(str).head(int(n_say))}
+                kv_yaz(f"olusturuldu:{pid}", sorted(gonderildi_ | ilk_))
+                st.success(f"{len(ilk_):,} ürün gönderilmiş sayıldı. Sayfayı yenileyince listeden düşer.")
+                st.rerun()
+        onceki_ = int(df["barkod"].astype(str).isin(gonderildi_).sum())
+        atla_ = st.checkbox(f"⏭️ Daha önce {ad}'e başarıyla gönderilenleri atla (kaldığın yerden devam et)", value=True, key=f"{pid}_atla",
+                            help="Limit yüzünden yarım kalan gönderimi tekrar başlatınca ilk ürünleri yeniden göndermez; sadece henüz gönderilmeyenleri gönderir.")
+        if atla_ and onceki_:
+            df = df[~df["barkod"].astype(str).isin(gonderildi_)]
+            huni.append(("Daha önce gönderilenler çıkarıldıktan sonra kalan", len(df)))
+            st.caption(f"✅ Daha önce gönderilmiş {onceki_:,} ürün atlandı. Gönderilmeyi bekleyen: **{len(df):,}**")
+        limit_ = st.number_input("Bu seferde en fazla kaç ürün gönderilsin? (0 = hepsi)", min_value=0, value=0, step=500, key=f"{pid}_limit",
+                                 help="Pazar yerinin saatlik/günlük limiti varsa buraya limite uygun bir sayı yazın (ör. 4000). Kalanlar sonraki gönderimde devam eder.")
+        if limit_ and len(df) > int(limit_):
+            st.caption(f"Bu seferde ilk {int(limit_):,} ürün gönderilecek; kalan {len(df) - int(limit_):,} ürün sonraki gönderimde.")
+            df = df.head(int(limit_))
+            huni.append(("Bu seferki limit sonrası", len(df)))
     uretici = {
         "n11": n11_urun_listesi, "idefix": idefix_urun_listesi, "trendruum": trendruum_urun_listesi,
         "ptt": ptt_urun_listesi, "hb": hb_urun_listesi,
@@ -5075,7 +5106,15 @@ def toplu_urun_paneli(pid):
 
         try:
             gonder = {"n11": n11_urun_gonder, "idefix": idefix_gonder, "trendruum": trendruum_gonder, "ptt": ptt_urun_gonder, "hb": hb_urun_gonder}[pid]
+            SON_PAKET["ok"], SON_PAKET["hata"] = [], []
             ok, hata, loglar = gonder(ayarlar, liste, ilerleme)
+            try:  # başarıyla iletilen ürünleri hatırla: sonraki gönderimde (limit nedeniyle yarım kaldıysa) atlanır
+                onek_k = str(pa_al(ayarlar, "hb").get("sku_prefix", "") or "") if pid == "hb" else ""
+                yeni_ok = {(k[len(onek_k):] if onek_k and str(k).startswith(onek_k) else str(k)) for k in SON_PAKET["ok"]}
+                if yeni_ok:
+                    kv_yaz(f"olusturuldu:{pid}", sorted({str(x) for x in (kv_oku(f"olusturuldu:{pid}", []) or [])} | yeni_ok))
+            except Exception:
+                pass
         except Exception as e:
             log_yaz(ad, "HATA", f"Ürün gönderimi: {e}")
             st.error(f"Hata: {e}")
