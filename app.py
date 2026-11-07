@@ -777,14 +777,41 @@ def kdv_orani(x, varsayilan=0.20):
     return v if 0 <= v <= 0.5 else varsayilan
 
 
+PERAKENDE_IPUCU = ("perakende", "retail", "piyasa", "liste", "pesin", "etiket")
+BAYI_IPUCU = ("bayi", "toptan", "dealer", "wholesale", "maliyet", "alis", "alış")
+
+
+def bayi_fiyat_alani(kolonlar, secili):
+    """Seçili fiyat alanı perakende/liste fiyatıysa ve XML'de bayi/toptan fiyat alanı da varsa onu döndürür; yoksa None.
+    (Alış fiyatı olarak perakende fiyatı okunursa tüm satış fiyatları şişer.)"""
+    sl = str(secili or "").lower()
+    if not any(i in sl for i in PERAKENDE_IPUCU):
+        return None
+    adaylar = [k for k in kolonlar if any(i in str(k).lower() for i in BAYI_IPUCU)
+               and "fiyat" in str(k).lower() and "." not in str(k) and "variant" not in str(k).lower()]
+    return adaylar[0] if adaylar else None
+
+
 def normalle(tedarikci, df, harita, marj, sabit_ek, kritik_esik=0, stok_ust=0, bilgi=None):
+    bilgi = dict(bilgi or {})
+    _fk0 = (harita or {}).get("fiyat", "(yok)")
+    _bayi = bayi_fiyat_alani(df.columns, _fk0)
+    if _bayi:  # yanlış (perakende) fiyat alanı seçilmiş: bayi/toptan alanını kullan
+        harita = dict(harita)
+        harita["fiyat"] = _bayi
+        if "kdv_ekle" not in bilgi and any(str(k).lower() in ("kdvorani", "kdv", "vat") for k in df.columns):
+            bilgi["kdv_ekle"] = True  # bayi fiyatı KDV hariç gelir; KDV alanı varsa eklenir (ayarda kdv_ekle'yi kapatırsanız uygulanmaz)
+        try:
+            log_yaz(tedarikci, "BILGI", f"Fiyat alanı '{_fk0}' (perakende) yerine '{_bayi}' (bayi/toptan) kullanıldı.")
+        except Exception:
+            pass
+
     def kol(ad):
         k = harita.get(ad, "(yok)")
         if k == "(yok)" or k not in df.columns:
             return pd.Series([""] * len(df), index=df.index)
         return df[k]
 
-    bilgi = bilgi or {}
     kontrol = bool(bilgi.get("doviz_kontrol"))
     kdv_ekle = bool(bilgi.get("kdv_ekle"))
     ozet = None
@@ -4719,7 +4746,7 @@ def tedarikci_sayfasi():
                 "kod": sec("Barkod / SKU", ["barkod", "barcode", "sku", "stokkod", "kod", "id"], "kod"),
                 "ad": sec("Ürün Adı", ["urunadi", "ürünadı", "name", "title", "ad", "baslik"], "ad"),
                 "stok": sec("Stok", ["stok", "stock", "quantity", "adet", "miktar"], "stok"),
-                "fiyat": sec("Alış Fiyatı", ["fiyat", "price", "alis", "alış"], "fiyat"),
+                "fiyat": sec("Alış Fiyatı", ["bayi", "toptan", "dealer", "wholesale", "alis", "alış", "fiyat", "price"], "fiyat"),
                 "gorsel": sec("Görsel", ["image_1", "resim", "image", "gorsel", "görsel", "picture", "foto"], "gorsel"),
                 "kategori": sec("Kategori", ["kategori", "category", "cat", "tur", "grup", "maincategory"], "kategori"),
             }
