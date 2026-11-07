@@ -6,6 +6,7 @@ Gizli bilgiler için öncelik sırası: ortam değişkeni > st.secrets > ayarlar
 """
 import base64
 import gzip
+import zlib
 import hashlib
 import hmac
 import html
@@ -529,7 +530,10 @@ def indir(url, okuma_sn=300, deneme=2):
                     parcalar.append(p)
             veri = b"".join(parcalar)
             if veri[:2] == b"\x1f\x8b":
-                veri = gzip.decompress(veri)
+                d_ = zlib.decompressobj(16 + zlib.MAX_WBITS)  # sınırlı açma: sıkıştırılmış dev dosya belleği şişirmesin
+                veri = d_.decompress(veri, MAKS_XML_BOYUT)
+                if d_.unconsumed_tail:
+                    raise ValueError("Sıkıştırılmış XML açıldığında çok büyük (300 MB üstü).")
             return veri
         except (requests.Timeout, requests.ConnectionError) as e:
             son_hata = e
@@ -1101,6 +1105,13 @@ def tedarikci_senkron(ad, bilgi, kritik_esik=0, stok_ust=0, zorla=False):
     if kayip:
         log_yaz(ad, "BILGI", f"{kayip} ürün tedarikçi XML'inde artık yok; pazar yerlerinde satışta kalmasın diye stokları 0 yapıldı.")
     yedeklendi = False
+    if zorla:  # 'Düşüşü kabul et': eski sağlıklı yedek artık geçersiz, geri yüklenmesin
+        try:
+            with closing(baglan()) as c_y:
+                c_y.execute("DELETE FROM stok_yedek WHERE tedarikci = ?", (ad,))
+                c_y.commit()
+        except Exception:
+            pass
     try:
         yedeklendi = stok_yedegi_al(ad, df)
     except Exception:
@@ -3173,6 +3184,9 @@ def pazara_gonder(ayar, pid, df, ilerleme=None, tam=True):
             raise RuntimeError(f"{ad} için entegrasyon yok.")
         if not pazar_bagli(ayar, pid):
             raise RuntimeError(f"{ad} API bilgileri eksik.")
+        if not df.empty and "barkod" in df.columns and df["barkod"].duplicated().any():  # aynı barkod iki tedarikçide: stoğu yüksek olan tek kayıt gitsin
+            _sk = pd.to_numeric(df.get("stok"), errors="coerce").fillna(0) if "stok" in df.columns else 0
+            df = df.assign(_sk=_sk).sort_values("_sk", ascending=False, kind="stable").drop_duplicates("barkod", keep="first").drop(columns="_sk").reset_index(drop=True)
         df = fiyat_artis_uygula(ayar, pid, df)
         kara = kara_liste_maskesi(ayar, df) | stok_sifir_maskesi(ayar, df)
         if kara.any():  # kara listedeki ürünler pazarda satıştan kalksın (stok 0)
@@ -3350,7 +3364,15 @@ def tumunu_senkronla(oto=True, zorla=False):
                 log_yaz(ad, "HATA", e)
                 sonuclar.append((ad, False, str(e)))
         kurtarildi = False
-        if oto and ayar.get("oto_stok_kurtarma", True):
+        if oto and not ayar.get("oto_stok_kurtarma", False):  # varsayılan KAPALI: tedarikçide gerçekten biten stoklar eski haline döndürülmesin
+            try:
+                toplam_, stoklu_, yedek_ = stok_saglik()
+                if stok_sorunlu_mu(toplam_, stoklu_, yedek_):
+                    log_yaz("Sistem", "UYARI", "Ürünlerin çoğu 0 stoklu görünüyor ama son sağlıklı kayıtta çok ürün stoklu idi. Otomatik geri yükleme KAPALI; doğruysa Ana Sayfa'daki 'Son sağlıklı stokları geri yükle' düğmesini kullanın.")
+                    bildir("Ürünlerin çoğu 0 stoklu görünüyor. Otomatik geri yükleme kapalı; panelden kontrol edin.", tekil="stok_sifir_uyari", bekleme_dk=180)
+            except Exception:
+                pass
+        if oto and ayar.get("oto_stok_kurtarma", False):
             try:
                 toplam_, stoklu_, yedek_ = stok_saglik()
                 if stok_sorunlu_mu(toplam_, stoklu_, yedek_):
@@ -3741,8 +3763,15 @@ def sifre_al():
     return None
 
 
+def _oturum_surumu():
+    try:
+        return str(kv_oku("oturum_surumu", 0))
+    except Exception:
+        return "0"
+
+
 def _imza(sifre, ts):
-    return hmac.new(str(sifre).encode(), f"oturum:{ts}".encode(), hashlib.sha256).hexdigest()
+    return hmac.new(str(sifre).encode(), f"oturum:{ts}:{_oturum_surumu()}".encode(), hashlib.sha256).hexdigest()
 
 
 def oturum_jetonu(sifre):
@@ -3812,6 +3841,10 @@ def ac_kapa(pid):
 
 def cikis_yap():
     st.session_state.giris_ok = False
+    try:  # çıkışta daha önce verilmiş tüm giriş bağlantıları (?t=...) geçersiz olsun
+        kv_yaz("oturum_surumu", int(kv_oku("oturum_surumu", 0) or 0) + 1)
+    except Exception:
+        pass
     try:
         st.query_params.clear()
     except Exception:
@@ -3839,6 +3872,11 @@ def giris_ekrani(sifre):
             girilen = st.text_input("🔑 Yönetici Şifresi", type="password", placeholder="••••••••")
             buton = gen(st.form_submit_button, "Giriş Yap", type="primary")
         if buton:
+            simdi_g = time.time()
+            son_hatalar = [t_ for t_ in (kv_oku("giris_hatalari", []) or []) if simdi_g - float(t_) < 900]
+            if len(son_hatalar) >= 10:  # 15 dakikada 10 hatalı deneme: yeni sekme açmak sayacı sıfırlamaz
+                st.error("⛔ Çok fazla hatalı deneme. 15 dakika sonra tekrar deneyin.")
+                st.stop()
             hatalar = st.session_state.get("hatali_giris", 0)
             if hatalar >= 5:  # kaba kuvvet yavaşlatma
                 time.sleep(min(2 ** (hatalar - 4), 30))
@@ -3849,6 +3887,10 @@ def giris_ekrani(sifre):
                 st.rerun()
             else:
                 st.session_state.hatali_giris = hatalar + 1
+                try:
+                    kv_yaz("giris_hatalari", son_hatalar + [simdi_g])
+                except Exception:
+                    pass
                 st.error("❌ Hatalı şifre.")
     st.stop()
 
@@ -6093,6 +6135,10 @@ def main():
     st.session_state.setdefault("sayfa", "Anasayfa")
     st.session_state.setdefault("acik_pazar", None)
 
+    kapali_oto = [adx for adx, anah, pidx in OTO_ANAHTAR if pazar_bagli(ayarlar, pidx) and not ayarlar.get(anah)]
+    if kapali_oto:
+        st.warning("⚠️ Otomatik stok/fiyat güncelleme KAPALI: " + ", ".join(kapali_oto)
+                   + ". Tedarikçiden stok gelse bile bu pazarlara kendiliğinden gitmez. Açmak için o pazarın 'Genel Ayarları' sayfasındaki 'her senkronizasyondan sonra otomatik güncelle' düğmesini açın.")
     st.sidebar.title("🦅 ŞahEntegre")
     if sifre:
         gen(st.sidebar.button, "🚪 Çıkış Yap", key="btn_cikis_yap", type="secondary", on_click=cikis_yap)
@@ -6124,7 +6170,7 @@ def main():
         urunler_sayfasi()
     elif sayfa == "Kritik":
         st.title("🔄 Oto Kritik Stok")
-        st.caption("Bu eşik, her tedarikçi senkronizasyonunda uygulanır: stok eşiğin altındaysa 0 gönderilir.")
+        st.caption("Bu eşik, her tedarikçi senkronizasyonunda uygulanır: stok eşiğe eşit ya da eşiğin altındaysa 0 gönderilir (ör. eşik 3 ise 3 adet de 0 gider).")
         esik = st.number_input("Kritik stok eşiği:", 0, 50, _i(ayarlar.get("kritik_esik")))
         if int(esik) != _i(ayarlar.get("kritik_esik")):
             ayarlar["kritik_esik"] = int(esik)
