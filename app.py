@@ -5901,13 +5901,15 @@ def urunler_sayfasi():
     _fs_acik = bool(fiyat_sistemi(ayarlar))
     if not _fs_acik:
         st.error("⚠️ FİYAT SİSTEMİ KAPALI: pazarlara tedarikçi (alış) fiyatı gider! Pazar Yerleri → Genel Ayarlar → Fiyat sistemi'ni açıp Kaydet'e basın.")
-    _gp = None
-    try:
-        _pz = next((x for x in GUNCELLEYICI if pazar_bagli(ayarlar, x)), None)
-        if _pz and len(f):
-            _gp = fiyat_artis_uygula(ayarlar, _pz, f.copy())["satis_fiyati"].map(_f).round(2).values
-    except Exception:
-        _gp = None
+    # Her bağlı pazar için ayrı fiyat sütunu (hangi pazara hangi fiyat gittiği yan yana görünsün)
+    _pazar_fiyat = {}
+    _sira = ["hb", "trendyol", "n11", "idefix", "ptt", "trendruum"]
+    for _pz in [x for x in _sira if x in GUNCELLEYICI and pazar_bagli(ayarlar, x)]:
+        try:
+            if len(f):
+                _pazar_fiyat[f"{PAZAR_AD.get(_pz, _pz)} fiyatı"] = fiyat_artis_uygula(ayarlar, _pz, f.copy())["satis_fiyati"].map(_f).round(2).values
+        except Exception:
+            pass
     if gorunum.startswith("Tablo"):
         v = pd.DataFrame({
             "Görsel": f["gorsel"].where(f["gorsel"].astype(str).str.startswith("http"), None),
@@ -5918,10 +5920,11 @@ def urunler_sayfasi():
             "Kilit": [("🔒" if b in kilit else "") + ("💲" if b in fiyat_kilit else "")
                       for b in f["barkod"].astype(str)],
         })
-        if _gp is not None:
-            v.insert(v.columns.get_loc("Satış") + 1, "Pazara giden", _gp)
+        _yer = v.columns.get_loc("Satış") + 1
+        for _sn, (_ad, _deg) in enumerate(_pazar_fiyat.items()):
+            v.insert(_yer + _sn, _ad, _deg)
         ayar_kol = {
-            "Pazara giden": st.column_config.NumberColumn("Pazara giden", format="%.2f ₺", help="Pazaryerine gönderilecek hesaplanmış satış fiyatı"),
+            **{_ad: st.column_config.NumberColumn(_ad, format="%.2f ₺", help="Bu pazar yerine gönderilecek hesaplanmış satış fiyatı (o pazarın komisyonuyla)") for _ad in _pazar_fiyat},
             "Görsel": st.column_config.ImageColumn("Görsel", width="small"),
             "Ürün": st.column_config.TextColumn("Ürün", width="large"),
             "Alış": st.column_config.NumberColumn("Alış", format="%.2f ₺"),
