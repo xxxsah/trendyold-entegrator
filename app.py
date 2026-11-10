@@ -5862,19 +5862,26 @@ def galeri_goster(f, kilit, sayfa_boy=24):
     st.caption(f"Sayfa {sayfa}/{sayfa_say} · {toplam:,} ürün")
 
 
-RISKLI_MARKALAR = (
-    "apple", "iphone", "airpods", "samsung", "xiaomi", "redmi", "huawei", "oppo", "realme", "vivo", "oneplus", "honor",
-    "dux ducis", "baseus", "ugreen", "anker", "hoco", "remax", "torima", "jbl", "sony", "philips", "logitech", "razer",
-    "lg", "hp", "lenovo", "asus", "dell", "canon", "nikon", "gopro", "dyson", "braun", "tefal", "bosch", "arzum", "karaca",
-    "nike", "adidas", "puma", "lacoste", "gucci", "louis vuitton", "chanel", "versace", "calvin klein", "tommy", "levi", "converse",
-    "rolex", "casio", "fossil", "lego", "disney", "marvel", "barbie", "hello kitty", "nintendo", "playstation", "xbox", "stanley",
+# Gerçek ürün/üretici markaları: başlığın başında geçiyorsa ürün o markanındır (marka alanı farklıysa risk)
+URETICI_MARKALAR = (
+    "dux ducis", "baseus", "ugreen", "anker", "hoco", "remax", "torima", "gor", "jbl", "sony", "philips", "logitech", "razer",
+    "dyson", "braun", "tefal", "bosch", "arzum", "karaca", "stanley", "nike", "adidas", "puma", "lacoste", "gucci", "louis vuitton",
+    "chanel", "versace", "calvin klein", "tommy", "levi", "converse", "rolex", "casio", "fossil", "lego", "disney", "marvel",
+    "barbie", "hello kitty", "mattel", "hasbro", "playmobil", "canon", "nikon", "gopro",
 )
+# Telefon / cihaz marka-model adları: çoğu 'iPhone 15 kılıf', 'Vivo Y20 cam' gibi uyumluluk bilgisidir; varsayılan olarak taranmaz
+CIHAZ_MARKALARI = (
+    "apple", "iphone", "airpods", "samsung", "xiaomi", "redmi", "huawei", "oppo", "realme", "vivo", "oneplus", "honor",
+    "lg", "hp", "lenovo", "asus", "dell", "nintendo", "playstation", "xbox",
+)
+RISKLI_MARKALAR = URETICI_MARKALAR + CIHAZ_MARKALARI
 
 
-def marka_risk_tara(df, ilk_kelime=4):
-    """Başlığında bilinen marka adı geçen ürünleri bulur. ilk_kelime: yalnız başlığın ilk N kelimesine bakar (asıl marka olma ihtimali yüksek);
-    0 verilirse tüm başlığa bakar. Dönüş: {marka: [(barkod, başlık), ...]}"""
-    kalip = re.compile(r"(?<![a-z0-9])(" + "|".join(re.escape(m) for m in sorted(RISKLI_MARKALAR, key=len, reverse=True)) + r")(?![a-z0-9])")
+def marka_risk_tara(df, ilk_kelime=4, cihaz_dahil=False):
+    """Başlığında bilinen marka adı geçen ürünleri bulur. ilk_kelime: yalnız başlığın ilk N kelimesine bakar; 0 = tüm başlık.
+    cihaz_dahil=False iken telefon/cihaz adları (iPhone, Samsung, Vivo...) sayılmaz. Dönüş: {marka: [(barkod, başlık), ...]}"""
+    liste = RISKLI_MARKALAR if cihaz_dahil else URETICI_MARKALAR
+    kalip = re.compile(r"(?<![a-z0-9])(" + "|".join(re.escape(m) for m in sorted(liste, key=len, reverse=True)) + r")(?![a-z0-9])")
     out = {}
     for barkod, ad in zip(df["barkod"].astype(str), df["urun_adi"].astype(str)):
         n = tr_norm(ad)
@@ -5891,10 +5898,11 @@ def marka_risk_tarayici(df):
                    "Bu araç başlıklarda bilinen marka adlarını arar. Çıkan her ürün sorunlu değildir (örneğin 'Samsung uyumlu kılıf'); listeye bakıp karar verin. "
                    "Seçtiğiniz markaların ürünleri satıştan kaldırılır (stok 0 + kilit); ürün silinmez, istediğinizde kilit kaldırılır.")
         k1, k2 = st.columns([2, 1])
-        dar = k1.checkbox("Sadece başlığın ilk 4 kelimesinde geçenler (uyumluluk yazıları az çıkar)", value=True, key="mr_dar")
+        dar = k1.checkbox("Sadece başlığın ilk 4 kelimesinde geçenler", value=True, key="mr_dar")
+        cihaz = k1.checkbox("Telefon/cihaz adlarını da say (iPhone, Samsung, Vivo...; çoğu sadece uyumluluk bilgisidir)", value=False, key="mr_cihaz")
         if gen(k2.button, "🔍 Tara", key="mr_tara"):
             with st.spinner("Taranıyor..."):
-                st.session_state["mr_sonuc"] = marka_risk_tara(df, 4 if dar else 0)
+                st.session_state["mr_sonuc"] = marka_risk_tara(df, 4 if dar else 0, cihaz)
         sonuc = st.session_state.get("mr_sonuc")
         if sonuc is None:
             return
