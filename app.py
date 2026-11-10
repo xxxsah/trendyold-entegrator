@@ -5559,10 +5559,27 @@ def siparis_karti_css():
 </style>"""
 
 
+_SIP_TED = {}  # barkod -> tedarikçi adı (sipariş kartında "kimden alınacak" göstermek için)
+
+
+def siparis_ted_doldur(urunler_df):
+    """Sipariş sayfaları açılırken çağrılır; ürünlerin hangi tedarikçiden geldiğini hafızaya alır."""
+    _SIP_TED.clear()
+    try:
+        if urunler_df is not None and not urunler_df.empty:
+            _SIP_TED.update(urunler_df.groupby("barkod")["tedarikci"].first().astype(str).to_dict())
+    except Exception:
+        pass
+
+
 def siparis_stok_html(u, stok_harita, onek):
     t = siparis_stok_metni(u, stok_harita, onek).replace("**", "").replace("⚠️ ", "")
     sinif = "ok" if (": " in t and t.split(": ")[-1].strip().isdigit() and int(t.split(": ")[-1]) > 0) else "kotu"
-    return f'<span class="{sinif}">{_e(t)}</span>'
+    sku = str(u.get("sku") or "")
+    ham_sku = sku[len(onek):] if (onek and sku.startswith(onek)) else sku
+    ted = _SIP_TED.get(ham_sku) or _SIP_TED.get(sku)
+    ted_html = f' · <b>🏬 Tedarikçi: {_e(ted)}</b>' if ted else ""
+    return f'<span class="{sinif}">{_e(t)}</span>{ted_html}'
 
 
 def siparis_aktar_metni(o):
@@ -5650,6 +5667,7 @@ def ana_siparis_kutulari():
         _u = urunleri_oku()
         if not _u.empty:
             stok_harita = _u.groupby("barkod")["stok"].max().to_dict()
+        siparis_ted_doldur(_u)
     except Exception:
         pass
     kutular = list(PAZAR.keys())
@@ -5779,6 +5797,7 @@ def pazar_siparis(pid):
         _u = urunleri_oku()
         if not _u.empty:
             stok_harita = _u.groupby("barkod")["stok"].max().to_dict()
+        siparis_ted_doldur(_u)
     except Exception:
         pass
     onek = str(pa_al(ayarlar, "hb").get("sku_prefix", "") or "") if pid == "hb" else ""
@@ -5841,6 +5860,61 @@ def galeri_goster(f, kilit, sayfa_boy=24):
             f'<div class="st">{stok_h} · {_f(row.get("satis_fiyati")):.2f} ₺</div></div>')
     st.markdown('<div class="sg">' + "".join(kartlar) + "</div>", unsafe_allow_html=True)
     st.caption(f"Sayfa {sayfa}/{sayfa_say} · {toplam:,} ürün")
+
+
+RISKLI_MARKALAR = (
+    "apple", "iphone", "airpods", "samsung", "xiaomi", "redmi", "huawei", "oppo", "realme", "vivo", "oneplus", "honor",
+    "dux ducis", "baseus", "ugreen", "anker", "hoco", "remax", "torima", "jbl", "sony", "philips", "logitech", "razer",
+    "lg", "hp", "lenovo", "asus", "dell", "canon", "nikon", "gopro", "dyson", "braun", "tefal", "bosch", "arzum", "karaca",
+    "nike", "adidas", "puma", "lacoste", "gucci", "louis vuitton", "chanel", "versace", "calvin klein", "tommy", "levi", "converse",
+    "rolex", "casio", "fossil", "lego", "disney", "marvel", "barbie", "hello kitty", "nintendo", "playstation", "xbox", "stanley",
+)
+
+
+def marka_risk_tara(df, ilk_kelime=4):
+    """Başlığında bilinen marka adı geçen ürünleri bulur. ilk_kelime: yalnız başlığın ilk N kelimesine bakar (asıl marka olma ihtimali yüksek);
+    0 verilirse tüm başlığa bakar. Dönüş: {marka: [(barkod, başlık), ...]}"""
+    kalip = re.compile(r"(?<![a-z0-9])(" + "|".join(re.escape(m) for m in sorted(RISKLI_MARKALAR, key=len, reverse=True)) + r")(?![a-z0-9])")
+    out = {}
+    for barkod, ad in zip(df["barkod"].astype(str), df["urun_adi"].astype(str)):
+        n = tr_norm(ad)
+        if ilk_kelime:
+            n = " ".join(n.split()[:ilk_kelime])
+        for m in set(kalip.findall(n)):
+            out.setdefault(m, []).append((barkod, ad))
+    return out
+
+
+def marka_risk_tarayici(df):
+    with st.expander("⚠️ Marka riski tarayıcı (başlığında tanınmış marka adı geçen ürünler)"):
+        st.caption("Başka bir markanın adını taşıyan ürünler, pazar yerlerinde 'hatalı marka / orijinal olmayan ürün' ihlaline yol açabilir. "
+                   "Bu araç başlıklarda bilinen marka adlarını arar. Çıkan her ürün sorunlu değildir (örneğin 'Samsung uyumlu kılıf'); listeye bakıp karar verin. "
+                   "Seçtiğiniz markaların ürünleri satıştan kaldırılır (stok 0 + kilit); ürün silinmez, istediğinizde kilit kaldırılır.")
+        k1, k2 = st.columns([2, 1])
+        dar = k1.checkbox("Sadece başlığın ilk 4 kelimesinde geçenler (uyumluluk yazıları az çıkar)", value=True, key="mr_dar")
+        if gen(k2.button, "🔍 Tara", key="mr_tara"):
+            with st.spinner("Taranıyor..."):
+                st.session_state["mr_sonuc"] = marka_risk_tara(df, 4 if dar else 0)
+        sonuc = st.session_state.get("mr_sonuc")
+        if sonuc is None:
+            return
+        if not sonuc:
+            st.success("Bilinen marka adı taşıyan ürün bulunmadı.")
+            return
+        tablo = pd.DataFrame({"Marka": list(sonuc), "Ürün": [len(v) for v in sonuc.values()],
+                              "Örnek başlık": [v[0][1][:90] for v in sonuc.values()]}).sort_values("Ürün", ascending=False).reset_index(drop=True)
+        st.dataframe(tablo, hide_index=True, use_container_width=True)
+        secili = st.multiselect("Satıştan kaldırılacak markalar", list(tablo["Marka"]), key="mr_sec")
+        barkodlar = sorted({b for m in secili for b, _ in sonuc[m]})
+        if barkodlar:
+            st.warning(f"{len(barkodlar):,} ürünün stoğu 0 yapılıp kilitlenecek ve bağlı pazar yerlerine gönderilecek.")
+            onay = st.checkbox("Onaylıyorum", key="mr_onay")
+            if gen(st.button, "🔒 Seçili markaların ürünlerini satıştan kaldır", key="mr_btn", disabled=not onay):
+                sonuc_g = stok_sifirla(ayarlar, barkodlar, True)
+                st.session_state["urun_sifir_sonuc"] = [f"{len(barkodlar):,} ürünün stoğu sıfırlandı ve kilitlendi."] + [
+                    f"{ad}: {ok} gönderildi" + (f", hata: {h}" if h else "") for ad, ok, h in sonuc_g]
+                st.session_state.pop("mr_sonuc", None)
+                st.rerun()
 
 
 def urunler_sayfasi():
@@ -6008,6 +6082,7 @@ def urunler_sayfasi():
         if len(f) > sayi and gen(st.button, f"⬇️ Daha fazla göster ({min(sayi, len(f))}/{len(f)})", key="urun_daha_fazla"):
             st.session_state["urun_kart_sayi"] = sayi + 48
             st.rerun()
+    marka_risk_tarayici(df)
     with st.expander("🔎 Stok neden 0? (teşhis)"):
         st.caption("Tedarikçi başına stok dağılımı: 'Stok 0' çoksa ya XML'de stok gerçekten yok, ya kritik eşik/kilit/kara liste sıfırlıyor.")
         dag = tedarikci_stok_dagilimi(_i(ayarlar.get("kritik_esik")))
