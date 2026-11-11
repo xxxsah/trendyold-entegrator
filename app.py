@@ -2635,44 +2635,72 @@ def ptt_kategori_gez():
 
 
 def ptt_oto_dugumler(ayar):
-    """PTT uç kategorileri (otomatik öneri için). Önce tüm ağaç; olmazsa ana kategorilerden inerek gezer. Oturumda saklanır."""
+    """PTT uç kategorileri (otomatik öneri için). Ağaç ucu 400 verirse ana kategorilerden paralel inerek gezer.
+    Sonuç diske de kaydedilir (yeniden başlatmada tekrar taranmaz)."""
+    import concurrent.futures as cf
+    import time as _t
     onbellek = st.session_state.get("ptt_oto_agac")
     if onbellek:
         return onbellek
+    dosya = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ptt_kategori_onbellek.json")
     liste = []
     try:
-        liste = ptt_kategori_duzlestir(ptt_kategori_agaci(ayar))
+        with open(dosya, encoding="utf-8") as f:
+            liste = json.load(f)
     except Exception:
         liste = []
+    if not liste:
+        try:
+            liste = ptt_kategori_duzlestir(ptt_kategori_agaci(ayar))
+        except Exception:
+            liste = []
     if not liste:
         kod, j, _ham = ptt_kategori_getir(ayar, "main")
         if kod != 200 or j is None:
             raise RuntimeError(f"PTT ana kategori listesi alınamadı (HTTP {kod}). API bilgilerini kontrol edin.")
-        kuyruk = [(x["ID"], x["Kategori"]) for x in ptt_kategori_duzlestir(j)]
-        gorulen, istek = set(), 0
-        while kuyruk and istek < 600:
-            cid, yol = kuyruk.pop(0)
-            if cid in gorulen or not str(cid).isdigit():
-                continue
-            gorulen.add(cid)
-            istek += 1
+        seviye = [(x["ID"], x["Kategori"]) for x in ptt_kategori_duzlestir(j) if str(x["ID"]).isdigit()]
+        gorulen = set()
+        bitis = _t.time() + 150  # en çok 2,5 dk
+
+        def ac(oge):
+            cid, yol = oge
             try:
-                kod, j, _ham = ptt_kategori_getir(ayar, cid)
+                kod_, j_, _h = ptt_kategori_getir(ayar, cid)
             except Exception:
-                kod, j = 0, None
-            alt = [x for x in (ptt_kategori_duzlestir(j) if (kod == 200 and j is not None) else []) if x["ID"] != str(cid)]
-            if not alt:
-                liste.append({"ID": str(cid), "Kategori": yol, "Alt kategorisi var": False})
-                continue
-            for x in alt:
-                kuyruk.append((x["ID"], yol + " > " + x["Kategori"].split(" > ")[-1]))
+                return oge, None
+            if kod_ != 200 or j_ is None:
+                return oge, None
+            return oge, [x for x in ptt_kategori_duzlestir(j_) if x["ID"] != str(cid)]
+
+        while seviye and _t.time() < bitis:
+            seviye = [o for o in seviye if o[0] not in gorulen]
+            gorulen.update(o[0] for o in seviye)
+            sonraki = []
+            with cf.ThreadPoolExecutor(max_workers=8) as ex:
+                for oge, alt in ex.map(ac, seviye):
+                    if alt is None:
+                        continue  # alınamadı: ne uç ne ara düğüm say
+                    if not alt:
+                        liste.append({"ID": str(oge[0]), "Kategori": oge[1], "Alt kategorisi var": False})
+                        continue
+                    for x in alt:
+                        if str(x["ID"]).isdigit():
+                            sonraki.append((x["ID"], oge[1] + " > " + x["Kategori"].split(" > ")[-1]))
+            seviye = sonraki
+        if liste:
+            try:
+                with open(dosya, "w", encoding="utf-8") as f:
+                    json.dump(liste, f, ensure_ascii=False)
+            except Exception:
+                pass
     out = []
     for k in liste:
         if k.get("Alt kategorisi var"):
             continue
         out.append({"ID": k["ID"], "yol": k["Kategori"], "son": kat_belirtec(k["Kategori"].split(">")[-1]), "tum": kat_belirtec(k["Kategori"])})
     if not out:
-        raise RuntimeError("PTT kategori listesi okunamadı.")
+        raise RuntimeError("PTT kategori listesi okunamadı (ana kategoriler alındı ama alt kategoriler gelmedi). "
+                           "'Ana kategorileri getir' ile bir kategori açıp ekran görüntüsünü gönderin.")
     st.session_state["ptt_oto_agac"] = out
     return out
 
