@@ -4512,6 +4512,25 @@ def oto_esleme(pid, pa, adet, mevcut):
             r["Onayla"] = var and (toplu == "tum" or (toplu == "orta" and r.get("Güven") in ("Yüksek", "Orta")))
         st.session_state[sv] = st.session_state.get(sv, 0) + 1
         st.rerun()
+    st.caption("Tablodaki kutulara bakmadan doğrudan kaydetmek için (ID'si olan tüm önerileri, 300 satırla sınırlı kalmadan kaydeder):")
+    k1, k2 = st.columns(2)
+    dogrudan = None
+    if gen(k1.button, "💾 Orta + yüksek güvenlileri HEMEN kaydet", key=f"oto_hk_orta_{pid}"):
+        dogrudan = ("Yüksek", "Orta")
+    if gen(k2.button, "💾 TÜMÜNÜ (düşük dahil) HEMEN kaydet", key=f"oto_hk_tum_{pid}"):
+        dogrudan = ("Yüksek", "Orta", "Düşük")
+    if dogrudan:
+        yeni_d = dict(mevcut)
+        n_d = 0
+        for r in sat:
+            if r.get("Güven") in dogrudan and str(r.get("ID", "")).strip():
+                yeni_d[str(r["Tedarikçi kategorisi"])] = str(r["ID"]).strip()
+                n_d += 1
+        pa["kategori_eslesme"] = yeni_d
+        ayar_yaz(ayarlar)
+        st.session_state[f"oneri_{pid}"] = None
+        st.session_state[f"oto_bildirim_{pid}"] = f"{n_d} kategori eşleştirmesi kaydedildi (toplam {len(yeni_d)})."
+        st.rerun()
     duz = st.data_editor(d, hide_index=True, key=f"oto_{pid}_{len(d)}_{st.session_state.get(sv, 0)}",
                          disabled=["Tedarikçi kategorisi", "Ürün", "Önerilen kategori", "Güven", "ID"])
     if gen(st.button, "İşaretlenenleri kaydet", key=f"oto_kaydet_{pid}"):
@@ -4544,6 +4563,29 @@ def kategori_esleme_editoru(pid):
                  f"({pa.get('category_id') or 'varsayılan'}) kategorisine gider. Bunu kapatın (Genel Ayarlar); eşleşmeyenler gönderilmeden atlanır.")
     if pid in ("trendruum", "hb", "idefix", "n11", "ptt"):
         oto_esleme(pid, pa, adet, mevcut)
+    st.markdown("**Kelimeyle toplu atama** (çok sayıda kategoriyi tek seferde aynı pazar kategorisine bağlar)")
+    st.caption("Örnek: kutuya 'çorap' yazın, PTT'deki çorap kategorisinin ID'sini girin; adında çorap geçen tüm kategoriler o ID'ye gider. "
+               "Birden fazla kelimeyi virgülle ayırabilirsiniz (çorap, patik). Yalnızca henüz ID'si girilmemiş kategoriler değişir.")
+    tk1, tk2 = st.columns([3, 2])
+    kelimeler = [tr_norm(x).strip() for x in tk1.text_input("Kategori adında geçen kelime(ler)", key=f"toplu_kel_{pid}").split(",") if x.strip()]
+    toplu_id = tk2.text_input("Pazar yeri kategori ID", key=f"toplu_id_{pid}").strip()
+    if kelimeler:
+        esl = [k for k in adet.index if not mevcut.get(k) and any(w in tr_norm(k) for w in kelimeler)]
+        st.write(f"Eşleşen kategori: **{len(esl)}** · ürün: **{int(sum(adet[k] for k in esl)):,}**")
+        if esl:
+            with st.expander("Hangi kategoriler?"):
+                st.dataframe(pd.DataFrame({"Kategori": esl[:200], "Ürün": [int(adet[k]) for k in esl[:200]]}), hide_index=True)
+        gecerli = bool(toplu_id) and (objectid_mi(toplu_id) if pid == "trendruum" else (toplu_id.isdigit() if pid == "ptt" else True))
+        if toplu_id and not gecerli:
+            st.warning("ID biçimi bu pazar yeri için geçersiz" + (" (PTT'de sayı olmalı)." if pid == "ptt" else "."))
+        if esl and gecerli and gen(st.button, f"✅ {len(esl)} kategoriyi {toplu_id} ID'sine ata", key=f"toplu_ata_{pid}"):
+            yeni_t = dict(mevcut)
+            for k in esl:
+                yeni_t[k] = toplu_id
+            pa["kategori_eslesme"] = yeni_t
+            ayar_yaz(ayarlar)
+            st.session_state[f"oto_bildirim_{pid}"] = f"{len(esl)} kategori {toplu_id} ID'sine atandı (toplam {len(yeni_t)})."
+            st.rerun()
     st.markdown("**Elle eşleştirme**")
     ara = st.text_input("Kategori ara (filtre)", key=f"kat_ara_{pid}")
     liste = [k for k in adet.index if not ara.strip() or tr_norm(ara) in tr_norm(k)]
