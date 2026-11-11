@@ -4497,7 +4497,22 @@ def oto_esleme(pid, pa, adet, mevcut):
         return
     d = pd.DataFrame(sat).head(300)
     st.caption(f"{len(sat)} eşleşmemiş kategori için öneri hazır. 'Yüksek' güvenliler işaretli geldi; 'Orta/Düşük' olanları kendiniz kontrol edip işaretleyin.")
-    duz = st.data_editor(d, hide_index=True, key=f"oto_{pid}_{len(d)}",
+    sv = f"oto_surum_{pid}"
+    b1, b2, b3 = st.columns(3)
+    toplu = None
+    if gen(b1.button, "☑️ Tümünü işaretle", key=f"oto_tum_{pid}"):
+        toplu = "tum"
+    if gen(b2.button, "☑️ Orta ve yükseği işaretle", key=f"oto_orta_{pid}"):
+        toplu = "orta"
+    if gen(b3.button, "⬜ Hiçbirini işaretleme", key=f"oto_hic_{pid}"):
+        toplu = "hic"
+    if toplu:
+        for r in sat:
+            var = bool(str(r.get("ID", "")).strip())  # önerisi olmayan satır işaretlenmez
+            r["Onayla"] = var and (toplu == "tum" or (toplu == "orta" and r.get("Güven") in ("Yüksek", "Orta")))
+        st.session_state[sv] = st.session_state.get(sv, 0) + 1
+        st.rerun()
+    duz = st.data_editor(d, hide_index=True, key=f"oto_{pid}_{len(d)}_{st.session_state.get(sv, 0)}",
                          disabled=["Tedarikçi kategorisi", "Ürün", "Önerilen kategori", "Güven", "ID"])
     if gen(st.button, "İşaretlenenleri kaydet", key=f"oto_kaydet_{pid}"):
         yeni = dict(mevcut)
