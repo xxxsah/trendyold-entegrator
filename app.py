@@ -2634,6 +2634,49 @@ def ptt_kategori_gez():
             st.text(g["ham"])
 
 
+def ptt_oto_dugumler(ayar):
+    """PTT uç kategorileri (otomatik öneri için). Önce tüm ağaç; olmazsa ana kategorilerden inerek gezer. Oturumda saklanır."""
+    onbellek = st.session_state.get("ptt_oto_agac")
+    if onbellek:
+        return onbellek
+    liste = []
+    try:
+        liste = ptt_kategori_duzlestir(ptt_kategori_agaci(ayar))
+    except Exception:
+        liste = []
+    if not liste:
+        kod, j, _ham = ptt_kategori_getir(ayar, "main")
+        if kod != 200 or j is None:
+            raise RuntimeError(f"PTT ana kategori listesi alınamadı (HTTP {kod}). API bilgilerini kontrol edin.")
+        kuyruk = [(x["ID"], x["Kategori"]) for x in ptt_kategori_duzlestir(j)]
+        gorulen, istek = set(), 0
+        while kuyruk and istek < 600:
+            cid, yol = kuyruk.pop(0)
+            if cid in gorulen or not str(cid).isdigit():
+                continue
+            gorulen.add(cid)
+            istek += 1
+            try:
+                kod, j, _ham = ptt_kategori_getir(ayar, cid)
+            except Exception:
+                kod, j = 0, None
+            alt = [x for x in (ptt_kategori_duzlestir(j) if (kod == 200 and j is not None) else []) if x["ID"] != str(cid)]
+            if not alt:
+                liste.append({"ID": str(cid), "Kategori": yol, "Alt kategorisi var": False})
+                continue
+            for x in alt:
+                kuyruk.append((x["ID"], yol + " > " + x["Kategori"].split(" > ")[-1]))
+    out = []
+    for k in liste:
+        if k.get("Alt kategorisi var"):
+            continue
+        out.append({"ID": k["ID"], "yol": k["Kategori"], "son": kat_belirtec(k["Kategori"].split(">")[-1]), "tum": kat_belirtec(k["Kategori"])})
+    if not out:
+        raise RuntimeError("PTT kategori listesi okunamadı.")
+    st.session_state["ptt_oto_agac"] = out
+    return out
+
+
 def ptt_kategori_bulucu():
     if not pazar_bagli(ayarlar, "ptt"):
         st.caption("Kategori aramak için önce PTT API bilgilerini kaydedin.")
@@ -4381,7 +4424,7 @@ def idefix_kategori_bulucu():
 
 def oto_esleme(pid, pa, adet, mevcut):
     st.markdown("**Otomatik öneri**")
-    pazar_ad = {"trendruum": "Trendruum", "hb": "Hepsiburada", "idefix": "İdefix", "n11": "N11"}.get(pid, pid)
+    pazar_ad = {"trendruum": "Trendruum", "hb": "Hepsiburada", "idefix": "İdefix", "n11": "N11", "ptt": "PTT AVM"}.get(pid, pid)
     st.caption(f"{pazar_ad} kategori listesini çekip tedarikçi kategorilerinize en yakın kategoriyi önerir. "
                "Hiçbir şey kendiliğinden kaydedilmez; işaretlediğiniz satırlar kaydedilir.")
     bildirim = st.session_state.pop(f"oto_bildirim_{pid}", None)
@@ -4391,7 +4434,7 @@ def oto_esleme(pid, pa, adet, mevcut):
     if gen(st.button, "Önerileri hazırla (önce ben bakayım)", key=f"oto_hazirla_{pid}") or tek_tus:
         try:
             with st.spinner("Kategori listesi alınıyor..."):
-                dugumler = {"trendruum": trendruum_agac_yukle, "hb": hb_oto_dugumler, "idefix": idefix_oto_dugumler, "n11": n11_oto_dugumler}[pid](ayarlar)
+                dugumler = {"trendruum": trendruum_agac_yukle, "hb": hb_oto_dugumler, "idefix": idefix_oto_dugumler, "n11": n11_oto_dugumler, "ptt": ptt_oto_dugumler}[pid](ayarlar)
             satirlar = []
             for k in adet.index:
                 if mevcut.get(k):
@@ -4453,7 +4496,10 @@ def kategori_esleme_editoru(pid):
     ana = df["kategori"].dropna().astype(str).map(lambda k: k.split(">>>")[0].strip())
     adet = ana[ana != ""].value_counts()
     st.caption(f"{len(adet)} farklı tedarikçi kategorisi var; eşleşmemiş ürünler (varsayılan kapalıyken) gönderilmez.")
-    if pid in ("trendruum", "hb", "idefix", "n11"):
+    if pa.get("varsayilan_kategori_kullan"):
+        st.error("⚠️ 'Eşleşmesi olmayan ürünleri de varsayılan kategoriye koy' AÇIK: ID'si girilmemiş her kategori "
+                 f"({pa.get('category_id') or 'varsayılan'}) kategorisine gider. Bunu kapatın (Genel Ayarlar); eşleşmeyenler gönderilmeden atlanır.")
+    if pid in ("trendruum", "hb", "idefix", "n11", "ptt"):
         oto_esleme(pid, pa, adet, mevcut)
     st.markdown("**Elle eşleştirme**")
     ara = st.text_input("Kategori ara (filtre)", key=f"kat_ara_{pid}")
