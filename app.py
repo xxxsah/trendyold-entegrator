@@ -2705,6 +2705,34 @@ def ptt_oto_dugumler(ayar):
     return out
 
 
+def ptt_kategori_kontrol_tablosu(liste, ayar):
+    """Gönderilecek PTT ürünlerini kategori ID'sine göre gruplar; ID'nin PTT'deki adını ve örnek ürün adlarını gösterir."""
+    gruplar = {}
+    for u in liste:
+        g = gruplar.setdefault(str(u.get("categoryId")), {"n": 0, "orn": []})
+        g["n"] += 1
+        if len(g["orn"]) < 2:
+            g["orn"].append(str(u.get("name", ""))[:45])
+    ad_sozluk = {}
+    try:
+        for k in st.session_state.get("ptt_oto_agac") or []:
+            ad_sozluk[str(k["ID"])] = k["yol"]
+    except Exception:
+        pass
+    satirlar = []
+    for cid, g in sorted(gruplar.items(), key=lambda x: -x[1]["n"])[:40]:
+        ad = ad_sozluk.get(cid, "")
+        if not ad:
+            try:
+                kod, j, _h = ptt_kategori_getir(ayar, cid)
+                dz = ptt_kategori_duzlestir(j) if (kod == 200 and j is not None) else []
+                ad = next((x["Kategori"] for x in dz if x["ID"] == cid), dz[0]["Kategori"] if dz else f"(PTT adı vermedi, HTTP {kod})")
+            except Exception as e:
+                ad = f"(sorgulanamadı: {str(e)[:40]})"
+        satirlar.append({"Kategori ID": cid, "PTT'deki kategori adı": ad, "Ürün": g["n"], "Örnek ürünler": " | ".join(g["orn"])})
+    return pd.DataFrame(satirlar)
+
+
 def ptt_kategori_bulucu():
     if not pazar_bagli(ayarlar, "ptt"):
         st.caption("Kategori aramak için önce PTT API bilgilerini kaydedin.")
@@ -5270,6 +5298,15 @@ def toplu_urun_paneli(pid):
         return
     st.write(f"Gönderilecek ürün: **{len(liste):,}** (Atlanan: {atlanan} — görsel/fiyat/barkod/kategori eksik)")
     huni.append(("Eksiksiz, gönderilebilir ürün", len(liste)))
+    if pid == "ptt" and liste:
+        with st.expander("🧭 Kategori kontrolü: hangi ürünler hangi PTT kategorisine gidecek?", expanded=True):
+            if gen(st.button, "Kontrol tablosunu hazırla", key="ptt_kat_kontrol_btn"):
+                st.session_state["ptt_kat_kontrol"] = ptt_kategori_kontrol_tablosu(liste, ayarlar)
+            kt = st.session_state.get("ptt_kat_kontrol")
+            if kt is not None and len(kt):
+                st.dataframe(kt, hide_index=True)
+                st.caption("'PTT'deki kategori adı' sütunu ürünle uyuşmuyorsa (örn. çorap için beyaz eşya) o satırın ID'si yanlıştır: "
+                           "Kategori eşleştirmede o ID'yi düzeltin. Doğrusunu görmeden GÖNDERMEYİN.")
     if not mod.startswith("Tek"):
         with st.expander(f"📉 Ürünler neden azalıyor? ({huni[0][1]:,} → {len(liste):,})", expanded=len(liste) < 0.9 * max(huni[0][1], 1)):
             for ad_, n_ in huni:
