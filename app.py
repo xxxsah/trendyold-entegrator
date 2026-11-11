@@ -5205,6 +5205,84 @@ def kategori_secimi_uygula(pid, df, varsayilan_isaret=True):
     return df[ana.isin(secilen).values]
 
 
+def ptt_kategori_adi(ayar, cid, dugum_ad):
+    """Bir PTT kategori ID'sinin adı: önce PTT'den sorar, olmazsa yüklü listeden."""
+    try:
+        kod, j, _h = ptt_kategori_getir(ayar, cid)
+        dz = ptt_kategori_duzlestir(j) if (kod == 200 and j is not None) else []
+        ad = next((x["Kategori"] for x in dz if x["ID"] == str(cid)), "")
+        if ad:
+            return ad
+    except Exception:
+        pass
+    return dugum_ad.get(str(cid), "")
+
+
+def ptt_otomatik_esle(ayar, df):
+    """Gönderilecek ürünlerin XML kategorilerini PTT kategorilerine otomatik bağlar ve DOĞRULAR.
+    Mevcut eşleştirmeler de kontrol edilir: PTT'deki adı tedarikçi kategorisiyle uyuşmayanlar düzeltilir/silinir."""
+    import concurrent.futures as cf
+    pa = pa_al(ayar, "ptt")
+    esl = dict(pa.get("kategori_eslesme") or {})
+    ana = df["kategori"].fillna("").astype(str).map(lambda k: k.split(">>>")[0].strip())
+    adet = ana[ana != ""].value_counts()
+    dugumler = ptt_oto_dugumler(ayar)
+    dugum_ad = {d["ID"]: d["yol"] for d in dugumler}
+    aday = {}
+    for k in adet.index:
+        i, y, g = kategori_oner(k, dugumler)
+        aday[k] = (i, y, g)
+    istenen = {str(esl[k]) for k in adet.index if esl.get(k)} | {a[0] for a in aday.values() if a[0]}
+    with cf.ThreadPoolExecutor(max_workers=8) as ex:
+        adlar = dict(zip(istenen, ex.map(lambda c: ptt_kategori_adi(ayar, c, dugum_ad), istenen)))
+
+    def uyar(k, cid):
+        ad = adlar.get(str(cid), "")
+        return bool(ad) and bool(kat_belirtec(k) & kat_belirtec(ad.split(">")[-1]))
+
+    satirlar = []
+    for k in adet.index:
+        eski = str(esl.get(k, "") or "")
+        i, y, g = aday[k]
+        if eski and uyar(k, eski):
+            sonuc, cid = "Mevcut eşleşme doğru, korundu", eski
+        elif i and g in ("yuksek", "orta") and uyar(k, i):
+            sonuc, cid = ("Otomatik eşleşti" if not eski else "Yanlıştı, düzeltildi"), i
+        else:
+            sonuc, cid = ("Eşleşme güvenilmedi, GÖNDERİLMEYECEK" if not eski else "Yanlıştı, silindi: GÖNDERİLMEYECEK"), ""
+        if cid:
+            esl[k] = cid
+        else:
+            esl.pop(k, None)
+        satirlar.append({"Tedarikçi kategorisi": k, "Ürün": int(adet[k]), "PTT ID": cid,
+                         "PTT'deki ad": adlar.get(str(cid), "") if cid else "", "Sonuç": sonuc})
+    pa["kategori_eslesme"] = esl
+    pa["varsayilan_kategori_kullan"] = False  # yanlış kategoriye dökülmesin
+    ayar_yaz(ayar)
+    return pd.DataFrame(satirlar)
+
+
+def ptt_otomatik_panel(df):
+    if df.empty or "kategori" not in df.columns:
+        return
+    with st.container(border=True):
+        st.markdown("**🪄 Kategorileri otomatik eşleştir (ID girmeden)**")
+        st.caption("XML'deki kategori adına bakıp PTT kategorisini kendisi bulur, PTT'ye sorarak adını doğrular. "
+                   "Uyuşmayanlar (ör. çorap → beyaz eşya) düzeltilir ya da gönderilmez. 'Varsayılan kategori' otomatik kapatılır.")
+        if gen(st.button, "🪄 Kategorileri otomatik bul, doğrula ve kaydet", key="ptt_oto_tek", type="primary"):
+            try:
+                with st.spinner("PTT kategorileri taranıyor ve doğrulanıyor (ilk seferde 2-3 dk sürebilir)..."):
+                    st.session_state["ptt_oto_sonuc"] = ptt_otomatik_esle(ayarlar, df)
+            except Exception as e:
+                st.session_state["ptt_oto_sonuc"] = None
+                st.error(f"Hata: {e}")
+        sn = st.session_state.get("ptt_oto_sonuc")
+        if sn is not None and len(sn):
+            st.dataframe(sn, hide_index=True)
+            gidecek = int(sn.loc[sn["PTT ID"] != "", "Ürün"].sum())
+            st.success(f"{gidecek:,} ürün doğrulanmış kategoriyle gidecek; {int(sn['Ürün'].sum()) - gidecek:,} ürün güvenilir eşleşme bulunamadığı için gönderilmeyecek.")
+
+
 def toplu_urun_paneli(pid):
     """Ürün OLUŞTURMA (N11, İdefix, Trendruum)."""
     ad = PAZAR_AD[pid]
@@ -5222,6 +5300,8 @@ def toplu_urun_paneli(pid):
         st.caption(f"🚫 Kara listedeki {int(kara.sum())} ürün gönderim dışı bırakıldı.")
         df = df[~kara]
         huni.append(("Kara liste dışında kalanlar", len(df)))
+    if pid == "ptt":
+        ptt_otomatik_panel(df)
     mod = st.selectbox("Gönderim Modu", ["Tek ürün (Test)", "Kategori seç", "Tüm Ürünler"], key=f"{pid}_mod",
                        help="Kategori seç: yalnızca işaretlediğiniz kategorilerdeki ürünler gönderilir. Tüm Ürünler: kategorisi eşleşmiş bütün ürünler.")
     if mod.startswith("Kategori"):
