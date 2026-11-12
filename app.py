@@ -3667,7 +3667,8 @@ def siparis_normalle_n11(p):
         "tarih": tr_tarih(ilk), "durum": durum_kodu("n11", p.get("shipmentPackageStatus")),
         "alici": adr.get("fullName") or p.get("customerfullName") or "",
         "adres": ", ".join(x for x in (adr.get("address"), adr.get("district"), adr.get("city")) if x),
-        "urunler": [{"ad": l.get("productName", ""), "sku": l.get("stockCode") or l.get("barcode") or "", "adet": l.get("quantity", 1)}
+        "urunler": [{"ad": l.get("productName", ""), "sku": l.get("stockCode") or l.get("barcode") or "", "adet": l.get("quantity", 1),
+                     "fiyat": l.get("price") or l.get("dueAmount")}
                     for l in (p.get("lines") or [])],
         "tutar": p.get("totalAmount"), "kargo": p.get("cargoProviderName", "") or "",
         "barkod": str(p.get("cargoTrackingNumber", "") or ""),
@@ -5875,15 +5876,19 @@ def siparis_karti_css():
 </style>"""
 
 
-_SIP_TED = {}  # barkod -> tedarikçi adı (sipariş kartında "kimden alınacak" göstermek için)
+_SIP_TED = {}
+_SIP_FIYAT = {}  # barkod -> tedarikçi adı (sipariş kartında "kimden alınacak" göstermek için)
 
 
 def siparis_ted_doldur(urunler_df):
     """Sipariş sayfaları açılırken çağrılır; ürünlerin hangi tedarikçiden geldiğini hafızaya alır."""
     _SIP_TED.clear()
+    _SIP_FIYAT.clear()
     try:
         if urunler_df is not None and not urunler_df.empty:
             _SIP_TED.update(urunler_df.groupby("barkod")["tedarikci"].first().astype(str).to_dict())
+            if "satis_fiyati" in urunler_df.columns:
+                _SIP_FIYAT.update({str(k): _f(v) for k, v in urunler_df.groupby("barkod")["satis_fiyati"].first().items()})
     except Exception:
         pass
 
@@ -5895,7 +5900,17 @@ def siparis_stok_html(u, stok_harita, onek):
     ham_sku = sku[len(onek):] if (onek and sku.startswith(onek)) else sku
     ted = _SIP_TED.get(ham_sku) or _SIP_TED.get(sku)
     ted_html = f' · <b>🏬 Tedarikçi: {_e(ted)}</b>' if ted else ""
-    return f'<span class="{sinif}">{_e(t)}</span>{ted_html}'
+    fiyat_html = ""
+    try:
+        pf = _SIP_FIYAT.get(ham_sku) or _SIP_FIYAT.get(sku)
+        bf = _f(u.get("fiyat"))
+        if pf and bf:
+            fiyat_html = f' · panel satış: {_e(para_metni(pf))}'
+            if bf > pf * 1.25 or bf < pf * 0.75:
+                fiyat_html += f' <b style="color:#b91c1c">⚠️ pazardaki birim fiyat panelden {bf / pf:.1f} kat farklı: pazardaki fiyatı kontrol edin</b>'
+    except Exception:
+        pass
+    return f'<span class="{sinif}">{_e(t)}</span>{ted_html}{fiyat_html}'
 
 
 def siparis_aktar_metni(o):
