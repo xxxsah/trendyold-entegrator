@@ -2672,6 +2672,7 @@ def ptt_oto_dugumler(ayar):
                 return oge, None
             return oge, [x for x in ptt_kategori_duzlestir(j_) if x["ID"] != str(cid)]
 
+        yarim = False
         while seviye and _t.time() < bitis:
             seviye = [o for o in seviye if o[0] not in gorulen]
             gorulen.update(o[0] for o in seviye)
@@ -2687,7 +2688,8 @@ def ptt_oto_dugumler(ayar):
                         if str(x["ID"]).isdigit():
                             sonraki.append((x["ID"], oge[1] + " > " + x["Kategori"].split(" > ")[-1]))
             seviye = sonraki
-        if liste:
+        yarim = bool(seviye)
+        if liste and not yarim:
             try:
                 with open(dosya, "w", encoding="utf-8") as f:
                     json.dump(liste, f, ensure_ascii=False)
@@ -5205,6 +5207,55 @@ def kategori_secimi_uygula(pid, df, varsayilan_isaret=True):
     return df[ana.isin(secilen).values]
 
 
+CINSIYET_KELIME = {"kadin", "erkek", "cocuk", "unise", "bebek", "bayan", "genel", "kiz", "genc"}
+
+
+def _kat_kelimeler(t):
+    t = html.unescape(str(t or "")).replace("&", " ")
+    return kat_belirtec(t) - {"amp"}
+
+
+def ptt_kategori_uyumu(ted, pazar_yol):
+    """Tedarikçi kategorisi ile PTT kategorisi birbirine uyuyor mu? (cinsiyet kelimeleri sayılmaz)
+    A) PTT kategori adındaki tüm kelimeler tedarikçi kategorisinde geçiyorsa (PTT 'Çorap' ⊆ 'Yoga Çorap')
+    B) tedarikçinin (en az 2) kelimesi PTT adının içinde tamamen geçiyorsa ('İç Giyim' ⊆ 'Termal İç Giyim')."""
+    t = _kat_kelimeler(ted)
+    tg = t - CINSIYET_KELIME
+    son = _kat_kelimeler(str(pazar_yol).split(">")[-1]) - CINSIYET_KELIME
+    if not son or not tg:
+        return False
+    if son <= t:
+        return True
+    return len(tg) >= 2 and tg <= son
+
+
+def ptt_kategori_bul(ted, dugumler):
+    """(ID, yol, aday_mi) döner. Önce kesin uyum (ptt_kategori_uyumu), yoksa eski benzerlik; yoksa en yakın ZAYIF aday."""
+    t = _kat_kelimeler(ted)
+    en, en_puan = None, -1
+    for d in dugumler:
+        if not ptt_kategori_uyumu(ted, d["yol"]):
+            continue
+        son = _kat_kelimeler(d["yol"].split(">")[-1]) - CINSIYET_KELIME
+        ust = _kat_kelimeler(">".join(d["yol"].split(">")[:-1]))
+        puan = len(son) * 10 + len(t & ust) * 3 - len(d["yol"]) / 1000.0  # özgül ad + üst yolda cinsiyet/tür uyumu
+        if puan > en_puan:
+            en, en_puan = d, puan
+    if en:
+        return en["ID"], en["yol"], False
+    i, y, g = kategori_oner(ted, dugumler)
+    if i and g in ("yuksek", "orta") and ptt_kategori_uyumu(ted, y):
+        return i, y, False
+    # zayıf aday: cinsiyet dışı ortak kelime sayısı en yüksek uç kategori (yalnızca bilgi için)
+    tg = t - CINSIYET_KELIME
+    zayif, zp = None, 0
+    for d in dugumler:
+        ortak = len(tg & (_kat_kelimeler(d["yol"].split(">")[-1]) - CINSIYET_KELIME))
+        if ortak > zp:
+            zayif, zp = d, ortak
+    return (zayif["ID"], zayif["yol"], True) if zayif else ("", "", True)
+
+
 def ptt_kategori_adi(ayar, cid, dugum_ad):
     """Bir PTT kategori ID'sinin adı: önce PTT'den sorar, olmazsa yüklü listeden."""
     try:
@@ -5228,34 +5279,32 @@ def ptt_otomatik_esle(ayar, df):
     adet = ana[ana != ""].value_counts()
     dugumler = ptt_oto_dugumler(ayar)
     dugum_ad = {d["ID"]: d["yol"] for d in dugumler}
-    aday = {}
-    for k in adet.index:
-        i, y, g = kategori_oner(k, dugumler)
-        aday[k] = (i, y, g)
-    istenen = {str(esl[k]) for k in adet.index if esl.get(k)} | {a[0] for a in aday.values() if a[0]}
+    aday = {k: ptt_kategori_bul(k, dugumler) for k in adet.index}
+    istenen = {str(esl[k]) for k in adet.index if esl.get(k)} | {a_[0] for a_ in aday.values() if a_[0] and not a_[2]}
     with cf.ThreadPoolExecutor(max_workers=8) as ex:
         adlar = dict(zip(istenen, ex.map(lambda c: ptt_kategori_adi(ayar, c, dugum_ad), istenen)))
 
     def uyar(k, cid):
         ad = adlar.get(str(cid), "")
-        return bool(ad) and bool(kat_belirtec(k) & kat_belirtec(ad.split(">")[-1]))
+        return bool(ad) and ptt_kategori_uyumu(k, ad)
 
     satirlar = []
     for k in adet.index:
         eski = str(esl.get(k, "") or "")
-        i, y, g = aday[k]
+        i, y, zayif = aday[k]
         if eski and uyar(k, eski):
             sonuc, cid = "Mevcut eşleşme doğru, korundu", eski
-        elif i and g in ("yuksek", "orta") and uyar(k, i):
+        elif i and not zayif and uyar(k, i):
             sonuc, cid = ("Otomatik eşleşti" if not eski else "Yanlıştı, düzeltildi"), i
         else:
-            sonuc, cid = ("Eşleşme güvenilmedi, GÖNDERİLMEYECEK" if not eski else "Yanlıştı, silindi: GÖNDERİLMEYECEK"), ""
+            sonuc, cid = ("Eşleşme bulunamadı, GÖNDERİLMEYECEK" if not eski else "Yanlıştı, silindi: GÖNDERİLMEYECEK"), ""
         if cid:
             esl[k] = cid
         else:
             esl.pop(k, None)
-        satirlar.append({"Tedarikçi kategorisi": k, "Ürün": int(adet[k]), "PTT ID": cid,
-                         "PTT'deki ad": adlar.get(str(cid), "") if cid else "", "Sonuç": sonuc})
+        satirlar.append({"Tedarikçi kategorisi": html.unescape(k), "Ürün": int(adet[k]), "PTT ID": cid,
+                         "PTT'deki ad": adlar.get(str(cid), "") if cid else "", "Sonuç": sonuc,
+                         "En yakın PTT adayı (güvenilmedi)": (f"{i} — {y}" if (not cid and i) else "")})
     pa["kategori_eslesme"] = esl
     pa["varsayilan_kategori_kullan"] = False  # yanlış kategoriye dökülmesin
     ayar_yaz(ayar)
@@ -5279,6 +5328,8 @@ def ptt_otomatik_panel(df):
         sn = st.session_state.get("ptt_oto_sonuc")
         if sn is not None and len(sn):
             st.dataframe(sn, hide_index=True)
+            st.caption(f"PTT'den taranan uç kategori sayısı: {len(st.session_state.get('ptt_oto_agac') or [])} "
+                       "(çok azsa tarama eksik kalmıştır; düğmeye tekrar basın).")
             gidecek = int(sn.loc[sn["PTT ID"] != "", "Ürün"].sum())
             st.success(f"{gidecek:,} ürün doğrulanmış kategoriyle gidecek; {int(sn['Ürün'].sum()) - gidecek:,} ürün güvenilir eşleşme bulunamadığı için gönderilmeyecek.")
 
