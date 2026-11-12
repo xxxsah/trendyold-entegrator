@@ -2634,33 +2634,37 @@ def ptt_kategori_gez():
             st.text(g["ham"])
 
 
-def ptt_oto_dugumler(ayar):
-    """PTT uç kategorileri (otomatik öneri için). Ağaç ucu 400 verirse ana kategorilerden paralel inerek gezer.
-    Sonuç diske de kaydedilir (yeniden başlatmada tekrar taranmaz)."""
+MODA_KELIMELERI = {"moda", "giyim", "kadin", "erkek", "cocuk", "bebek", "ic", "aksesuar", "corap", "spor", "ayakk", "tekst", "tak"}
+
+
+def _ptt_durum_dosyasi():
+    return os.path.join(os.path.dirname(os.path.abspath(__file__)), "ptt_tarama_v2.json")
+
+
+def ptt_tarama(ayar, oncelik=None, sure=150):
+    """PTT kategori ağacını kaldığı yerden taramaya devam eder (durum diske yazılır). (düğümler, tamam_mı) döner.
+    'oncelik': önce bu kelimeleri taşıyan dalları açar (örn. tedarikçi kategorilerinin kelimeleri)."""
     import concurrent.futures as cf
     import time as _t
-    onbellek = st.session_state.get("ptt_oto_agac")
-    if onbellek:
-        return onbellek
-    dosya = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ptt_kategori_onbellek.json")
-    liste = []
-    try:
-        with open(dosya, encoding="utf-8") as f:
-            liste = json.load(f)
-    except Exception:
-        liste = []
-    if not liste:
+    durum = st.session_state.get("ptt_tarama_durum")
+    if durum is None:
         try:
-            liste = ptt_kategori_duzlestir(ptt_kategori_agaci(ayar))
+            with open(_ptt_durum_dosyasi(), encoding="utf-8") as f:
+                durum = json.load(f)
         except Exception:
-            liste = []
-    if not liste:
-        kod, j, _ham = ptt_kategori_getir(ayar, "main")
-        if kod != 200 or j is None:
-            raise RuntimeError(f"PTT ana kategori listesi alınamadı (HTTP {kod}). API bilgilerini kontrol edin.")
-        seviye = [(x["ID"], x["Kategori"]) for x in ptt_kategori_duzlestir(j) if str(x["ID"]).isdigit()]
-        gorulen = set()
-        bitis = _t.time() + 150  # en çok 2,5 dk
+            durum = None
+    if durum is None:
+        durum = {"yaprak": [], "kuyruk": [], "gorulen": [], "tamam": False, "basladi": False}
+    if not durum["tamam"]:
+        if not durum["basladi"]:
+            kod, j, _ham = ptt_kategori_getir(ayar, "main")
+            if kod != 200 or j is None:
+                raise RuntimeError(f"PTT ana kategori listesi alınamadı (HTTP {kod}). API bilgilerini kontrol edin.")
+            durum["kuyruk"] = [[x["ID"], x["Kategori"]] for x in ptt_kategori_duzlestir(j) if str(x["ID"]).isdigit()]
+            durum["basladi"] = True
+        oncelik = set(oncelik or set()) | MODA_KELIMELERI
+        gorulen = set(durum["gorulen"])
+        bitis = _t.time() + sure
 
         def ac(oge):
             cid, yol = oge
@@ -2672,38 +2676,42 @@ def ptt_oto_dugumler(ayar):
                 return oge, None
             return oge, [x for x in ptt_kategori_duzlestir(j_) if x["ID"] != str(cid)]
 
-        yarim = False
-        while seviye and _t.time() < bitis:
-            seviye = [o for o in seviye if o[0] not in gorulen]
-            gorulen.update(o[0] for o in seviye)
-            sonraki = []
-            with cf.ThreadPoolExecutor(max_workers=8) as ex:
-                for oge, alt in ex.map(ac, seviye):
+        while durum["kuyruk"] and _t.time() < bitis:
+            durum["kuyruk"].sort(key=lambda o: -len(_kat_kelimeler(o[1]) & oncelik))
+            parti, durum["kuyruk"] = durum["kuyruk"][:48], durum["kuyruk"][48:]
+            parti = [o for o in parti if o[0] not in gorulen]
+            gorulen.update(o[0] for o in parti)
+            with cf.ThreadPoolExecutor(max_workers=12) as ex:
+                for oge, alt in ex.map(ac, parti):
                     if alt is None:
-                        continue  # alınamadı: ne uç ne ara düğüm say
+                        continue
                     if not alt:
-                        liste.append({"ID": str(oge[0]), "Kategori": oge[1], "Alt kategorisi var": False})
+                        durum["yaprak"].append({"ID": str(oge[0]), "Kategori": oge[1]})
                         continue
                     for x in alt:
-                        if str(x["ID"]).isdigit():
-                            sonraki.append((x["ID"], oge[1] + " > " + x["Kategori"].split(" > ")[-1]))
-            seviye = sonraki
-        yarim = bool(seviye)
-        if liste and not yarim:
-            try:
-                with open(dosya, "w", encoding="utf-8") as f:
-                    json.dump(liste, f, ensure_ascii=False)
-            except Exception:
-                pass
-    out = []
-    for k in liste:
-        if k.get("Alt kategorisi var"):
-            continue
-        out.append({"ID": k["ID"], "yol": k["Kategori"], "son": kat_belirtec(k["Kategori"].split(">")[-1]), "tum": kat_belirtec(k["Kategori"])})
-    if not out:
-        raise RuntimeError("PTT kategori listesi okunamadı (ana kategoriler alındı ama alt kategoriler gelmedi). "
-                           "'Ana kategorileri getir' ile bir kategori açıp ekran görüntüsünü gönderin.")
+                        if str(x["ID"]).isdigit() and x["ID"] not in gorulen:
+                            durum["kuyruk"].append([x["ID"], oge[1] + " > " + x["Kategori"].split(" > ")[-1]])
+        durum["gorulen"] = list(gorulen)
+        durum["tamam"] = not durum["kuyruk"]
+        try:
+            with open(_ptt_durum_dosyasi(), "w", encoding="utf-8") as f:
+                json.dump(durum, f, ensure_ascii=False)
+        except Exception:
+            pass
+    st.session_state["ptt_tarama_durum"] = durum
+    out = [{"ID": k["ID"], "yol": k["Kategori"], "son": kat_belirtec(k["Kategori"].split(">")[-1]), "tum": kat_belirtec(k["Kategori"])}
+           for k in durum["yaprak"]]
     st.session_state["ptt_oto_agac"] = out
+    return out, bool(durum["tamam"]), len(durum["kuyruk"])
+
+
+def ptt_oto_dugumler(ayar):
+    """Öneri/otomatik eşleştirme için PTT uç kategorileri. Ağaç ucu çalışırsa onu kullanır, yoksa taramaya devam eder."""
+    if st.session_state.get("ptt_oto_agac") and (st.session_state.get("ptt_tarama_durum") or {}).get("tamam"):
+        return st.session_state["ptt_oto_agac"]
+    out, tamam, _kalan = ptt_tarama(ayar)
+    if not out:
+        raise RuntimeError("PTT kategori listesi okunamadı. 'Ana kategorileri getir' ile bir kategori açıp ekran görüntüsünü gönderin.")
     return out
 
 
@@ -5277,7 +5285,10 @@ def ptt_otomatik_esle(ayar, df):
     esl = dict(pa.get("kategori_eslesme") or {})
     ana = df["kategori"].fillna("").astype(str).map(lambda k: k.split(">>>")[0].strip())
     adet = ana[ana != ""].value_counts()
-    dugumler = ptt_oto_dugumler(ayar)
+    oncelik = set()
+    for k_ in adet.index:
+        oncelik |= (_kat_kelimeler(k_) - CINSIYET_KELIME)
+    dugumler, tamam, kalan = ptt_tarama(ayar, oncelik)
     dugum_ad = {d["ID"]: d["yol"] for d in dugumler}
     aday = {k: ptt_kategori_bul(k, dugumler) for k in adet.index}
     istenen = {str(esl[k]) for k in adet.index if esl.get(k)} | {a_[0] for a_ in aday.values() if a_[0] and not a_[2]}
@@ -5297,7 +5308,8 @@ def ptt_otomatik_esle(ayar, df):
         elif i and not zayif and uyar(k, i):
             sonuc, cid = ("Otomatik eşleşti" if not eski else "Yanlıştı, düzeltildi"), i
         else:
-            sonuc, cid = ("Eşleşme bulunamadı, GÖNDERİLMEYECEK" if not eski else "Yanlıştı, silindi: GÖNDERİLMEYECEK"), ""
+            sonuc, cid = (("Henüz bulunamadı: tarama sürüyor, düğmeye tekrar basın" if not tamam else "Eşleşme bulunamadı, GÖNDERİLMEYECEK")
+                          if not eski else "Yanlıştı, silindi: GÖNDERİLMEYECEK"), ""
         if cid:
             esl[k] = cid
         else:
@@ -5308,6 +5320,7 @@ def ptt_otomatik_esle(ayar, df):
     pa["kategori_eslesme"] = esl
     pa["varsayilan_kategori_kullan"] = False  # yanlış kategoriye dökülmesin
     ayar_yaz(ayar)
+    st.session_state["ptt_tarama_bilgi"] = (tamam, kalan)
     return pd.DataFrame(satirlar)
 
 
@@ -5328,8 +5341,12 @@ def ptt_otomatik_panel(df):
         sn = st.session_state.get("ptt_oto_sonuc")
         if sn is not None and len(sn):
             st.dataframe(sn, hide_index=True)
-            st.caption(f"PTT'den taranan uç kategori sayısı: {len(st.session_state.get('ptt_oto_agac') or [])} "
-                       "(çok azsa tarama eksik kalmıştır; düğmeye tekrar basın).")
+            tamam_, kalan_ = st.session_state.get("ptt_tarama_bilgi", (True, 0))
+            if tamam_:
+                st.caption(f"PTT kategori taraması TAMAM: {len(st.session_state.get('ptt_oto_agac') or [])} uç kategori tarandı.")
+            else:
+                st.warning(f"PTT kategori taraması henüz bitmedi ({len(st.session_state.get('ptt_oto_agac') or [])} uç kategori bulundu, "
+                           f"{kalan_} dal sırada). Düğmeye tekrar basın; kaldığı yerden devam eder.")
             gidecek = int(sn.loc[sn["PTT ID"] != "", "Ürün"].sum())
             st.success(f"{gidecek:,} ürün doğrulanmış kategoriyle gidecek; {int(sn['Ürün'].sum()) - gidecek:,} ürün güvenilir eşleşme bulunamadığı için gönderilmeyecek.")
 
