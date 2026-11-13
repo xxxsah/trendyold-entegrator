@@ -5970,20 +5970,34 @@ def siparis_karti(o, stok_harita, onek, anahtar="k"):
             st.json(o["ham"])
 
 
+_SIP_ORTAK = {}  # tüm oturumlar için ortak sipariş önbelleği: pid -> {"liste","hata","t"}
+
+
 def ana_siparisleri_yukle(zorla=False):
-    """Bağlı pazarların siparişlerini oturumda önbelleğe alır (5 dk); hata bir pazarı diğerlerinden ayırmaz."""
+    """Bağlı pazarların siparişlerini önbelleğe alır (5 dk, oturumlar arası ortak). Pazarlar AYNI ANDA çekilir;
+    hata bir pazarı diğerlerinden ayırmaz."""
+    import concurrent.futures as cf
     onbellek = st.session_state.setdefault("ana_sip", {})
     simdi = time.time()
+    for p_, d_ in list(_SIP_ORTAK.items()):  # başka oturumda daha yeni çekilmişse onu kullan
+        if p_ not in onbellek or d_["t"] > onbellek[p_]["t"]:
+            onbellek[p_] = d_
     bekleyen = [p for p in SIPARIS_PAZARLARI if pazar_bagli(ayarlar, p)
                 and (zorla or p not in onbellek or simdi - onbellek[p]["t"] > 300)]
     if not bekleyen:
         return onbellek
+
+    def cek(pid):
+        try:
+            return pid, {"liste": siparis_cek(ayarlar, pid, 72), "hata": None, "t": simdi}
+        except Exception as e:
+            return pid, {"liste": [], "hata": str(e)[:200], "t": simdi}
+
     with st.spinner("Siparişler çekiliyor..."):
-        for pid in bekleyen:
-            try:
-                onbellek[pid] = {"liste": siparis_cek(ayarlar, pid, 72), "hata": None, "t": simdi}
-            except Exception as e:
-                onbellek[pid] = {"liste": [], "hata": str(e)[:200], "t": simdi}
+        with cf.ThreadPoolExecutor(max_workers=len(bekleyen)) as ex:
+            for pid, d_ in ex.map(cek, bekleyen):
+                onbellek[pid] = d_
+                _SIP_ORTAK[pid] = d_
     return onbellek
 
 
@@ -6315,6 +6329,11 @@ def urunler_sayfasi():
     if not _fs_acik:
         st.error("⚠️ FİYAT SİSTEMİ KAPALI: pazarlara tedarikçi (alış) fiyatı gider! Pazar Yerleri → Genel Ayarlar → Fiyat sistemi'ni açıp Kaydet'e basın.")
     # Her bağlı pazar için ayrı fiyat sütunu (hangi pazara hangi fiyat gittiği yan yana görünsün)
+    TABLO_TAVAN = 2000
+    if gorunum.startswith("Tablo") and len(f) > TABLO_TAVAN:
+        st.warning(f"Tabloda hızlı açılması için ilk {TABLO_TAVAN:,} ürün gösteriliyor (toplam {len(f):,}). "
+                   "Aramayı, tedarikçi ya da stok filtresini kullanarak istediğiniz ürüne inin.")
+        f = f.head(TABLO_TAVAN)
     _pazar_fiyat = {}
     _sira = ["hb", "trendyol", "n11", "idefix", "ptt", "trendruum"]
     for _pz in [x for x in _sira if x in GUNCELLEYICI and pazar_bagli(ayarlar, x)]:
