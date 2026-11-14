@@ -4583,6 +4583,19 @@ def idefix_kategori_bulucu():
         varsayilan_kategori_yaz("idefix", secilen)
 
 
+def oto_kalan_ozeti(sat, kaydedilen_kategoriler):
+    """Kaydedilmeyen kategorilerin özeti (neden eşleşmediğini gösterir)."""
+    kalan = [r for r in sat if str(r.get("Tedarikçi kategorisi")) not in kaydedilen_kategoriler]
+    if not kalan:
+        return ""
+    urun = sum(int(r.get("Ürün") or 0) for r in kalan)
+    yok = sum(1 for r in kalan if not str(r.get("ID", "")).strip())
+    en = sorted(kalan, key=lambda r: -int(r.get("Ürün") or 0))[:12]
+    satir = "; ".join(f"{r['Tedarikçi kategorisi']} ({int(r['Ürün'])})" for r in en)
+    return (f" Kaydedilmeyen: {len(kalan)} kategori / {urun:,} ürün ({yok} tanesi için pazarda hiç öneri bulunamadı). "
+            f"En kalabalık olanlar: {satir}. Bunlar için 'Kelimeyle toplu atama'yı kullanın.")
+
+
 def oto_esleme(pid, pa, adet, mevcut):
     st.markdown("**Otomatik öneri**")
     pazar_ad = {"trendruum": "Trendruum", "hb": "Hepsiburada", "idefix": "İdefix", "n11": "N11", "ptt": "PTT AVM"}.get(pid, pid)
@@ -4655,28 +4668,32 @@ def oto_esleme(pid, pa, adet, mevcut):
     if dogrudan:
         yeni_d = dict(mevcut)
         n_d = 0
+        kayd = set()
         for r in sat:
             if r.get("Güven") in dogrudan and str(r.get("ID", "")).strip():
                 yeni_d[str(r["Tedarikçi kategorisi"])] = str(r["ID"]).strip()
+                kayd.add(str(r["Tedarikçi kategorisi"]))
                 n_d += 1
         pa["kategori_eslesme"] = yeni_d
         ayar_yaz(ayarlar)
         st.session_state[f"oneri_{pid}"] = None
-        st.session_state[f"oto_bildirim_{pid}"] = f"{n_d} kategori eşleştirmesi kaydedildi (toplam {len(yeni_d)})."
+        st.session_state[f"oto_bildirim_{pid}"] = f"{n_d} kategori eşleştirmesi kaydedildi (toplam {len(yeni_d)})." + oto_kalan_ozeti(sat, kayd)
         st.rerun()
     duz = st.data_editor(d, hide_index=True, key=f"oto_{pid}_{len(d)}_{st.session_state.get(sv, 0)}",
                          disabled=["Tedarikçi kategorisi", "Ürün", "Önerilen kategori", "Güven", "ID"])
     if gen(st.button, "İşaretlenenleri kaydet", key=f"oto_kaydet_{pid}"):
         yeni = dict(mevcut)
         n = 0
+        kayd = set()
         for _, r in duz.iterrows():
             if r["Onayla"] and str(r["ID"]).strip():
                 yeni[str(r["Tedarikçi kategorisi"])] = str(r["ID"])
+                kayd.add(str(r["Tedarikçi kategorisi"]))
                 n += 1
         pa["kategori_eslesme"] = yeni
         ayar_yaz(ayarlar)
         st.session_state[f"oneri_{pid}"] = None
-        st.success(f"{n} kategori eşleştirmesi kaydedildi (toplam {len(yeni)}).")
+        st.session_state[f"oto_bildirim_{pid}"] = f"{n} kategori eşleştirmesi kaydedildi (toplam {len(yeni)})." + oto_kalan_ozeti(sat, kayd)
         st.rerun()
     st.divider()
 
