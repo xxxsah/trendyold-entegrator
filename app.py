@@ -206,6 +206,94 @@ def yedek_coz(ham, parola):
         raise ValueError("Yedek parolası hatalı ya da dosya bozulmuş.")
 
 
+_BULUT_KILIT = threading.Lock()
+_BULUT_SON = [0.0]
+_BULUT_DOSYA = "sahentegre_otomatik_yedek.json"
+
+
+def bulut_yedek_ayari():
+    """Otomatik bulut yedeği için gizli bilgiler: YEDEK_GITHUB_TOKEN (gist yetkili), YEDEK_GIST_ID (ÖZEL gist), YEDEK_PAROLA.
+    Ortam değişkeni ya da Streamlit Secrets'tan okunur. Üçü de yoksa None."""
+    def al(ad):
+        v = os.environ.get(ad)
+        if v and v.strip():
+            return v.strip()
+        try:
+            if ad in st.secrets and str(st.secrets[ad]).strip():
+                return str(st.secrets[ad]).strip()
+        except Exception:
+            pass
+        return ""
+    t, g, p = al("YEDEK_GITHUB_TOKEN"), al("YEDEK_GIST_ID"), al("YEDEK_PAROLA")
+    return (t, g, p) if (t and g and p) else None
+
+
+def _yerel_ayar_bos():
+    """ayarlar.json yok ya da içinde ne tedarikçi ne API kimliği var (sunucu sıfırlanmış)."""
+    try:
+        if not AYAR_DOSYA.exists():
+            return True
+        v = json.loads(AYAR_DOSYA.read_text(encoding="utf-8"))
+        return not (v.get("tedarikciler") or any((v.get("kimlik") or {}).values()))
+    except Exception:
+        return True
+
+
+def bulut_yedek_gonder(zorla=False):
+    """Ayarları ve durum_kv tablosunu parolayla şifreleyip özel gist'e yazar (en sık 30 sn'de bir). Hata olursa sessizce atlar."""
+    cfg = bulut_yedek_ayari()
+    if not cfg or _yerel_ayar_bos():  # boş/sıfırlanmış ayarla iyi yedeğin üzerine ASLA yazma
+        return False
+    with _BULUT_KILIT:
+        if not zorla and time.time() - _BULUT_SON[0] < 30:
+            return False
+        _BULUT_SON[0] = time.time()
+        try:
+            token, gist, parola = cfg
+            ayar_ham = json.loads(AYAR_DOSYA.read_text(encoding="utf-8"))
+            with closing(baglan()) as c:
+                kv = c.execute("SELECT anahtar, deger FROM durum_kv").fetchall()
+            veri = {"ayarlar": ayar_ham, "kv": [[a, d] for a, d in kv], "zaman": simdi_tr().strftime("%Y-%m-%d %H:%M")}
+            r = requests.patch(f"https://api.github.com/gists/{gist}",
+                               headers={"Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json"},
+                               json={"files": {_BULUT_DOSYA: {"content": yedek_sifrele(veri, parola).decode("utf-8")}}}, timeout=30)
+            return r.status_code == 200
+        except Exception:
+            return False
+
+
+def bulut_yedek_geri_yukle():
+    """Yerel ayarlar boşsa son bulut yedeğini geri yükler. Dönüş: (başarılı_mı, mesaj)."""
+    cfg = bulut_yedek_ayari()
+    if not cfg:
+        return False, "Bulut yedeği tanımlı değil."
+    token, gist, parola = cfg
+    try:
+        r = requests.get(f"https://api.github.com/gists/{gist}", headers={"Authorization": f"Bearer {token}"}, timeout=30)
+        if r.status_code != 200:
+            return False, f"Gist okunamadı (HTTP {r.status_code})."
+        f = (r.json().get("files") or {}).get(_BULUT_DOSYA)
+        if not f:
+            return False, "Gist'te henüz yedek yok."
+        ham = f.get("content") or ""
+        if f.get("truncated") and f.get("raw_url"):
+            ham = requests.get(f["raw_url"], headers={"Authorization": f"Bearer {token}"}, timeout=60).text
+        veri = yedek_coz(ham.encode("utf-8"), parola)
+        ayar = veri.get("ayarlar")
+        if not isinstance(ayar, dict) or not (ayar.get("tedarikciler") or ayar.get("kimlik")):
+            return False, "Yedek boş görünüyor, geri yüklenmedi."
+        tmp = AYAR_DOSYA.with_name("ayarlar.geri.tmp")
+        tmp.write_text(json.dumps(ayar, ensure_ascii=False, indent=2), encoding="utf-8")
+        tmp.replace(AYAR_DOSYA)
+        with closing(baglan()) as c:
+            for a, d in veri.get("kv") or []:
+                c.execute("INSERT OR REPLACE INTO durum_kv (anahtar, deger) VALUES (?, ?)", (a, d))
+            c.commit()
+        return True, f"Ayarlar bulut yedeğinden geri yüklendi ({veri.get('zaman', '?')})."
+    except Exception as e:
+        return False, f"Geri yükleme hatası: {e}"
+
+
 def tr_norm(t):
     """Türkçe-güvenli küçük harf (İ/I/ı sorunu: Python 'İ'.lower() noktalı birleşik karakter üretir)."""
     return str(t).replace("İ", "i").replace("I", "i").replace("ı", "i").lower()
@@ -267,6 +355,11 @@ def ayar_yaz(ayar):
         except OSError:
             pass
         tmp.replace(AYAR_DOSYA)
+    try:
+        if bulut_yedek_ayari():
+            threading.Thread(target=bulut_yedek_gonder, daemon=True).start()
+    except Exception:
+        pass
 
 
 def ayar_kismi_yaz(degistir, ayar_bellek=None):
@@ -3540,6 +3633,7 @@ def arka_plan_dongusu():
         dk = 10.0
         try:
             ayar = ayar_oku()
+            bulut_yedek_gonder(zorla=True)
             dk = senkron_dk_degeri(ayar)
             if ayar.get("oto_senkron", True):
                 tumunu_senkronla()
@@ -5096,6 +5190,13 @@ def genel_ayarlar(sifre):
         st.caption(f"Son indirilen yedek: {ayarlar['son_yedek']}")
     else:
         st.warning("Henüz yedek almadınız. Sunucu yeniden başlarsa ayarlarınız/anahtarlarınız silinebilir; yedek indirip güvenli bir yerde saklayın.")
+    if bulut_yedek_ayari():
+        st.success("☁️ Otomatik bulut yedeği AÇIK: ayarlar her kayıtta ve her senkronda şifreli olarak özel gist'e yedeklenir; sunucu sıfırlanırsa kendiliğinden geri yüklenir.")
+        if gen(st.button, "☁️ Şimdi bulut yedeği al", key="bulut_yedek_simdi"):
+            st.success("Yedeklendi.") if bulut_yedek_gonder(zorla=True) else st.error("Yedeklenemedi (ayarlar boş ya da gist/token hatalı).")
+    else:
+        st.warning("☁️ Otomatik bulut yedeği KAPALI: Streamlit Cloud'da Reboot/yeni yüklemede ayarlar silinir. "
+                   "Streamlit Secrets'a YEDEK_GITHUB_TOKEN, YEDEK_GIST_ID, YEDEK_PAROLA ekleyerek açın (adımlar sohbette).")
     st.markdown("**🔐 Şifreli TAM yedek (API anahtarları, tedarikçiler, kategori eşleştirmeleri, tüm ayarlar)**")
     try:
         import cryptography  # noqa: F401
@@ -6482,9 +6583,43 @@ def urunler_sayfasi():
                 except Exception as e:
                     st.error(f"Hata: {e}")
     if kilit:
-        with st.expander(f"🔒 Elle sıfırlanmış ürünler ({len(kilit)})"):
-            kd = pd.DataFrame({"Barkod": sorted(kilit), "Kilit zamanı": [ayarlar["stok_sifir"][b] for b in sorted(kilit)]})
-            st.dataframe(kd, hide_index=True)
+        with st.expander(f"🔒 Elle sıfırlanmış ürünler ({len(kilit):,}) — toplu kilit kaldırma"):
+            kilit_df = df[df["barkod"].astype(str).isin(kilit)].drop_duplicates("barkod")
+            sistemde_yok = len(kilit) - len(kilit_df)
+            st.write(f"Kilitli **{len(kilit):,}** barkodun **{len(kilit_df):,}** tanesi şu an sistemde ürün olarak var; "
+                     f"**{sistemde_yok:,}** tanesi sistemde yok (silinmiş tedarikçi / eski kayıt).")
+            if len(kilit_df):
+                st.dataframe(kilit_df["tedarikci"].fillna("?").value_counts().rename_axis("Tedarikçi").reset_index(name="Kilitli ürün"), hide_index=True)
+            kk1, kk2 = st.columns(2)
+            ted_sec = kk1.multiselect("Kilidi kaldırılacak tedarikçiler (boş = hepsi)", sorted(kilit_df["tedarikci"].dropna().unique().tolist()), key="kk_ted")
+            kelime = kk2.text_input("Sadece adında şu kelime geçenler (boş = hepsi)", key="kk_kelime")
+            korun = st.checkbox("Marka riski taşıyanlar (marka tarayıcının bulduğu ürünler) KİLİTLİ KALSIN", value=True, key="kk_korun",
+                                help="Başlığın ilk 4 kelimesinde tanınmış marka adı geçen ürünler satıştan kaldırılmış kalır.")
+            yok_temizle = st.checkbox("Sistemde olmayan eski kilitleri de temizle", value=True, key="kk_yok")
+            hedef = kilit_df
+            if ted_sec:
+                hedef = hedef[hedef["tedarikci"].isin(ted_sec)]
+            if kelime.strip():
+                q_ = tr_norm(kelime.strip())
+                hedef = hedef[hedef["urun_adi"].astype(str).map(tr_norm).str.contains(q_, regex=False)]
+            korunan = set()
+            if korun and len(hedef):
+                korunan = {b for v in marka_risk_tara(hedef, 4, False).values() for b, _ in v}
+            kaldirilacak = [b for b in hedef["barkod"].astype(str) if b not in korunan]
+            if yok_temizle and not ted_sec and not kelime.strip():
+                var_ = set(kilit_df["barkod"].astype(str))
+                kaldirilacak += [b for b in kilit if b not in var_]
+            st.info(f"Kilidi kaldırılacak: **{len(kaldirilacak):,}** · marka riski yüzünden kilitli kalacak: **{len(korunan):,}**")
+            kk_onay = st.checkbox("Onaylıyorum", key="kk_onay")
+            if kaldirilacak and gen(st.button, f"🔓 {len(kaldirilacak):,} ürünün kilidini kaldır ve stokları tedarikçiden çek", key="kk_btn", disabled=not kk_onay):
+                n_ = stok_kilidi_kaldir(ayarlar, kaldirilacak)
+                with st.spinner("Stoklar tedarikçiden çekiliyor..."):
+                    st.session_state["urun_senk_sonuc"] = tumunu_senkronla(oto=False)
+                st.session_state["urun_sifir_sonuc"] = [f"{n_:,} ürünün kilidi kaldırıldı. Pazar yerlerine stok gitmesi için ilgili pazarın otomatik güncellemesi açık olmalı ya da 'Tüm Stok/Fiyatları Güncelle'ye basın."]
+                st.rerun()
+            st.caption("Aşağıda yalnızca ilk 200 kilitli barkod gösterilir.")
+            ilk = sorted(kilit)[:200]
+            st.dataframe(pd.DataFrame({"Barkod": ilk, "Kilit zamanı": [ayarlar["stok_sifir"][b] for b in ilk]}), hide_index=True)
 
 
 def stok_teshis(ayar, barkod):
@@ -6581,8 +6716,14 @@ def anasayfa():
 def main():
     global ayarlar
     db_olustur()
+    if _yerel_ayar_bos() and bulut_yedek_ayari():
+        _ok, _msj = bulut_yedek_geri_yukle()
+        st.session_state["bulut_geri_msj"] = (_ok, _msj)
     arka_plan_baslat()
     ayarlar = ayar_oku()  # her çalışmada taze: arka plan ve diğer oturumlarla tutarlı
+    if st.session_state.get("bulut_geri_msj"):
+        _ok, _msj = st.session_state["bulut_geri_msj"]
+        (st.success if _ok else st.warning)(("♻️ " if _ok else "⚠️ ") + _msj)
 
     sifre = sifre_al()
     if "giris_ok" not in st.session_state:
