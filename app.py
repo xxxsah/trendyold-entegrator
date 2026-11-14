@@ -1718,7 +1718,7 @@ def n11_urun_listesi(df, ayar):
         gorsel = https_yap(str(r.get("gorsel", "")).strip())
         kod = str(r["barkod"]).strip()
         fiyat = round(_f(r.get("satis_fiyati")), 2)
-        cat = _i(kat_sec(pa, ayar, r.get("kategori"), "n11"))
+        cat = _i(kat_sec(pa, ayar, r.get("kategori"), "n11", r.get("barkod")))
         if not gorsel.startswith("https") or fiyat <= 0 or not kod or cat <= 0:
             atlanan += 1
             continue
@@ -1917,7 +1917,7 @@ def idefix_urun_listesi(df, ayar):
         kod = str(r["barkod"]).strip()
         bk = idefix_barkod(kod, ayar)
         fiyat = round(_f(r.get("satis_fiyati")), 2)
-        cat = _i(kat_sec(pa, ayar, r.get("kategori"), "idefix"))
+        cat = _i(kat_sec(pa, ayar, r.get("kategori"), "idefix", r.get("barkod")))
         brand = _i(tedarikci_marka(ayar, r.get("tedarikci"), "idefix", "brand_id", pa.get("brand_id")))
         if not gorsel.startswith("https") or fiyat <= 0 or not bk or cat <= 0 or brand <= 0:
             atlanan += 1
@@ -2219,7 +2219,7 @@ def hb_urun_listesi(df, ayar):
         kod = str(r["barkod"]).strip()
         barkod = sabit_barkod(kod, uret)
         fiyat = round(_f(r.get("satis_fiyati")), 2)
-        cat = kat_sec(pa, ayar, r.get("kategori"), "hb")
+        cat = kat_sec(pa, ayar, r.get("kategori"), "hb", r.get("barkod"))
         marka = tedarikci_marka(ayar, r.get("tedarikci"), "hb", "marka", marka_gen)
         if not gorsel.startswith("https") or fiyat <= 0 or not barkod or not cat or not marka:
             atlanan += 1
@@ -2532,7 +2532,7 @@ def ptt_urun_listesi(df, ayar):
         kod = str(r["barkod"]).strip()
         barkod = sabit_barkod(kod, uret)
         fiyat = round(_f(r.get("satis_fiyati")), 2)
-        cat = kat_sec(pa, ayar, r.get("kategori"), "ptt")
+        cat = kat_sec(pa, ayar, r.get("kategori"), "ptt", r.get("barkod"))
         if not gorsel.startswith("https") or fiyat <= 0 or not barkod or not cat.isdigit():
             atlanan += 1
             continue
@@ -2977,7 +2977,7 @@ def trendruum_urun_listesi(df, ayar):
         kod = str(r["barkod"]).strip()
         barkod = sabit_barkod(kod, uret)
         fiyat = _f(r.get("satis_fiyati"))
-        cat = kat_sec(pa, ayar, r.get("kategori"), "trendruum")
+        cat = kat_sec(pa, ayar, r.get("kategori"), "trendruum", r.get("barkod"))
         brand = tedarikci_marka(ayar, r.get("tedarikci"), "trendruum", "brand_id", brand_gen)
         if not objectid_mi(brand):
             brand = brand_gen  # tedarikçiye özel marka geçersizse genel marka ID'sine dön
@@ -3258,11 +3258,33 @@ def trendruum_guncelle(ayar, df, ilerleme=None):
     return _sonuc("trendruum", ok_k, hata_k, loglar, atlanan)
 
 
-def kat_sec(pa, ayar, kategori, pid):
-    """Eslesmis kategori ID'si; yoksa varsayilan SADECE 'varsayilan kategoriyi kullan' acikken."""
+_UK_ONBELLEK = {}  # pid -> (zaman, {barkod: kategori_id})
+
+
+def urun_kat_haritasi(pid):
+    """Ürün başlığına göre bulunmuş ürün-bazlı kategori eşleşmeleri (durum_kv'de saklanır; 30 sn önbellek)."""
+    t, d = _UK_ONBELLEK.get(pid, (0, None))
+    if d is None or time.time() - t > 30:
+        d = kv_oku(f"urun_kat:{pid}", {}) or {}
+        _UK_ONBELLEK[pid] = (time.time(), d)
+    return d
+
+
+def urun_kat_yaz(pid, harita):
+    kv_yaz(f"urun_kat:{pid}", harita)
+    _UK_ONBELLEK[pid] = (time.time(), harita)
+
+
+def kat_sec(pa, ayar, kategori, pid, barkod=None):
+    """Eslesmis kategori ID'si (önce tedarikçi kategorisi eşleşmesi, sonra ürün başlığından bulunan ürün-bazlı eşleşme);
+    yoksa varsayilan SADECE 'varsayilan kategoriyi kullan' acikken."""
     v = kategori_id(pa, ayar, kategori, pid)
     if v and (pid != "trendruum" or objectid_mi(v)):  # geçersiz (24 karakterlik ID olmayan) eşleştirme yok sayılır, varsayılana düşer
         return v
+    if barkod is not None:
+        u = str(urun_kat_haritasi(pid).get(str(barkod), "") or "").strip()
+        if u and (pid != "trendruum" or objectid_mi(u)):
+            return u
     if pa.get("varsayilan_kategori_kullan"):
         return str(pa.get("category_id") or "").strip()
     return ""
@@ -4596,6 +4618,81 @@ def oto_kalan_ozeti(sat, kaydedilen_kategoriler):
             f"En kalabalık olanlar: {satir}. Bunlar için 'Kelimeyle toplu atama'yı kullanın.")
 
 
+def urun_basligi_kategori_bul(df, dugumler):
+    """Her ürünün başlığındaki (ve kategorisindeki) kelimelerden en uygun pazar uç kategorisini bulur.
+    Kural: pazar kategori adındaki TÜM kelimeler başlıkta geçmeli. Dönüş: DataFrame(barkod, baslik, id, yol)."""
+    indeks = {}
+    for i, d in enumerate(dugumler):
+        if d["son"]:
+            for t in d["son"]:
+                indeks.setdefault(t, []).append(i)
+    satirlar = []
+    for barkod, ad, kat in zip(df["barkod"].astype(str), df["urun_adi"].astype(str), df["kategori"].fillna("").astype(str)):
+        T = kat_belirtec(ad) | kat_belirtec(kat.split(">>>")[0])
+        sayac = {}
+        for t in T:
+            for i in indeks.get(t, ()):
+                sayac[i] = sayac.get(i, 0) + 1
+        en, en_puan = None, -1e9
+        for i, c in sayac.items():
+            d = dugumler[i]
+            if c != len(d["son"]):
+                continue
+            puan = len(d["son"]) * 10 + len(d["tum"] & T) * 2 - len(d["yol"]) / 1000.0
+            if puan > en_puan:
+                en, en_puan = d, puan
+        if en is not None:
+            satirlar.append({"barkod": barkod, "baslik": ad, "id": str(en["ID"]), "yol": en["yol"]})
+    return pd.DataFrame(satirlar, columns=["barkod", "baslik", "id", "yol"])
+
+
+def urun_baslik_esleme(pid, pa):
+    pazar_ad = {"trendruum": "Trendruum", "hb": "Hepsiburada", "idefix": "İdefix", "n11": "N11", "ptt": "PTT AVM"}.get(pid, pid)
+    with st.expander("🧠 Ürün başlığına göre otomatik kategori (kategori adı işe yaramayanlar için: marka adı, 'Diğer' vb.)"):
+        st.caption(f"Kategorisi eşleşmemiş ürünlerin BAŞLIĞINA bakıp {pazar_ad} kategorisini ürün ürün bulur. "
+                   "Kural: pazar kategorisinin adındaki tüm kelimeler başlıkta geçmeli (örn. 'Tavan Boyası' başlıkta varsa 'Tavan Boyası' kategorisi). "
+                   "Bulunamayan ürünler yine gönderilmez. Kaydetmeden önce örnek tabloyu kontrol edin.")
+        bildirim = st.session_state.pop(f"ub_bildirim_{pid}", None)
+        if bildirim:
+            st.success(bildirim)
+        if gen(st.button, "🔍 Kategorisiz ürünleri başlığa göre tara", key=f"ub_tara_{pid}"):
+            try:
+                with st.spinner("Pazar yeri kategorileri alınıyor ve ürünler taranıyor..."):
+                    dugumler = {"trendruum": trendruum_agac_yukle, "hb": hb_oto_dugumler, "idefix": idefix_oto_dugumler,
+                                "n11": n11_oto_dugumler, "ptt": ptt_oto_dugumler}[pid](ayarlar)
+                    d_ = urunleri_oku()
+                    d_ = d_[d_["stok"] > 0].drop_duplicates("barkod")
+                    bos = d_[[not kat_sec(pa, ayarlar, k_, pid, b_) for k_, b_ in zip(d_["kategori"], d_["barkod"])]]
+                    sonuc = urun_basligi_kategori_bul(bos, dugumler)
+                st.session_state[f"ub_sonuc_{pid}"] = (len(bos), sonuc)
+            except Exception as e:
+                st.session_state[f"ub_sonuc_{pid}"] = None
+                st.error(f"Hata: {e}")
+        v = st.session_state.get(f"ub_sonuc_{pid}")
+        if not v:
+            return
+        toplam, sonuc = v
+        st.write(f"Kategorisiz **{toplam:,}** üründen **{len(sonuc):,}** tanesi için kategori bulundu; **{toplam - len(sonuc):,}** ürün için bulunamadı.")
+        if sonuc.empty:
+            return
+        st.markdown("**Kontrol için rastgele örnekler** (başlık → bulunan kategori):")
+        st.dataframe(sonuc.sample(min(40, len(sonuc)), random_state=1)[["baslik", "yol", "id"]].rename(
+            columns={"baslik": "Ürün başlığı", "yol": "Bulunan kategori", "id": "ID"}), hide_index=True)
+        st.markdown("**En çok ürün giden kategoriler:**")
+        st.dataframe(sonuc.groupby(["yol", "id"]).size().reset_index(name="Ürün").sort_values("Ürün", ascending=False).head(25), hide_index=True)
+        onay = st.checkbox("Örnekleri kontrol ettim, doğru görünüyor", key=f"ub_onay_{pid}")
+        if gen(st.button, f"💾 {len(sonuc):,} ürünün kategorisini kaydet", key=f"ub_kaydet_{pid}", disabled=not onay):
+            harita = dict(urun_kat_haritasi(pid))
+            harita.update(dict(zip(sonuc["barkod"], sonuc["id"])))
+            urun_kat_yaz(pid, harita)
+            st.session_state.pop(f"ub_sonuc_{pid}", None)
+            st.session_state[f"ub_bildirim_{pid}"] = f"{len(sonuc):,} ürünün kategorisi kaydedildi (ürün bazlı toplam {len(harita):,})."
+            st.rerun()
+        if urun_kat_haritasi(pid) and gen(st.button, "🗑️ Ürün bazlı kategori kayıtlarını sil", key=f"ub_sil_{pid}"):
+            urun_kat_yaz(pid, {})
+            st.rerun()
+
+
 def oto_esleme(pid, pa, adet, mevcut):
     st.markdown("**Otomatik öneri**")
     pazar_ad = {"trendruum": "Trendruum", "hb": "Hepsiburada", "idefix": "İdefix", "n11": "N11", "ptt": "PTT AVM"}.get(pid, pid)
@@ -4713,6 +4810,7 @@ def kategori_esleme_editoru(pid):
                  f"({pa.get('category_id') or 'varsayılan'}) kategorisine gider. Bunu kapatın (Genel Ayarlar); eşleşmeyenler gönderilmeden atlanır.")
     if pid in ("trendruum", "hb", "idefix", "n11", "ptt"):
         oto_esleme(pid, pa, adet, mevcut)
+        urun_baslik_esleme(pid, pa)
     st.markdown("**Kelimeyle toplu atama** (çok sayıda kategoriyi tek seferde aynı pazar kategorisine bağlar)")
     st.caption("Örnek: kutuya 'çorap' yazın, PTT'deki çorap kategorisinin ID'sini girin; adında çorap geçen tüm kategoriler o ID'ye gider. "
                "Birden fazla kelimeyi virgülle ayırabilirsiniz (çorap, patik). Yalnızca henüz ID'si girilmemiş kategoriler değişir.")
@@ -5277,7 +5375,7 @@ def atlama_nedenleri(df, pid):
             ekle("görsel adresi geçersiz (http/https değil)")
         if _f(r.get("satis_fiyati")) <= 0:
             ekle("fiyatı 0")
-        cat = kat_sec(pa, ayarlar, r.get("kategori"), pid)
+        cat = kat_sec(pa, ayarlar, r.get("kategori"), pid, r.get("barkod"))
         if not cat:
             ekle("kategorisi eşleştirilmemiş (varsayılan kategori kapalı)")
         elif pid == "trendruum" and not objectid_mi(cat):
@@ -5585,7 +5683,7 @@ def toplu_urun_paneli(pid):
             st.caption("Atlanma nedenleri: " + neden)
         try:
             pa_ = pa_al(ayarlar, pid)
-            eslesmeyen = df[df["kategori"].map(lambda k: not kat_sec(pa_, ayarlar, k, pid))]
+            eslesmeyen = df[[not kat_sec(pa_, ayarlar, k_, pid, b_) for k_, b_ in zip(df["kategori"], df["barkod"])]]
             if len(eslesmeyen):
                 ana_ = eslesmeyen["kategori"].astype(str).map(lambda k: k.split(">>>")[0].strip())
                 tablo_ = ana_.value_counts().head(25).rename_axis("Eşleşmemiş ana kategori").reset_index(name="Ürün sayısı")
