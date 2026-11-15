@@ -6386,16 +6386,19 @@ def _satir_yuksekligi():
     return {}
 
 
-def galeri_goster(f, kilit, sayfa_boy=24):
-    """Büyük, ortalanmış, net ve canlı görselli ürün ızgarası (yalnızca gösterim)."""
+def galeri_goster(f, kilit, sayfa_boy=48):
+    """Büyük, ortalanmış, net ve canlı görselli ürün ızgarası. Sayfa numarası yok: aşağı indikçe yeni ürünler eklenir."""
     import html as _html
     if f.empty:
         st.info("Gösterilecek ürün yok.")
         return
     toplam = len(f)
-    sayfa_say = max((toplam + sayfa_boy - 1) // sayfa_boy, 1)
-    sayfa = int(st.number_input("Sayfa", min_value=1, max_value=sayfa_say, value=1, step=1, key="galeri_sayfa"))
-    parca = f.iloc[(sayfa - 1) * sayfa_boy: sayfa * sayfa_boy]
+    imza = (toplam, str(f["barkod"].iloc[0]), str(f["barkod"].iloc[-1]))
+    if st.session_state.get("galeri_imza") != imza:  # filtre/arama değişti: baştan başla
+        st.session_state["galeri_imza"] = imza
+        st.session_state["galeri_say"] = sayfa_boy
+    sayi = min(int(st.session_state.get("galeri_say", sayfa_boy)), toplam)
+    parca = f.iloc[:sayi]
     st.markdown("""<style>
 .sg{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:14px}
 .sk{background:#fff;border:1px solid #e5e7eb;border-radius:14px;padding:10px;text-align:center;box-shadow:0 1px 4px rgba(0,0,0,.06)}
@@ -6420,7 +6423,26 @@ def galeri_goster(f, kilit, sayfa_boy=24):
             f'<div class="bk">{_html.escape(str(row.get("barkod", "-")))}</div>'
             f'<div class="st">{stok_h} · {_f(row.get("satis_fiyati")):.2f} ₺</div></div>')
     st.markdown('<div class="sg">' + "".join(kartlar) + "</div>", unsafe_allow_html=True)
-    st.caption(f"Sayfa {sayfa}/{sayfa_say} · {toplam:,} ürün")
+    st.caption(f"{sayi:,} / {toplam:,} ürün gösteriliyor")
+    if sayi < toplam:
+        if gen(st.button, f"⬇️ Daha fazla göster (+{sayfa_boy})", key="galeri_daha"):
+            st.session_state["galeri_say"] = sayi + sayfa_boy
+            st.rerun()
+        try:  # aşağı inince düğme ekrana girdiğinde kendiliğinden basılır (çalışmazsa düğmeyi elle kullanın)
+            import streamlit.components.v1 as _cmp
+            _cmp.html("""<script>
+(function(){
+  try{
+    var d = window.parent.document;
+    var bul = function(){ var b = d.querySelectorAll('button'); for (var i=0;i<b.length;i++){ if ((b[i].innerText||'').indexOf('Daha fazla göster (+')>=0) return b[i]; } return null; };
+    var dugme = bul(); if(!dugme) return;
+    var io = new IntersectionObserver(function(es){ es.forEach(function(e){ if(e.isIntersecting){ io.disconnect(); setTimeout(function(){ dugme.click(); }, 150); } }); }, {rootMargin:'400px'});
+    io.observe(dugme);
+  }catch(e){}
+})();
+</script>""", height=0)
+        except Exception:
+            pass
 
 
 # Gerçek ürün/üretici markaları: başlığın başında geçiyorsa ürün o markanındır (marka alanı farklıysa risk)
@@ -6484,6 +6506,63 @@ def marka_risk_tarayici(df):
                     f"{ad}: {ok} gönderildi" + (f", hata: {h}" if h else "") for ad, ok, h in sonuc_g]
                 st.session_state.pop("mr_sonuc", None)
                 st.rerun()
+
+
+def fiyat_tutarlilik_paneli(df):
+    with st.expander("💲 Fiyat tutarlılık raporu (panel ↔ pazara son gönderilen fiyat, uç oranlar)"):
+        st.caption("1) Panelin şu an hesapladığı fiyat ile o pazara EN SON GÖNDERİLEN fiyat farklıysa ürün listelenir (güncelleme gitmemiş demektir). "
+                   "2) Satış/alış oranı çok yüksek ya da çok düşük ürünler uyarılır (yanlış XML fiyatı gibi). "
+                   "Not: Bu rapor pazar yerinin kendi sayfasını okumaz; paneli en son neyin gönderildiğiyle karşılaştırır.")
+        bagli = [p_ for p_ in GUNCELLEYICI if pazar_bagli(ayarlar, p_)]
+        if not bagli:
+            st.info("Bağlı pazar yeri yok.")
+            return
+        pz = st.selectbox("Pazar", bagli, format_func=lambda p_: PAZAR_AD.get(p_, p_), key="ftr_pazar")
+        esik = st.slider("Fark eşiği (%)", 1, 20, 2, key="ftr_esik")
+        if gen(st.button, "🔍 Raporu hazırla", key="ftr_hazirla"):
+            with st.spinner("Karşılaştırılıyor..."):
+                d = df[df["stok"] > 0].drop_duplicates("barkod").reset_index(drop=True)
+                hes = fiyat_artis_uygula(ayarlar, pz, d)
+                d = d.assign(hesap=hes["satis_fiyati"].map(_f).values)
+                with closing(baglan()) as c:
+                    son = pd.read_sql("SELECT barkod, fiyat AS son_fiyat, zaman FROM pazar_son WHERE pazar = ? AND barkod != '__tam__'", c, params=(pz,))
+                son["barkod"] = son["barkod"].astype(str)
+                d["barkod"] = d["barkod"].astype(str)
+                d = d.merge(son, on="barkod", how="left")
+                d["alis"] = d["alis_fiyati"].map(_f)
+                st.session_state["ftr_sonuc"] = (pz, d)
+        v = st.session_state.get("ftr_sonuc")
+        if not v or v[0] != pz:
+            return
+        d = v[1]
+        gonderilmis = d[d["son_fiyat"].notna() & (d["son_fiyat"] > 0)]
+        fark = gonderilmis[(gonderilmis["son_fiyat"] - gonderilmis["hesap"]).abs() > gonderilmis["hesap"] * esik / 100]
+        yok = d[~d.index.isin(gonderilmis.index)]
+        oran = d[(d["alis"] > 0) & (d["hesap"] > 0) & ((d["hesap"] / d["alis"] > 6) | (d["hesap"] / d["alis"] < 1.15))]
+        m1, m2, m3, m4 = st.columns(4)
+        m1.metric("Stoklu ürün", f"{len(d):,}")
+        m2.metric("Fiyatı farklı", f"{len(fark):,}")
+        m3.metric("Hiç gönderilmemiş", f"{len(yok):,}")
+        m4.metric("Uç satış/alış oranı", f"{len(oran):,}")
+        if len(fark):
+            st.markdown("**Panel fiyatı ≠ pazara son gönderilen** (en büyük fark üstte):")
+            t = fark.assign(Fark=(fark["son_fiyat"] - fark["hesap"]).round(2))
+            t = t.reindex(t["Fark"].abs().sort_values(ascending=False).index).head(200)
+            st.dataframe(t[["barkod", "urun_adi", "alis", "hesap", "son_fiyat", "Fark", "zaman"]].rename(columns={
+                "urun_adi": "Ürün", "alis": "Alış", "hesap": "Panel fiyatı", "son_fiyat": "Son gönderilen", "zaman": "Gönderim zamanı"}), hide_index=True)
+            onay = st.checkbox(f"Onaylıyorum: farklı olan ilk {min(len(fark), 3000):,} ürünü {PAZAR_AD.get(pz, pz)}'a şimdi gönder", key="ftr_onay")
+            if gen(st.button, "📤 Farklı olanları pazara gönder", key="ftr_gonder", disabled=not onay):
+                alt = df[df["barkod"].astype(str).isin(set(fark["barkod"].head(3000)))].drop_duplicates("barkod").reset_index(drop=True)
+                with st.spinner("Gönderiliyor..."):
+                    ok_, hata_, ozet_ = pazara_gonder(ayarlar, pz, alt)
+                st.session_state.pop("ftr_sonuc", None)
+                st.session_state["urun_sifir_sonuc"] = [f"{PAZAR_AD.get(pz, pz)}: {ok_} ürün gönderildi, {hata_} hata. {str(ozet_)[:200]}"]
+                st.rerun()
+        if len(oran):
+            st.markdown("**Satış/alış oranı uç olanlar** (6 kattan fazla ya da 1,15 kattan az; XML fiyatını kontrol edin):")
+            t = oran.assign(Oran=(oran["hesap"] / oran["alis"]).round(2)).sort_values("Oran", ascending=False).head(200)
+            st.dataframe(t[["barkod", "urun_adi", "tedarikci", "alis", "hesap", "Oran"]].rename(columns={
+                "urun_adi": "Ürün", "tedarikci": "Tedarikçi", "alis": "Alış", "hesap": "Panel fiyatı"}), hide_index=True)
 
 
 def urunler_sayfasi():
@@ -6656,6 +6735,7 @@ def urunler_sayfasi():
         if len(f) > sayi and gen(st.button, f"⬇️ Daha fazla göster ({min(sayi, len(f))}/{len(f)})", key="urun_daha_fazla"):
             st.session_state["urun_kart_sayi"] = sayi + 48
             st.rerun()
+    fiyat_tutarlilik_paneli(df)
     marka_risk_tarayici(df)
     with st.expander("🔎 Stok neden 0? (teşhis)"):
         st.caption("Tedarikçi başına stok dağılımı: 'Stok 0' çoksa ya XML'de stok gerçekten yok, ya kritik eşik/kilit/kara liste sıfırlıyor.")
