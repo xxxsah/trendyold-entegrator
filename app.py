@@ -1752,11 +1752,14 @@ def n11_ozellik_sec(zorunlu, baslik, notr_kullan=True):
         vals = n11_degerler(oz)
         secim = None
         if vals:
+            bulunan = [(len(_n11_n(vad).strip()), vid) for vad, vid in vals
+                       if len(_n11_n(vad).strip()) >= 3 and f" {_n11_n(vad).strip()} " in b]
             en = None
-            for vad, vid in vals:
-                n = _n11_n(vad).strip()
-                if len(n) >= 3 and f" {n} " in b and (en is None or len(n) > en[0]):
-                    en = (len(n), vid)
+            if bulunan:
+                uz = max(x[0] for x in bulunan)
+                en_list = {x[1] for x in bulunan if x[0] == uz}
+                if len(en_list) == 1:  # aynı uzunlukta birden çok farklı eşleşme (örn. hem Kadın hem Erkek) belirsizdir: tahmin etme
+                    en = (uz, next(iter(en_list)))
             if en:
                 secim = {"id": aid, "valueId": en[1]}
             elif notr_kullan:
@@ -1801,7 +1804,7 @@ def n11_urun_listesi(df, ayar):
         ad = str(r["urun_adi"]).strip()
         atr_u = atr
         if oto_oz and sema.get(cat) is not None:
-            atr_u, eksik_ = n11_ozellik_sec(sema[cat], ad, notr)
+            atr_u, eksik_ = n11_ozellik_sec(sema[cat], ad + " " + str(r.get("kategori") or "").replace(">>>", " "), notr)
             if eksik_:  # zorunlu özellik doldurulamadı: N11 zaten reddedecek, hiç göndermeyip nedenini göster
                 atlanan += 1
                 for e_ in eksik_:
