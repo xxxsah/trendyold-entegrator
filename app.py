@@ -5706,6 +5706,14 @@ def toplu_urun_paneli(pid):
                 kv_yaz(f"olusturuldu:{pid}", sorted(gonderildi_ | ilk_))
                 st.success(f"{len(ilk_):,} ürün gönderilmiş sayıldı. Sayfayı yenileyince listeden düşer.")
                 st.rerun()
+            if gonderildi_:
+                st.divider()
+                st.caption(f"Şu an {len(gonderildi_):,} ürün 'daha önce gönderilmiş' kayıtlı. Ürünleri {ad}'den sildiyseniz bu listeyi sıfırlayın, yoksa bu ürünler tekrar gönderilmez.")
+                if st.checkbox(f"Evet, 'daha önce gönderilenler' listesini sıfırla ({len(gonderildi_):,})", key=f"{pid}_olus_onay"):
+                    if st.button("🧹 'Daha önce gönderilenler' listesini sıfırla", key=f"{pid}_olus_sifirla"):
+                        kv_yaz(f"olusturuldu:{pid}", [])
+                        st.success("Sıfırlandı. Tüm ürünler yeniden gönderilebilir.")
+                        st.rerun()
         onceki_ = int(df["barkod"].astype(str).isin(gonderildi_).sum())
         atla_ = st.checkbox(f"⏭️ Daha önce {ad}'e başarıyla gönderilenleri atla (kaldığın yerden devam et)", value=True, key=f"{pid}_atla",
                             help="Limit yüzünden yarım kalan gönderimi tekrar başlatınca ilk ürünleri yeniden göndermez; sadece henüz gönderilmeyenleri gönderir.")
