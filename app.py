@@ -2895,7 +2895,7 @@ def ptt_kategori_kontrol_tablosu(liste, ayar, pid="ptt"):
     """Gönderilecek ürünleri kategori ID'sine göre gruplar; ID'nin pazardaki adını ve örnek ürün adlarını gösterir."""
     gruplar = {}
     for u in liste:
-        g = gruplar.setdefault(str(u.get("categoryId")), {"n": 0, "orn": []})
+        g = gruplar.setdefault(str(u.get("categoryId") or u.get("category_id")), {"n": 0, "orn": []})
         g["n"] += 1
         if len(g["orn"]) < 2:
             g["orn"].append(str(u.get("name") or u.get("title") or "")[:45])
@@ -2907,7 +2907,7 @@ def ptt_kategori_kontrol_tablosu(liste, ayar, pid="ptt"):
         except Exception:
             pass
     else:
-        yuk = {"n11": n11_oto_dugumler, "hb": hb_oto_dugumler, "idefix": idefix_oto_dugumler}.get(pid)
+        yuk = {"n11": n11_oto_dugumler, "hb": hb_oto_dugumler, "idefix": idefix_oto_dugumler, "trendruum": trendruum_agac_yukle}.get(pid)
         if yuk:
             onb = st.session_state.get(f"kk_dugum_{pid}")
             if onb is None:
@@ -5765,7 +5765,7 @@ def toplu_urun_paneli(pid):
                        "N11 aynı barkodlu ürünleri tek ürüne BİRLEŞTİRİR; gönderdiğiniz sayıdan az ürün görünmesinin nedeni bu olabilir.")
         else:
             st.caption("N11 kontrolü: barkod ve ürün kodları benzersiz.")
-    if pid in ("ptt", "n11", "hb", "idefix") and liste:
+    if pid in ("ptt", "n11", "hb", "idefix", "trendruum") and liste:
         with st.expander(f"🧭 Kategori kontrolü: hangi ürünler hangi {PAZAR_AD.get(pid, pid)} kategorisine gidecek?", expanded=True):
             if gen(st.button, "Kontrol tablosunu hazırla", key=f"kat_kontrol_btn_{pid}"):
                 try:
@@ -5861,6 +5861,18 @@ def pazar_ozet(pid):
     son = ok["zaman"].max() if not ok.empty else None
     gonderilmeyen = max(int(u["barkod"].nunique()) - len(ok), 0) if not u.empty else 0
     st.caption(f"Son başarılı gönderim: {son or '-'} · Sistemde olup bu pazara hiç gitmeyen: {gonderilmeyen:,}")
+    with st.expander("🧹 Bu pazarın gönderim kayıtlarını sıfırla (sayaç yanlışsa / ürünleri pazardan sildiyseniz)"):
+        st.caption("Yalnızca PANELDEKİ kaydı siler (Gönderilen sayısı, son gönderilen stok/fiyat). Pazar yerindeki ürünlere DOKUNMAZ. "
+                   "Ürünleri pazar yerinden siz silmişseniz bunu yapın; sonra kalan ürünleri yeniden gönderebilirsiniz.")
+        onay = st.checkbox(f"Evet, {PAZAR_AD.get(pid, pid)} gönderim kayıtlarını ({len(ok):,} ürün) sıfırla", key=f"sifirla_onay_{pid}")
+        if gen(st.button, "🧹 Kayıtları sıfırla", key=f"sifirla_btn_{pid}", disabled=not onay):
+            with closing(baglan()) as c:
+                c.execute("DELETE FROM pazar_durum WHERE pazar = ?", (pid,))
+                c.execute("DELETE FROM pazar_son WHERE pazar = ?", (pid,))
+                c.commit()
+            st.session_state.pop(f"islem_{pid}", None)
+            st.success("Sıfırlandı. Sayaç 0'dan başlar.")
+            st.rerun()
 
 
 def pazar_islemler(pid):
@@ -6115,7 +6127,11 @@ def pazar_ayar(pid):
         with st.expander("🔎 PTT kategori ID bulucu (kategori adından ID bul)"):
             ptt_kategori_bulucu()
     if pid == "idefix":
-        with st.expander("🏷️ İdefix marka ID bulucu (marka adından ID bul)"):
+        if not _i(pa_al(ayarlar, pid).get("brand_id")) and not tedarikci_marka_var_mi(ayarlar, "idefix", "brand_id"):
+            st.error("⚠️ İdefix 'Marka ID' boş: bu yüzden hiçbir ürün gönderilemiyor. Aşağıdaki '🏷️ İdefix marka ID bulucu' kutusunu açıp "
+                     "markanızın adını yazın, 'Marka ara' ile bulup 'Bu markayı Marka ID olarak kaydet'e basın. "
+                     "Marka listede yoksa İdefix destekten markanızı eklemelerini isteyin.")
+        with st.expander("🏷️ İdefix marka ID bulucu (marka adından ID bul)", expanded=not _i(pa_al(ayarlar, pid).get("brand_id"))):
             idefix_marka_bulucu()
     if pid == "n11":
         with st.expander("🔎 N11 kategori ID bulucu (kategori adından ID bul)"):
