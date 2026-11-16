@@ -1852,6 +1852,38 @@ def n11_oneri_paneli(ayar, j, tid):
         st.success(f"{len(satir)} kategori kaydedildi. Reddedilen ürünleri N11'den silip yeniden gönderin; eski eşleştirme eskisi gibi kalmasın diye gönderim öncesi 'Kategori kontrolü'ne bakın.")
 
 
+def n11_tum_gorevler_ozeti(ayar, en_fazla=300):
+    """Takip edilen tüm N11 görevlerini paralel sorgular; durumları ve ret nedenlerini toplar."""
+    from concurrent.futures import ThreadPoolExecutor
+    tidler = list(reversed(kv_oku("takip:n11", []) or []))[:en_fazla]
+    if not tidler:
+        return None
+    toplam_durum, toplam_mesaj, ornek = Counter(), Counter(), {}
+    kayit, hatali, gorunen = 0, 0, set()
+
+    def al(t):
+        try:
+            kod, j, _ = n11_gorev_sorgula(ayar, t)
+            return t, kod, j
+        except Exception:
+            return t, 0, None
+    with ThreadPoolExecutor(max_workers=6) as ex:
+        for t, kod, j in ex.map(al, tidler):
+            if kod != 200 or j is None:
+                hatali += 1
+                continue
+            d, m, o = n11_gorev_ozet(j)
+            toplam_durum.update(d)
+            toplam_mesaj.update(m)
+            for k_, v_ in o.items():
+                ornek.setdefault(k_, v_)
+            try:
+                kayit += len(j.get("content") or [])
+            except Exception:
+                pass
+    return {"gorev": len(tidler), "hatali": hatali, "kayit": kayit, "durum": toplam_durum, "mesaj": toplam_mesaj, "ornek": ornek}
+
+
 def n11_gorev_ozet_goster(ayar, tid):
     try:
         kod_, j_, ham_ = n11_gorev_sorgula(ayar, tid)
@@ -1888,7 +1920,7 @@ def n11_gorev_ozet_goster(ayar, tid):
         st.json(j_)
 
 
-def n11_takip_ekle(tid, en_fazla=30):
+def n11_takip_ekle(tid, en_fazla=300):
     liste = [str(x) for x in (kv_oku("takip:n11", []) or []) if str(x) != str(tid)]
     kv_yaz("takip:n11", (liste + [str(tid)])[-en_fazla:])
 
@@ -5992,6 +6024,20 @@ def pazar_islemler(pid):
             elle_ = st.text_input("veya görev no yazın", key="n11_takip_elle")
             if gen(st.button, "🔎 Sonucu getir", key="n11_takip_btn"):
                 n11_gorev_ozet_goster(ayarlar, (elle_ or sec_))
+            st.divider()
+            st.markdown("**Tüm görevlerin toplamı** (10.000 ürün 100 göreve bölünür; hepsini tek tek açmadan toplam sonucu görün)")
+            if gen(st.button, "📊 Tüm görevleri topla", key="n11_tum_btn"):
+                with st.spinner("Tüm N11 görevleri sorgulanıyor..."):
+                    st.session_state["n11_tum_sonuc"] = n11_tum_gorevler_ozeti(ayarlar)
+            ts_n = st.session_state.get("n11_tum_sonuc")
+            if ts_n:
+                st.write(f"{ts_n['gorev']} görev sorgulandı ({ts_n['hatali']} tanesi okunamadı). N11'in sonuç verdiği toplam kayıt: **{ts_n['kayit']:,}**")
+                if ts_n["durum"]:
+                    st.write("Durumlar: " + ", ".join(f"**{k}**: {n:,}" for k, n in ts_n["durum"].most_common()))
+                if ts_n["mesaj"]:
+                    st.dataframe(pd.DataFrame([{"Neden": m, "Adet": n, "Örnek stok kodu": ts_n["ornek"].get(m, "")} for m, n in ts_n["mesaj"].most_common(20)]), hide_index=True)
+            elif ts_n is None and "n11_tum_sonuc" in st.session_state:
+                st.info("Kayıtlı görev yok.")
     if pid == "idefix" and bagli:
         with st.expander("📋 İdefix gönderim sonucunu sorgula (batchRequestId)", expanded=True):
             st.caption("İdefix ürün oluşturmayı hemen yapmaz; ürün önce havuza alınır. Neden görünmediğini bu sonuç söyler.")
