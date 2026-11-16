@@ -1706,6 +1706,71 @@ def n11_guncelle(ayar, df, ilerleme=None):
     return _sonuc("n11", ok_k, hata_k, loglar, atlanan, tukenen_atlanan)
 
 
+_N11_SEMA = {}  # categoryId -> (zaman, zorunlu özellik listesi)
+N11_NOTR = {"diger", "belirtilmemis", "standart", "tek ebat", "tek beden", "cok renkli", "karisik", "std", "ayarlanabilir", "universal", "genel"}
+
+
+def n11_zorunlu_ozellikler(ayar, cid):
+    """Kategorinin ZORUNLU özellikleri (önbellekli). Hata olursa None (çağıran eski genel listeye döner)."""
+    cid = str(cid)
+    o = _N11_SEMA.get(cid)
+    if o and time.time() - o[0] < 6 * 3600:
+        return o[1]
+    try:
+        kod, j, _ = n11_kategori_sema(ayar, cid)
+    except Exception:
+        return None
+    if kod != 200 or not isinstance(j, dict):
+        return None
+    zor = [x for x in (j.get("categoryAttributes") or []) if isinstance(x, dict) and x.get("isMandatory")]
+    _N11_SEMA[cid] = (time.time(), zor)
+    return zor
+
+
+def n11_degerler(oz):
+    out = []
+    for v in (oz.get("attributeValues") or []):
+        if isinstance(v, dict):
+            ad = v.get("value") or v.get("name") or v.get("valueName") or ""
+            vid = v.get("id") if v.get("id") is not None else v.get("valueId")
+            if ad and vid is not None:
+                out.append((str(ad), vid))
+    return out
+
+
+def _n11_n(x):
+    return tr_norm(x).translate(str.maketrans("ğçşöüı", "gcsoui"))
+
+
+def n11_ozellik_sec(zorunlu, baslik, notr_kullan=True):
+    """Ürün başlığından kategorinin zorunlu özelliklerini doldurur. Dönüş: (özellik_listesi, eksik_özellik_adları)."""
+    b = " " + _n11_n(baslik) + " "
+    atr, eksik = [], []
+    for oz in zorunlu:
+        aid = oz.get("attributeId")
+        ad = str(oz.get("attributeName") or aid)
+        vals = n11_degerler(oz)
+        secim = None
+        if vals:
+            en = None
+            for vad, vid in vals:
+                n = _n11_n(vad).strip()
+                if len(n) >= 3 and f" {n} " in b and (en is None or len(n) > en[0]):
+                    en = (len(n), vid)
+            if en:
+                secim = {"id": aid, "valueId": en[1]}
+            elif notr_kullan:
+                for vad, vid in vals:
+                    if _n11_n(vad).strip() in N11_NOTR:
+                        secim = {"id": aid, "valueId": vid}
+                        break
+        if secim:
+            atr.append(secim)
+        else:
+            eksik.append(ad)
+    return atr, eksik
+
+
 def n11_urun_listesi(df, ayar):
     pa = pa_al(ayar, "n11")
     cat_varsayilan = _i(pa.get("category_id"))
@@ -1714,7 +1779,18 @@ def n11_urun_listesi(df, ayar):
     if not sablon:
         raise ValueError("N11 için 'Kargo şablonu' ayarı boş. Genel Ayarlar'dan girin.")
     liste, atlanan = [], 0
-    for r in kayit_listesi(df):
+    oto_oz = bool(pa.get("ozellik_oto", True))   # zorunlu özellikleri kategoriye göre otomatik doldur
+    notr = bool(pa.get("ozellik_notr", True))
+    kayitlar_ = kayit_listesi(df)
+    sema = {}
+    if oto_oz:
+        from concurrent.futures import ThreadPoolExecutor
+        kats = sorted({_i(kat_sec(pa, ayar, r.get("kategori"), "n11", r.get("barkod"))) for r in kayitlar_} - {0})
+        with ThreadPoolExecutor(max_workers=8) as ex:
+            for c_, z_ in zip(kats, ex.map(lambda c: n11_zorunlu_ozellikler(ayar, c), kats)):
+                sema[c_] = z_
+    eksik_say, eksik_ornek = Counter(), {}
+    for r in kayitlar_:
         gorsel = https_yap(str(r.get("gorsel", "")).strip())
         kod = str(r["barkod"]).strip()
         fiyat = round(_f(r.get("satis_fiyati")), 2)
@@ -1723,15 +1799,28 @@ def n11_urun_listesi(df, ayar):
             atlanan += 1
             continue
         ad = str(r["urun_adi"]).strip()
+        atr_u = atr
+        if oto_oz and sema.get(cat) is not None:
+            atr_u, eksik_ = n11_ozellik_sec(sema[cat], ad, notr)
+            if eksik_:  # zorunlu özellik doldurulamadı: N11 zaten reddedecek, hiç göndermeyip nedenini göster
+                atlanan += 1
+                for e_ in eksik_:
+                    eksik_say[e_] += 1
+                    eksik_ornek.setdefault(e_, kod)
+                continue
         u_ = {
             "title": ad[:100], "description": ad, "categoryId": cat, "currencyType": "TL",
             "productMainId": kod, "preparingDay": _i(pa.get("preparing_day"), 3) or 3,
             "shipmentTemplate": sablon, "stockCode": kod,
             "barcode": gecerli_barkod(kod), "quantity": max(_i(r.get("stok")), 0),
-            "images": [{"url": gorsel, "order": 1}], "attributes": atr,
+            "images": [{"url": gorsel, "order": 1}], "attributes": atr_u,
             "salePrice": fiyat, "listPrice": fiyat, "vatRate": _i(pa.get("kdv"), 20),
         }
         liste.append({k_: v_ for k_, v_ in u_.items() if v_ is not None})  # null alanlar N11'de doğrulama hatası verebilir
+    try:
+        st.session_state["n11_oz_eksik"] = (dict(eksik_say), eksik_ornek)
+    except Exception:
+        pass
     return liste, atlanan
 
 
@@ -1852,6 +1941,26 @@ def n11_oneri_paneli(ayar, j, tid):
         st.success(f"{len(satir)} kategori kaydedildi. Reddedilen ürünleri N11'den silip yeniden gönderin; eski eşleştirme eskisi gibi kalmasın diye gönderim öncesi 'Kategori kontrolü'ne bakın.")
 
 
+def n11_kod_durumlari(j):
+    """Görev yanıtındaki {stok_kodu: durum} (importStatus/status)."""
+    out = {}
+
+    def gez(x):
+        if isinstance(x, dict):
+            kod = str(x.get("itemCode") or x.get("stockCode") or x.get("merchantSku") or x.get("sku") or "").strip()
+            d = str(x.get("importStatus") or x.get("status") or x.get("state") or "").strip()
+            if kod and d:
+                out[kod] = d
+            for v in x.values():
+                if isinstance(v, (dict, list)):
+                    gez(v)
+        elif isinstance(x, list):
+            for e in x:
+                gez(e)
+    gez(j)
+    return out
+
+
 def n11_tum_gorevler_ozeti(ayar, en_fazla=300):
     """Takip edilen tüm N11 görevlerini paralel sorgular; durumları ve ret nedenlerini toplar."""
     from concurrent.futures import ThreadPoolExecutor
@@ -1860,6 +1969,7 @@ def n11_tum_gorevler_ozeti(ayar, en_fazla=300):
         return None
     toplam_durum, toplam_mesaj, ornek = Counter(), Counter(), {}
     kayit, hatali, gorunen = 0, 0, set()
+    son_durum = {}  # stok kodu -> EN YENİ görevdeki durum (tidler yeniden eskiye sıralı)
 
     def al(t):
         try:
@@ -1872,6 +1982,8 @@ def n11_tum_gorevler_ozeti(ayar, en_fazla=300):
             if kod != 200 or j is None:
                 hatali += 1
                 continue
+            for k_, v_ in n11_kod_durumlari(j).items():
+                son_durum.setdefault(k_, v_)
             d, m, o = n11_gorev_ozet(j)
             toplam_durum.update(d)
             toplam_mesaj.update(m)
@@ -1881,7 +1993,8 @@ def n11_tum_gorevler_ozeti(ayar, en_fazla=300):
                 kayit += len(j.get("content") or [])
             except Exception:
                 pass
-    return {"gorev": len(tidler), "hatali": hatali, "kayit": kayit, "durum": toplam_durum, "mesaj": toplam_mesaj, "ornek": ornek}
+    return {"gorev": len(tidler), "hatali": hatali, "kayit": kayit, "durum": toplam_durum, "mesaj": toplam_mesaj, "ornek": ornek,
+            "fail_kodlar": sorted(k for k, v in son_durum.items() if v.upper() == "FAIL"), "kod_say": len(son_durum)}
 
 
 def n11_gorev_ozet_goster(ayar, tid):
@@ -5066,6 +5179,11 @@ def pazar_ayar_formu(pid):
                 yeni["ek_ozellik"] = ek
             except ValueError as e:
                 hata = f"Ek özellikler geçerli bir JSON nesnesi olmalı: {e}"
+        if pid == "n11":
+            yeni["ozellik_oto"] = st.checkbox("Zorunlu özellikleri kategoriye göre OTOMATİK doldur (önerilen)", value=bool(pa.get("ozellik_oto", True)),
+                                              help="Her N11 kategorisinin zorunlu özelliklerini (Materyal, Ölçü, Beden...) N11'den okur ve ürün başlığından doldurur. "
+                                                   "Açıkken aşağıdaki sabit liste kullanılmaz (yanlış kategoriye ait değerler 'Beden özellik değeri kategoride bulunmamaktadır' hatası veriyordu).")
+            yeni["ozellik_notr"] = st.checkbox("Başlıkta bulunamazsa 'Diğer / Standart / Belirtilmemiş' gibi nötr değeri kullan", value=bool(pa.get("ozellik_notr", True)))
         if pid in ("n11", "idefix"):
             atr_metin = st.text_area("Zorunlu özellikler (JSON listesi, boş bırakılabilir)",
                                      value=json.dumps(pa.get("attributes") or [], ensure_ascii=False))
@@ -5806,6 +5924,11 @@ def toplu_urun_paneli(pid):
         else:
             st.caption("N11 kontrolü: barkod ve ürün kodları benzersiz.")
     if pid in ("ptt", "n11", "hb", "idefix", "trendruum") and liste:
+        if pid == "n11":
+            _oe = st.session_state.get("n11_oz_eksik")
+            if _oe and _oe[0]:
+                st.warning(f"⚠️ {sum(_oe[0].values()):,} zorunlu özellik eksikliği yüzünden bazı ürünler GÖNDERİLMEYECEK (N11 zaten reddederdi). "
+                           "Eksik özellikler (kaç üründe, örnek stok kodu): " + "; ".join(f"{k}: {n} ({_oe[1].get(k, '')})" for k, n in sorted(_oe[0].items(), key=lambda x: -x[1])[:8]))
         with st.expander(f"🧭 Kategori kontrolü: hangi ürünler hangi {PAZAR_AD.get(pid, pid)} kategorisine gidecek?", expanded=True):
             if gen(st.button, "Kontrol tablosunu hazırla", key=f"kat_kontrol_btn_{pid}"):
                 try:
@@ -6036,6 +6159,19 @@ def pazar_islemler(pid):
                     st.write("Durumlar: " + ", ".join(f"**{k}**: {n:,}" for k, n in ts_n["durum"].most_common()))
                 if ts_n["mesaj"]:
                     st.dataframe(pd.DataFrame([{"Neden": m, "Adet": n, "Örnek stok kodu": ts_n["ornek"].get(m, "")} for m, n in ts_n["mesaj"].most_common(20)]), hide_index=True)
+                fk = ts_n.get("fail_kodlar") or []
+                if fk:
+                    st.info(f"Ürün bazında SON durumu FAIL olan **{len(fk):,}** ürün var (aynı ürün sonra başarılı olduysa sayılmaz). "
+                            "N11'de bu ürünler oluşmadığı için silmeniz gerekmez; ama panel bunları 'gönderildi' saydığı için yeniden gönderimde atlar.")
+                    if gen(st.button, f"♻️ Bu {len(fk):,} ürünü 'gönderilmedi' say (yeniden gönderilebilsin)", key="n11_fail_sifirla"):
+                        mevcut = {str(x) for x in (kv_oku("olusturuldu:n11", []) or [])}
+                        kv_yaz("olusturuldu:n11", sorted(mevcut - set(fk)))
+                        with closing(baglan()) as c:
+                            for i in range(0, len(fk), 500):
+                                parca = fk[i:i + 500]
+                                c.execute(f"DELETE FROM pazar_durum WHERE pazar = 'n11' AND barkod IN ({','.join('?' * len(parca))})", parca)
+                            c.commit()
+                        st.success(f"{len(fk):,} ürün yeniden gönderilebilir hale geldi. Özellik düzeltmesini yükledikten sonra gönderim sayfasından tekrar gönderin.")
             elif ts_n is None and "n11_tum_sonuc" in st.session_state:
                 st.info("Kayıtlı görev yok.")
     if pid == "idefix" and bagli:
