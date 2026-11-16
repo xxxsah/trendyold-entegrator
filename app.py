@@ -1808,6 +1808,12 @@ def n11_gorev_ozet_goster(ayar, tid):
         st.code(ham_)
         return
     durum, mesaj, ornek = n11_gorev_ozet(j_)
+    try:
+        if isinstance(j_, dict) and isinstance(j_.get("content"), list):
+            st.write(f"Bu görevde N11'in sonuç verdiği kayıt sayısı: **{len(j_['content'])}** "
+                     f"(toplam {j_.get('totalElements', '?')}). Gönderdiğinizden azsa, N11 bazı ürünleri aynı barkod/ürün koduyla BİRLEŞTİRMİŞ olabilir.")
+    except Exception:
+        pass
     if durum:
         st.write("Durumlar: " + ", ".join(f"**{k}**: {n}" for k, n in durum.most_common()))
     if mesaj:
@@ -1836,7 +1842,21 @@ def n11_gorev_sorgula(ayar, tid):
         j = r.json()
     except Exception:
         j = None
-    return r.status_code, j, (r.text or "")[:4000]
+    ham = (r.text or "")[:4000]
+    # 250'den fazla kayıt varsa diğer sayfaları da getir (eskiden yalnızca ilk 250 kayıt inceleniyordu)
+    try:
+        if r.status_code == 200 and isinstance(j, dict) and isinstance(j.get("content"), list):
+            sayfa_say = int(j.get("totalPages") or 1)
+            for pg in range(1, min(sayfa_say, 40)):
+                r2 = http("POST", f"{N11_BASE}/ms/product/task-details/page-query", headers=h, timeout=60, tries=1,
+                          json={"taskId": int(tid), "pageable": {"page": pg, "size": 250}})
+                j2 = r2.json()
+                if r2.status_code != 200 or not isinstance(j2, dict) or not isinstance(j2.get("content"), list):
+                    break
+                j["content"].extend(j2["content"])
+    except Exception:
+        pass
+    return r.status_code, j, ham
 
 
 # --------------------------------------------------------------------------
@@ -5672,6 +5692,16 @@ def toplu_urun_paneli(pid):
         return
     st.write(f"Gönderilecek ürün: **{len(liste):,}** (Atlanan: {atlanan} — görsel/fiyat/barkod/kategori eksik)")
     huni.append(("Eksiksiz, gönderilebilir ürün", len(liste)))
+    if pid == "n11" and liste:
+        _bk = pd.Series([str(u.get("barcode") or "") for u in liste])
+        _bos = int((_bk == "").sum())
+        _cift = int(_bk[_bk != ""].duplicated(keep=False).sum())
+        _kod_cift = int(pd.Series([str(u.get("productMainId") or "") for u in liste]).duplicated(keep=False).sum())
+        if _bos or _cift or _kod_cift:
+            st.warning(f"N11 kontrolü: barkodsuz ürün **{_bos}**, aynı barkodu paylaşan ürün **{_cift}**, aynı ürün ana kodunu paylaşan **{_kod_cift}**. "
+                       "N11 aynı barkodlu ürünleri tek ürüne BİRLEŞTİRİR; gönderdiğiniz sayıdan az ürün görünmesinin nedeni bu olabilir.")
+        else:
+            st.caption("N11 kontrolü: barkod ve ürün kodları benzersiz.")
     if pid in ("ptt", "n11", "hb", "idefix") and liste:
         with st.expander(f"🧭 Kategori kontrolü: hangi ürünler hangi {PAZAR_AD.get(pid, pid)} kategorisine gidecek?", expanded=True):
             if gen(st.button, "Kontrol tablosunu hazırla", key=f"kat_kontrol_btn_{pid}"):
