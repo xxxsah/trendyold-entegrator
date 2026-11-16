@@ -1783,6 +1783,8 @@ def n11_gorev_ozet(j):
             if d and (ms or kod):
                 durum[d] += 1
             for m in ms:
+                if m.strip().lower().startswith("başarıyla"):  # başarı mesajı ret nedeni değildir
+                    continue
                 mesaj[m[:220]] += 1
                 ornek.setdefault(m[:220], kod)
             _mesaj_anahtar = ("reasons", "reason", "errors", "error", "message", "errorMessage", "failReasons", "failReason", "importMessages", "validationResults", "rejectReasonsMessages")
@@ -1795,6 +1797,59 @@ def n11_gorev_ozet(j):
 
     gez(j)
     return durum, mesaj, ornek
+
+
+def n11_onerilen_kategoriler(j):
+    """Görev sonucundaki 'ürününüzü <ID> idli <ad> kategorisinde önerebilirsiniz' mesajlarından {stok_kodu: (ID, ad)} çıkarır."""
+    out = {}
+    kal = re.compile(r"(\d{3,})\s*idli\s*(.+?)\s*kategorisinde", re.I | re.S)
+
+    def gez(x):
+        if isinstance(x, dict):
+            kod = str(x.get("itemCode") or x.get("stockCode") or x.get("merchantSku") or x.get("sku") or "").strip()
+            for v in x.values():
+                if isinstance(v, str):
+                    m = kal.search(v)
+                    if m and kod:
+                        out[kod] = (m.group(1), m.group(2).strip())
+            for v in x.values():
+                if isinstance(v, (dict, list)):
+                    gez(v)
+        elif isinstance(x, list):
+            for e in x:
+                gez(e)
+    gez(j)
+    return out
+
+
+def n11_oneri_paneli(ayar, j, tid):
+    oneri = n11_onerilen_kategoriler(j)
+    if not oneri:
+        return
+    d = urunleri_oku()
+    d["barkod"] = d["barkod"].astype(str)
+    ana_harita = dict(zip(d["barkod"], d["kategori"].fillna("").astype(str).map(lambda k: k.split(">>>")[0].strip())))
+    oylar = {}
+    for kod, (cid, ad) in oneri.items():
+        ana = ana_harita.get(kod)
+        if ana:
+            oylar.setdefault(ana, Counter())[(cid, ad)] += 1
+    if not oylar:
+        return
+    st.markdown("**🎯 N11'in kendisi doğru kategoriyi önerdi** (reddedilen ürünler için):")
+    satir = []
+    for ana, c_ in oylar.items():
+        (cid, ad), n = c_.most_common(1)[0]
+        satir.append({"Tedarikçi kategorisi": ana, "N11'in önerdiği ID": cid, "N11'in önerdiği kategori": ad, "Ürün": sum(c_.values())})
+    st.dataframe(pd.DataFrame(satir), hide_index=True)
+    if gen(st.button, f"💾 Bu {len(satir)} kategori eşleştirmesini N11 için kaydet", key=f"n11_oneri_kaydet_{tid}"):
+        pa = pa_al(ayar, "n11")
+        esl = dict(pa.get("kategori_eslesme") or {})
+        for r_ in satir:
+            esl[r_["Tedarikçi kategorisi"]] = r_["N11'in önerdiği ID"]
+        pa["kategori_eslesme"] = esl
+        ayar_yaz(ayar)
+        st.success(f"{len(satir)} kategori kaydedildi. Reddedilen ürünleri N11'den silip yeniden gönderin; eski eşleştirme eskisi gibi kalmasın diye gönderim öncesi 'Kategori kontrolü'ne bakın.")
 
 
 def n11_gorev_ozet_goster(ayar, tid):
@@ -1819,6 +1874,14 @@ def n11_gorev_ozet_goster(ayar, tid):
     if mesaj:
         st.error("N11'in ürünleri REDDETME nedenleri (en sık):")
         st.dataframe(pd.DataFrame([{"Neden": m, "Adet": n, "Örnek stok kodu": ornek.get(m, "")} for m, n in mesaj.most_common(15)]), hide_index=True)
+        with st.expander("Mesajların tamamı (tabloda kesiliyorsa buradan okuyun)"):
+            for m, n in mesaj.most_common(15):
+                st.write(f"**{n} ürün** · örnek: `{ornek.get(m, '')}`")
+                st.text(m)
+        try:
+            n11_oneri_paneli(ayar, j_, str(tid))
+        except Exception as e:
+            st.caption(f"Kategori önerisi okunamadı: {e}")
     elif durum:
         st.info("Hata mesajı görünmüyor; görev hâlâ işleniyor olabilir. Birkaç dakika sonra tekrar sorgulayın.")
     with st.expander("Ham yanıt"):
