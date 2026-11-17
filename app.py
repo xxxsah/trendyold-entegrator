@@ -3557,20 +3557,33 @@ def pazarama_token(ayar, zorla=False):
     """client_credentials (Basic: API Key:Secret), scope merchantgatewayapi.fullaccess; token ~1 saat geçerli, 50 dk önbelleklenir."""
     if not zorla and _PZ_TOKEN["v"] and time.time() - _PZ_TOKEN["t"] < 3000:
         return _PZ_TOKEN["v"]
-    k, x = kimlik(ayar, "pazarama_key"), kimlik(ayar, "pazarama_secret")
-    tok = base64.b64encode(f"{k.strip()}:{x.strip()}".encode()).decode()
-    r = requests.post(PZ_GIRIS, headers={"Authorization": f"Basic {tok}", "Content-Type": "application/x-www-form-urlencoded"},
-                      data={"grant_type": "client_credentials", "scope": "merchantgatewayapi.fullaccess"}, timeout=30)
-    try:
-        j = r.json()
-    except Exception:
-        j = {}
-    v = (j.get("data") or {}).get("accessToken") if isinstance(j.get("data"), dict) else None
-    v = v or j.get("access_token") or j.get("accessToken") or ""
-    if r.status_code != 200 or not v:
-        raise RuntimeError(f"Pazarama girişi başarısız (HTTP {r.status_code}): {(r.text or '')[:300]}")
-    _PZ_TOKEN.update(t=time.time(), v=v)
-    return v
+    k, x = kimlik(ayar, "pazarama_key").strip(), kimlik(ayar, "pazarama_secret").strip()
+    tok = base64.b64encode(f"{k}:{x}".encode()).decode()
+    sc = "merchantgatewayapi.fullaccess"
+    # Pazarama'nın kimlik doğrulama biçimi belgelerde net değil: sırayla üç biçim denenir, ilk çalışan kullanılır.
+    denemeler = [
+        ("Basic başlık + scope", {"Authorization": f"Basic {tok}"}, {"grant_type": "client_credentials", "scope": sc}),
+        ("Gövdede client_id/secret + scope", {}, {"grant_type": "client_credentials", "client_id": k, "client_secret": x, "scope": sc}),
+        ("Basic başlık, scope yok", {"Authorization": f"Basic {tok}"}, {"grant_type": "client_credentials"}),
+    ]
+    sonuclar = []
+    for ad, ek_baslik, veri in denemeler:
+        try:
+            r = requests.post(PZ_GIRIS, headers={"Content-Type": "application/x-www-form-urlencoded", **ek_baslik}, data=veri, timeout=30)
+        except Exception as e:
+            sonuclar.append(f"{ad}: bağlantı hatası {e}")
+            continue
+        try:
+            j = r.json()
+        except Exception:
+            j = {}
+        d_ = j.get("data") if isinstance(j.get("data"), dict) else {}
+        v = d_.get("accessToken") or d_.get("access_token") or j.get("access_token") or j.get("accessToken") or ""
+        if r.status_code == 200 and v:
+            _PZ_TOKEN.update(t=time.time(), v=v)
+            return v
+        sonuclar.append(f"{ad}: HTTP {r.status_code} {(r.text or '')[:160]}")
+    raise RuntimeError("Pazarama girişi başarısız. Denenen biçimler: " + " || ".join(sonuclar))
 
 
 def pazarama_istek(ayar, yol, govde):
