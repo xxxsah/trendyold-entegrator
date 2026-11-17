@@ -2121,7 +2121,8 @@ def idefix_guncelle(ayar, df, ilerleme=None):
 
 
 MARKA_ALANLARI = (("hb", "marka", "Hepsiburada marka adı"), ("ptt", "marka", "PTT AVM marka adı"),
-                  ("idefix", "brand_id", "İdefix marka ID"), ("trendruum", "brand_id", "Trendruum marka ID"))
+                  ("idefix", "brand_id", "İdefix marka ID"), ("trendruum", "brand_id", "Trendruum marka ID"),
+                  ("pazarama", "brand_id", "Pazarama marka ID"))
 
 
 def tedarikci_marka(ayar, tedarikci, pid, alan, varsayilan=""):
@@ -3059,7 +3060,7 @@ def ptt_kategori_kontrol_tablosu(liste, ayar, pid="ptt"):
         except Exception:
             pass
     else:
-        yuk = {"n11": n11_oto_dugumler, "hb": hb_oto_dugumler, "idefix": idefix_oto_dugumler, "trendruum": trendruum_agac_yukle}.get(pid)
+        yuk = {"n11": n11_oto_dugumler, "hb": hb_oto_dugumler, "idefix": idefix_oto_dugumler, "trendruum": trendruum_agac_yukle, "pazarama": pazarama_oto_dugumler}.get(pid)
         if yuk:
             onb = st.session_state.get(f"kk_dugum_{pid}")
             if onb is None:
@@ -3637,6 +3638,318 @@ def pazarama_guncelle(ayar, df, ilerleme=None):
 
     ok_k, hata_k, loglar = paketle(kayit, 1000, gonder, ilerleme, "Pazarama", bekle=10)
     return _sonuc("pazarama", ok_k, hata_k, loglar, atlanan, tukenen_atlanan)
+
+
+def guid_mi(v):
+    return bool(re.fullmatch(r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}", str(v or "").strip()))
+
+
+def pazarama_get(ayar, yol, params=None):
+    h = {"Authorization": f"Bearer {pazarama_token(ayar)}"}
+    r = http("GET", f"{PZ_BASE}{yol}", params=params, headers=h, timeout=120, tries=2)
+    if r.status_code == 401:
+        _PZ_TOKEN["v"] = ""
+        h["Authorization"] = f"Bearer {pazarama_token(ayar, zorla=True)}"
+        r = http("GET", f"{PZ_BASE}{yol}", params=params, headers=h, timeout=120, tries=1)
+    try:
+        j = r.json()
+    except Exception:
+        j = None
+    SON_YANIT["pazarama_get"] = {"yol": yol, "kod": r.status_code, "yanit": (r.text or "")[:3000]}
+    return r.status_code, j, (r.text or "")[:3000]
+
+
+def _pz_veri(j):
+    return j.get("data") if isinstance(j, dict) and "data" in j else j
+
+
+def pazarama_kategori_duzlestir(j):
+    """Kategori ağacı yanıtı (iç içe children ya da parentId'li düz liste) -> [{ID, Kategori, Uc kategori}]. Alan adları esnek okunur."""
+    veri = _pz_veri(j)
+    if isinstance(veri, dict):
+        for a in ("categories", "items", "result", "list", "data"):
+            if isinstance(veri.get(a), list):
+                veri = veri[a]
+                break
+        else:
+            veri = [veri]
+    kayit, goruldu = {}, set()
+
+    def gez(d, ust_yol, ust_id):
+        if not isinstance(d, dict):
+            return
+        cid = str(d.get("id") or d.get("categoryId") or "").strip()
+        ad = str(d.get("displayName") or d.get("name") or "").strip()
+        alt = next((d[a] for a in ("children", "subCategories", "sub_categories", "childCategories") if isinstance(d.get(a), list)), None)
+        yol = (ust_yol + " > " + ad) if ust_yol else ad
+        if cid and cid not in goruldu:
+            goruldu.add(cid)
+            yaprak = d.get("leaf") if d.get("leaf") is not None else d.get("isLeaf")
+            kayit[cid] = {"ad": ad, "yol": yol, "ust": str(d.get("parentId") or ust_id or ""), "yaprak": yaprak, "alt": bool(alt)}
+        for a in (alt or []):
+            gez(a, yol, cid)
+    for d in (veri if isinstance(veri, list) else []):
+        gez(d, "", "")
+    # düz liste (parentId) ise yolları kur
+    if kayit and not any(k["alt"] for k in kayit.values()) and any(k["ust"] in kayit for k in kayit.values()):
+        cocuklu = {k["ust"] for k in kayit.values()}
+
+        def yol_kur(cid, derin=0):
+            k = kayit[cid]
+            if k["ust"] in kayit and derin < 12:
+                return yol_kur(k["ust"], derin + 1) + " > " + k["ad"]
+            return k["ad"]
+        for cid, k in kayit.items():
+            k["yol"] = yol_kur(cid)
+            k["alt"] = cid in cocuklu
+    cikti = []
+    for cid, k in kayit.items():
+        uc = k["yaprak"] if isinstance(k["yaprak"], bool) else (not k["alt"])
+        cikti.append({"ID": cid, "Kategori": k["yol"], "Uc kategori": "evet" if uc else "hayir"})
+    return cikti
+
+
+def pazarama_agac_yukle(ayar):
+    kod, j, ham = pazarama_get(ayar, "/category/getCategoryTree")
+    if kod != 200 or j is None:
+        raise RuntimeError(f"Pazarama kategori ağacı alınamadı (HTTP {kod}): {ham[:300]}")
+    dz = pazarama_kategori_duzlestir(j)
+    if not dz:
+        raise RuntimeError("Pazarama kategori listesi okunamadı. Ham yanıt: " + ham[:300])
+    return dz
+
+
+def pazarama_oto_dugumler(ayar):
+    out = []
+    for k in pazarama_agac_yukle(ayar):
+        if k["Uc kategori"] != "evet":
+            continue
+        out.append({"ID": k["ID"], "yol": k["Kategori"], "son": kat_belirtec(k["Kategori"].split(">")[-1]), "tum": kat_belirtec(k["Kategori"])})
+    return out
+
+
+_PZ_OZ = {}  # categoryId -> (zaman, zorunlu özellikler n11 biçiminde)
+
+
+def pazarama_zorunlu_ozellikler(ayar, cid):
+    """Kategorinin ZORUNLU özellikleri. n11_ozellik_sec ile uyumlu biçime çevrilir; hata olursa None."""
+    cid = str(cid)
+    o = _PZ_OZ.get(cid)
+    if o and time.time() - o[0] < 6 * 3600:
+        return o[1]
+    try:
+        kod, j, _ = pazarama_get(ayar, "/category/getCategoryWithAttributes", {"Id": cid})
+    except Exception:
+        return None
+    if kod != 200 or j is None:
+        return None
+    veri = _pz_veri(j)
+    if isinstance(veri, list) and veri:
+        veri = veri[0]
+    ozl = []
+    if isinstance(veri, dict):
+        for a in ("attributes", "categoryAttributes", "attributeList"):
+            if isinstance(veri.get(a), list):
+                ozl = veri[a]
+                break
+    zor = []
+    for x in ozl:
+        if not isinstance(x, dict):
+            continue
+        if not any(x.get(a) for a in ("isRequired", "required", "isMandatory", "mandatory")):
+            continue
+        vals = []
+        for v in (x.get("attributeValues") or x.get("values") or []):
+            if isinstance(v, dict):
+                vid = v.get("id") if v.get("id") is not None else v.get("attributeValueId")
+                vad = v.get("displayName") or v.get("name") or v.get("value") or ""
+                if vid is not None and vad:
+                    vals.append({"id": vid, "value": vad})
+        zor.append({"attributeId": x.get("id") or x.get("attributeId"), "attributeName": x.get("displayName") or x.get("name") or "",
+                    "isMandatory": True, "attributeValues": vals})
+    _PZ_OZ[cid] = (time.time(), zor)
+    return zor
+
+
+def pazarama_urun_listesi(df, ayar):
+    pa = pa_al(ayar, "pazarama")
+    brand_gen = str(pa.get("brand_id") or "").strip()
+    if not guid_mi(brand_gen) and not tedarikci_marka_var_mi(ayar, "pazarama", "brand_id"):
+        raise ValueError("Pazarama 'Marka ID' geçersiz/boş (uzun kimlik kodu olmalı). Pazarama ayarlarındaki 'Marka bulucu'yu kullanın.")
+    kdv, desi = _i(pa.get("kdv"), 20), _f(pa.get("desi"), 1.0) or 1.0
+    notr = bool(pa.get("ozellik_notr", True))
+    kayitlar_ = kayit_listesi(df)
+    from concurrent.futures import ThreadPoolExecutor
+    kats = sorted({str(kat_sec(pa, ayar, r.get("kategori"), "pazarama", r.get("barkod"))) for r in kayitlar_} - {""})
+    sema = {}
+    with ThreadPoolExecutor(max_workers=6) as ex:
+        for c_, z_ in zip(kats, ex.map(lambda c: pazarama_zorunlu_ozellikler(ayar, c), kats)):
+            sema[c_] = z_
+    liste, atlanan = [], 0
+    eksik_say, eksik_ornek = Counter(), {}
+    for r in kayitlar_:
+        gorsel = https_yap(str(r.get("gorsel", "")).strip())
+        kod = str(r["barkod"]).strip()
+        fiyat = round(_f(r.get("satis_fiyati")), 2)
+        cat = str(kat_sec(pa, ayar, r.get("kategori"), "pazarama", r.get("barkod")) or "").strip()
+        brand = tedarikci_marka(ayar, r.get("tedarikci"), "pazarama", "brand_id", brand_gen)
+        if not guid_mi(brand):
+            brand = brand_gen
+        if not gorsel.startswith("http") or fiyat <= 0 or not kod or not guid_mi(cat) or not guid_mi(brand):
+            atlanan += 1
+            continue
+        ad = str(r["urun_adi"]).strip()
+        atr = []
+        if sema.get(cat):
+            sec_, eksik_ = n11_ozellik_sec(sema[cat], ad + " " + str(r.get("kategori") or "").replace(">>>", " "), notr)
+            if eksik_:
+                atlanan += 1
+                for e_ in eksik_:
+                    eksik_say[e_] += 1
+                    eksik_ornek.setdefault(e_, kod)
+                continue
+            atr = [{"attributeId": a["id"], "attributeValueId": a["valueId"]} for a in sec_]
+        liste.append({
+            "name": ad[:200], "displayName": ad[:200], "description": _tr_aciklama(r), "brandId": brand, "categoryId": cat,
+            "desi": desi, "code": kod, "groupCode": kod, "stockCount": max(_i(r.get("stok")), 0), "currencyType": "TRY",
+            "listPrice": fiyat, "salePrice": fiyat, "vatRate": kdv, "images": [{"imageurl": gorsel}], "attributes": atr,
+        })
+    try:
+        st.session_state["pz_oz_eksik"] = (dict(eksik_say), eksik_ornek)
+    except Exception:
+        pass
+    return liste, atlanan
+
+
+def pz_takip_ekle(bid, en_fazla=300):
+    liste = [str(x) for x in (kv_oku("takip:pazarama", []) or []) if str(x) != str(bid)]
+    kv_yaz("takip:pazarama", (liste + [str(bid)])[-en_fazla:])
+
+
+def pazarama_urun_gonder(ayar, liste, ilerleme=None):
+    kayit = [(u["code"], u) for u in liste]
+
+    def gonder(grup):
+        ok, ozet = pazarama_istek(ayar, "/product/create", {"products": grup})
+        if ok:
+            m = re.search(r'"batchRequestId"\s*:\s*"?([\w-]+)', (SON_YANIT.get("pazarama") or {}).get("yanit", ""))
+            if m:
+                pz_takip_ekle(m.group(1))
+                ozet += f" | batchRequestId: {m.group(1)} (kabul = ürün onayı değildir; sonucu 'Pazarama gönderim sonucu'ndan sorgulayın)"
+        return ok, ozet
+
+    ok_k, hata_k, loglar = paketle(kayit, 100, gonder, ilerleme, "Pazarama", durdur=3, bekle=10)
+    return len(ok_k), len(hata_k), loglar
+
+
+def pazarama_batch_sorgula(ayar, bid):
+    return pazarama_get(ayar, "/product/getProductBatchResult", {"BatchRequestId": str(bid).strip()})
+
+
+def pazarama_batch_goster(ayar, bid):
+    try:
+        kod, j, ham = pazarama_batch_sorgula(ayar, bid)
+    except Exception as e:
+        st.error(f"Sorgulanamadı: {e}")
+        return
+    (st.success if kod == 200 else st.error)(f"Pazarama sonucu {bid}: HTTP {kod}")
+    if j is None:
+        st.code(ham)
+        return
+    durum, mesaj, ornek = Counter(), Counter(), {}
+
+    def gez(x):
+        if isinstance(x, dict):
+            d = x.get("status") or x.get("state")
+            if d is not None and not isinstance(d, (dict, list)):
+                durum[str(d)] += 1
+            kod_ = str(x.get("code") or x.get("stockCode") or "")
+            for k_ in ("failReason", "errorMessage", "message", "error", "reason", "failMessage"):
+                v = x.get(k_)
+                if isinstance(v, str) and v.strip() and "başar" not in v.lower() and v.strip().lower() not in ("ok", "success"):
+                    mesaj[v.strip()[:220]] += 1
+                    ornek.setdefault(v.strip()[:220], kod_)
+            for v in x.values():
+                if isinstance(v, (dict, list)):
+                    gez(v)
+        elif isinstance(x, list):
+            for e in x:
+                gez(e)
+    gez(j)
+    if durum:
+        st.write("Durumlar: " + ", ".join(f"**{k}**: {n}" for k, n in durum.most_common()))
+    if mesaj:
+        st.error("Reddetme / hata nedenleri (en sık):")
+        st.dataframe(pd.DataFrame([{"Neden": m, "Adet": n, "Örnek kod": ornek.get(m, "")} for m, n in mesaj.most_common(15)]), hide_index=True)
+    with st.expander("Ham yanıt"):
+        st.json(j)
+
+
+_PZ_MARKALAR = {}
+
+
+def pazarama_marka_ara(ayar, ad, en_fazla_sayfa=60):
+    """Pazarama marka listesi sayfa sayfa gezilir; ada göre yerelde süzülür. Dönüş: [{ID, Marka}]."""
+    q = tr_norm(ad).strip()
+    if len(q) < 2:
+        raise ValueError("Aramak için en az 2 harf yazın.")
+    bulunan, goruldu = [], set()
+    from concurrent.futures import ThreadPoolExecutor
+
+    def sayfa(p):
+        kod, j, _ = pazarama_get(ayar, "/brand/getBrands", {"Page": p, "Size": 100, "Name": ad})
+        veri = _pz_veri(j)
+        if isinstance(veri, dict):
+            for a in ("items", "brands", "data", "result", "list"):
+                if isinstance(veri.get(a), list):
+                    veri = veri[a]
+                    break
+        return kod, (veri if isinstance(veri, list) else [])
+    for baslangic in range(1, en_fazla_sayfa + 1, 6):
+        with ThreadPoolExecutor(max_workers=6) as ex:
+            sonuc = list(ex.map(sayfa, range(baslangic, baslangic + 6)))
+        bos = 0
+        for kod, liste in sonuc:
+            if kod != 200 or not liste:
+                bos += 1
+            for b in liste:
+                if isinstance(b, dict):
+                    bid = str(b.get("id") or b.get("brandId") or "")
+                    bad = str(b.get("name") or b.get("displayName") or "")
+                    if bid and bid not in goruldu and q in tr_norm(bad):
+                        goruldu.add(bid)
+                        bulunan.append({"ID": bid, "Marka": bad})
+        if bulunan or bos:
+            break
+    return bulunan
+
+
+def pazarama_marka_bulucu():
+    if not pazar_bagli(ayarlar, "pazarama"):
+        st.caption("Marka aramak için önce Pazarama API bilgilerini kaydedin.")
+        return
+    kayitli = str(pa_al(ayarlar, "pazarama").get("brand_id", "") or "").strip()
+    st.caption(f"Şu an kayıtlı Marka ID: {kayitli or '(boş)'}")
+    ad = st.text_input("Marka adı", key="pzm_ara")
+    if gen(st.button, "Marka ara", key="pzm_ara_btn"):
+        try:
+            with st.spinner("Pazarama markaları aranıyor..."):
+                st.session_state["pzm_sonuc"] = pazarama_marka_ara(ayarlar, ad)
+        except Exception as e:
+            st.session_state["pzm_sonuc"] = None
+            st.error(f"Hata: {e}")
+    liste = st.session_state.get("pzm_sonuc")
+    if liste is None:
+        return
+    if not liste:
+        st.warning("Marka bulunamadı. Ham yanıt için aşağıya bakın; marka Pazarama'da yoksa Pazarama destekten markanızın eklenmesini isteyin.")
+        with st.expander("Son marka yanıtı (teşhis)"):
+            st.json(SON_YANIT.get("pazarama_get"))
+        return
+    st.dataframe(pd.DataFrame(liste), hide_index=True)
+    sec = st.selectbox("Listeden seç", [f"{m['ID']} — {m['Marka']}" for m in liste], key="pzm_sec")
+    if gen(st.button, "Bu markayı Marka ID olarak kaydet", key="pzm_kaydet"):
+        marka_id_yaz("pazarama", sec.split(" — ")[0].strip())
 
 
 GUNCELLEYICI = {
@@ -4988,7 +5301,7 @@ def urun_basligi_kategori_bul(df, dugumler):
 
 
 def urun_baslik_esleme(pid, pa):
-    pazar_ad = {"trendruum": "Trendruum", "hb": "Hepsiburada", "idefix": "İdefix", "n11": "N11", "ptt": "PTT AVM"}.get(pid, pid)
+    pazar_ad = {"trendruum": "Trendruum", "hb": "Hepsiburada", "idefix": "İdefix", "n11": "N11", "ptt": "PTT AVM", "pazarama": "Pazarama"}.get(pid, pid)
     with st.expander("🧠 Ürün başlığına göre otomatik kategori (kategori adı işe yaramayanlar için: marka adı, 'Diğer' vb.)"):
         st.caption(f"Kategorisi eşleşmemiş ürünlerin BAŞLIĞINA bakıp {pazar_ad} kategorisini ürün ürün bulur. "
                    "Kural: pazar kategorisinin adındaki tüm kelimeler başlıkta geçmeli (örn. 'Tavan Boyası' başlıkta varsa 'Tavan Boyası' kategorisi). "
@@ -5000,7 +5313,7 @@ def urun_baslik_esleme(pid, pa):
             try:
                 with st.spinner("Pazar yeri kategorileri alınıyor ve ürünler taranıyor..."):
                     dugumler = {"trendruum": trendruum_agac_yukle, "hb": hb_oto_dugumler, "idefix": idefix_oto_dugumler,
-                                "n11": n11_oto_dugumler, "ptt": ptt_oto_dugumler}[pid](ayarlar)
+                                "n11": n11_oto_dugumler, "ptt": ptt_oto_dugumler, "pazarama": pazarama_oto_dugumler}[pid](ayarlar)
                     d_ = urunleri_oku()
                     d_ = d_[d_["stok"] > 0].drop_duplicates("barkod")
                     bos = d_[[not kat_sec(pa, ayarlar, k_, pid, b_) for k_, b_ in zip(d_["kategori"], d_["barkod"])]]
@@ -5036,7 +5349,7 @@ def urun_baslik_esleme(pid, pa):
 
 def oto_esleme(pid, pa, adet, mevcut):
     st.markdown("**Otomatik öneri**")
-    pazar_ad = {"trendruum": "Trendruum", "hb": "Hepsiburada", "idefix": "İdefix", "n11": "N11", "ptt": "PTT AVM"}.get(pid, pid)
+    pazar_ad = {"trendruum": "Trendruum", "hb": "Hepsiburada", "idefix": "İdefix", "n11": "N11", "ptt": "PTT AVM", "pazarama": "Pazarama"}.get(pid, pid)
     st.caption(f"{pazar_ad} kategori listesini çekip tedarikçi kategorilerinize en yakın kategoriyi önerir. "
                "Hiçbir şey kendiliğinden kaydedilmez; işaretlediğiniz satırlar kaydedilir.")
     bildirim = st.session_state.pop(f"oto_bildirim_{pid}", None)
@@ -5046,7 +5359,7 @@ def oto_esleme(pid, pa, adet, mevcut):
     if gen(st.button, "Önerileri hazırla (önce ben bakayım)", key=f"oto_hazirla_{pid}") or tek_tus:
         try:
             with st.spinner("Kategori listesi alınıyor..."):
-                dugumler = {"trendruum": trendruum_agac_yukle, "hb": hb_oto_dugumler, "idefix": idefix_oto_dugumler, "n11": n11_oto_dugumler, "ptt": ptt_oto_dugumler}[pid](ayarlar)
+                dugumler = {"trendruum": trendruum_agac_yukle, "hb": hb_oto_dugumler, "idefix": idefix_oto_dugumler, "n11": n11_oto_dugumler, "ptt": ptt_oto_dugumler, "pazarama": pazarama_oto_dugumler}[pid](ayarlar)
             satirlar = []
             for k in adet.index:
                 if mevcut.get(k):
@@ -5149,7 +5462,7 @@ def kategori_esleme_editoru(pid):
     if pa.get("varsayilan_kategori_kullan"):
         st.error("⚠️ 'Eşleşmesi olmayan ürünleri de varsayılan kategoriye koy' AÇIK: ID'si girilmemiş her kategori "
                  f"({pa.get('category_id') or 'varsayılan'}) kategorisine gider. Bunu kapatın (Genel Ayarlar); eşleşmeyenler gönderilmeden atlanır.")
-    if pid in ("trendruum", "hb", "idefix", "n11", "ptt"):
+    if pid in ("trendruum", "hb", "idefix", "n11", "ptt", "pazarama"):
         oto_esleme(pid, pa, adet, mevcut)
         urun_baslik_esleme(pid, pa)
     st.markdown("**Kelimeyle toplu atama** (çok sayıda kategoriyi tek seferde aynı pazar kategorisine bağlar)")
@@ -5164,7 +5477,7 @@ def kategori_esleme_editoru(pid):
         if esl:
             with st.expander("Hangi kategoriler?"):
                 st.dataframe(pd.DataFrame({"Kategori": esl[:200], "Ürün": [int(adet[k]) for k in esl[:200]]}), hide_index=True)
-        gecerli = bool(toplu_id) and (objectid_mi(toplu_id) if pid == "trendruum" else (toplu_id.isdigit() if pid == "ptt" else True))
+        gecerli = bool(toplu_id) and (objectid_mi(toplu_id) if pid == "trendruum" else (guid_mi(toplu_id) if pid == "pazarama" else (toplu_id.isdigit() if pid == "ptt" else True)))
         if toplu_id and not gecerli:
             st.warning("ID biçimi bu pazar yeri için geçersiz" + (" (PTT'de sayı olmalı)." if pid == "ptt" else "."))
         if esl and gecerli and gen(st.button, f"✅ {len(esl)} kategoriyi {toplu_id} ID'sine ata", key=f"toplu_ata_{pid}"):
@@ -5232,7 +5545,7 @@ def pazar_ayar_formu(pid):
         hata = None
         if pid == "hb":
             yeni["sku_prefix"] = st.text_input("Merchant SKU öneki (varsa)", value=str(pa.get("sku_prefix", "") or ""))
-        if pid in ("n11", "idefix", "trendruum", "ptt", "hb"):
+        if pid in ("n11", "idefix", "trendruum", "ptt", "hb", "pazarama"):
             st.markdown("**Ürün oluşturma ayarları**")
             c1, c2, c3 = st.columns(3)
             yeni["category_id"] = c1.text_input("Varsayılan kategori ID", value=str(pa.get("category_id", "") or ""),
@@ -5242,12 +5555,16 @@ def pazar_ayar_formu(pid):
                 value=bool(pa.get("varsayilan_kategori_kullan", False)),
                 help="Kapalıyken (önerilen) yalnızca 'Kategori eşleştirme'de ID'si girilmiş ürünler gönderilir; "
                      "diğerleri atlanır. Açıkken tüm ürünler varsayılan kategoriye düşer.")
-            if pid in ("idefix", "trendruum"):
+            if pid in ("idefix", "trendruum", "pazarama"):
                 yeni["brand_id"] = c2.text_input("Marka ID", value=str(pa.get("brand_id", "") or (kimlik(ayarlar, "trendruum_brand") if pid == "trendruum" else "")),
                                                  key=f"marka_alan_{pid}_{pa.get('brand_id', '')}")
             kdv_liste = [20, 10, 1, 0]
             kdv_now = _i(pa.get("kdv"), 20)
             yeni["kdv"] = c3.selectbox("KDV %", kdv_liste, index=kdv_liste.index(kdv_now) if kdv_now in kdv_liste else 0)
+        if pid == "pazarama":
+            c1, c2 = st.columns(2)
+            yeni["desi"] = c1.number_input("Desi", 0.1, 500.0, _f(pa.get("desi"), 1.0) or 1.0, 0.5, key="pz_desi")
+            yeni["ozellik_notr"] = c2.checkbox("Zorunlu özellik başlıkta bulunamazsa 'Diğer/Standart' gibi nötr değeri kullan", value=bool(pa.get("ozellik_notr", True)))
         if pid == "n11":
             c1, c2 = st.columns(2)
             yeni["shipment_template"] = c1.text_input("Kargo şablonu adı", value=str(pa.get("shipment_template", "") or ""))
@@ -5983,7 +6300,7 @@ def toplu_urun_paneli(pid):
             huni.append(("Bu seferki limit sonrası", len(df)))
     uretici = {
         "n11": n11_urun_listesi, "idefix": idefix_urun_listesi, "trendruum": trendruum_urun_listesi,
-        "ptt": ptt_urun_listesi, "hb": hb_urun_listesi,
+        "ptt": ptt_urun_listesi, "hb": hb_urun_listesi, "pazarama": pazarama_urun_listesi,
     }[pid]
     if mod.startswith("Tek"):
         aranan = st.text_input("Test için ürün ara (ad veya barkod)", key=f"{pid}_tek_ara",
@@ -6027,7 +6344,12 @@ def toplu_urun_paneli(pid):
                        "N11 aynı barkodlu ürünleri tek ürüne BİRLEŞTİRİR; gönderdiğiniz sayıdan az ürün görünmesinin nedeni bu olabilir.")
         else:
             st.caption("N11 kontrolü: barkod ve ürün kodları benzersiz.")
-    if pid in ("ptt", "n11", "hb", "idefix", "trendruum") and liste:
+    if pid in ("ptt", "n11", "hb", "idefix", "trendruum", "pazarama") and liste:
+        if pid == "pazarama":
+            _oe = st.session_state.get("pz_oz_eksik")
+            if _oe and _oe[0]:
+                st.warning(f"⚠️ {sum(_oe[0].values()):,} zorunlu özellik eksikliği yüzünden bazı ürünler GÖNDERİLMEYECEK. "
+                           "Eksik özellikler (kaç üründe, örnek kod): " + "; ".join(f"{k}: {n} ({_oe[1].get(k, '')})" for k, n in sorted(_oe[0].items(), key=lambda x: -x[1])[:8]))
         if pid == "n11":
             _oe = st.session_state.get("n11_oz_eksik")
             if _oe and _oe[0]:
@@ -6080,7 +6402,7 @@ def toplu_urun_paneli(pid):
             kod_goster(log_k, "\n".join(loglar[-12:]))
 
         try:
-            gonder = {"n11": n11_urun_gonder, "idefix": idefix_gonder, "trendruum": trendruum_gonder, "ptt": ptt_urun_gonder, "hb": hb_urun_gonder}[pid]
+            gonder = {"n11": n11_urun_gonder, "idefix": idefix_gonder, "trendruum": trendruum_gonder, "ptt": ptt_urun_gonder, "hb": hb_urun_gonder, "pazarama": pazarama_urun_gonder}[pid]
             SON_PAKET["ok"], SON_PAKET["hata"] = [], []
             ok, hata, loglar = gonder(ayarlar, liste, ilerleme)
             try:  # başarıyla iletilen ürünleri hatırla: sonraki gönderimde (limit nedeniyle yarım kaldıysa) atlanır
@@ -6170,7 +6492,7 @@ def pazar_islemler(pid):
         st.session_state[k] = None
         gonder_ve_goster(pid, secili_ted)
 
-    if pid in ("n11", "idefix", "trendruum", "ptt", "hb"):
+    if pid in ("n11", "idefix", "trendruum", "ptt", "hb", "pazarama"):
         if gen(st.button, "📤 Toplu Ürün Oluştur / Gönder", key=f"b4_{pid}"):
             st.session_state[k] = "toplu"
     if bagli and pid in GUNCELLEYICI:
@@ -6242,6 +6564,14 @@ def pazar_islemler(pid):
                     st.info(f"{len(ts_['var_olan']):,} ürün Hepsiburada'da zaten katalogla eşleşmiş ya da katalog işleminde. "
                             "Bu ürünler tekrar 'ürün oluştur' ile yüklenemez (hata: 'Can not update product in matched or in catalog progress status'). "
                             "Bunlar için ürün oluşturmayı bırakıp fiyat/stok güncellemesini kullanın.")
+    if pid == "pazarama" and bagli:
+        with st.expander("📋 Pazarama gönderim sonucu (ürünler neden görünmüyor?)"):
+            st.caption("Pazarama ürünleri hemen oluşturmaz; önce işleme alır. Reddedilenlerin nedeni burada görünür.")
+            kayitli_p = list(reversed(kv_oku("takip:pazarama", []) or []))
+            sec_p = st.selectbox("Son gönderimlerin batchRequestId'leri", [""] + kayitli_p, key="pz_takip_sec")
+            elle_p = st.text_input("veya batchRequestId yapıştırın", key="pz_takip_elle")
+            if gen(st.button, "🔎 Sonucu getir", key="pz_takip_btn"):
+                pazarama_batch_goster(ayarlar, (elle_p or sec_p))
     if pid == "n11" and bagli:
         with st.expander("📋 N11 görev sonucu (ürün gönderimi neden görünmüyor?)"):
             st.caption("N11 ürünleri hemen oluşturmaz; önce görev sırasına alır. Hata varsa burada görünür. "
@@ -6439,7 +6769,10 @@ def pazar_ayar(pid):
     if pid == "trendruum":
         with st.expander("🔎 Trendruum kategori ID bulucu (kategori adından ID bul)"):
             trendruum_kategori_bulucu()
-    if pid in ("n11", "idefix", "trendruum", "ptt", "hb"):
+    if pid == "pazarama":
+        with st.expander("🏷️ Pazarama marka ID bulucu (marka adından ID bul)", expanded=not guid_mi(pa_al(ayarlar, pid).get("brand_id"))):
+            pazarama_marka_bulucu()
+    if pid in ("n11", "idefix", "trendruum", "ptt", "hb", "pazarama"):
         with st.expander("🗂️ Kategori eşleştirme (tedarikçi kategorisi → pazar yeri kategori ID)"):
             kategori_esleme_editoru(pid)
 
