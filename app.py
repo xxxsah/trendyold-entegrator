@@ -82,6 +82,7 @@ VARSAYILAN = {
     "n11_oto_guncelle": False,
     "idefix_oto_guncelle": False,
     "ptt_oto_guncelle": False,
+    "pazarama_oto_guncelle": False,
     "pazar_ayarlari": {},
     "fiyat_sistemi": {},
     "zarar_korumasi": True,
@@ -99,6 +100,7 @@ PAZAR = {
     "idefix": {"ad": "İdefix", "renk": "#00a651", "ikon": "📚", "pastel": "#e6f9ed"},
     "ptt": {"ad": "PTT AVM", "renk": "#ffcd00", "ikon": "📦", "pastel": "#fffde6"},
     "trendruum": {"ad": "Trendruum", "renk": "#8b5cf6", "ikon": "🛒", "pastel": "#f5f3ff"},
+    "pazarama": {"ad": "Pazarama", "renk": "#0ea5e9", "ikon": "🟦", "pastel": "#e8f6fd"},
 }
 PAZAR_AD = {k: v["ad"] for k, v in PAZAR.items()}
 
@@ -109,6 +111,7 @@ OTO_ANAHTAR = (
     ("N11", "n11_oto_guncelle", "n11"),
     ("İdefix", "idefix_oto_guncelle", "idefix"),
     ("PTT AVM", "ptt_oto_guncelle", "ptt"),
+    ("Pazarama", "pazarama_oto_guncelle", "pazarama"),
 )
 OTO_BAYRAK = {pid: anahtar for _, anahtar, pid in OTO_ANAHTAR}
 
@@ -119,6 +122,7 @@ PAZAR_KIMLIK = {
     "idefix": [("Satıcı ID", "idefix_satici_id", False), ("API Key", "idefix_token", True), ("API Secret", "idefix_secret", True)],
     "ptt": [("API Key (Shop ID)", "ptt_key", False), ("Access Token", "ptt_token", True)],
     "trendruum": [("Client ID", "trendruum_key", True), ("API Secret", "trendruum_secret", True)],
+    "pazarama": [("API Key (Client ID)", "pazarama_key", True), ("API Secret", "pazarama_secret", True)],
 }
 GEREKLI_KIMLIK = {pid: [a for _, a, _ in alanlar] for pid, alanlar in PAZAR_KIMLIK.items()}
 
@@ -3541,9 +3545,90 @@ def kategori_id(pa, ayar, kategori, pid):
 # --------------------------------------------------------------------------
 # Gönderim orkestrasyonu
 # --------------------------------------------------------------------------
+# --------------------------------------------------------------------------
+# Pazarama (stok + fiyat güncelleme; ürün oluşturma ikinci aşamada)
+# --------------------------------------------------------------------------
+PZ_GIRIS = "https://isortagimgiris.pazarama.com/connect/token"
+PZ_BASE = "https://isortagimapi.pazarama.com"
+_PZ_TOKEN = {"t": 0, "v": ""}
+
+
+def pazarama_token(ayar, zorla=False):
+    """client_credentials (Basic: API Key:Secret), scope merchantgatewayapi.fullaccess; token ~1 saat geçerli, 50 dk önbelleklenir."""
+    if not zorla and _PZ_TOKEN["v"] and time.time() - _PZ_TOKEN["t"] < 3000:
+        return _PZ_TOKEN["v"]
+    k, x = kimlik(ayar, "pazarama_key"), kimlik(ayar, "pazarama_secret")
+    tok = base64.b64encode(f"{k.strip()}:{x.strip()}".encode()).decode()
+    r = requests.post(PZ_GIRIS, headers={"Authorization": f"Basic {tok}", "Content-Type": "application/x-www-form-urlencoded"},
+                      data={"grant_type": "client_credentials", "scope": "merchantgatewayapi.fullaccess"}, timeout=30)
+    try:
+        j = r.json()
+    except Exception:
+        j = {}
+    v = (j.get("data") or {}).get("accessToken") if isinstance(j.get("data"), dict) else None
+    v = v or j.get("access_token") or j.get("accessToken") or ""
+    if r.status_code != 200 or not v:
+        raise RuntimeError(f"Pazarama girişi başarısız (HTTP {r.status_code}): {(r.text or '')[:300]}")
+    _PZ_TOKEN.update(t=time.time(), v=v)
+    return v
+
+
+def pazarama_istek(ayar, yol, govde):
+    h = {"Authorization": f"Bearer {pazarama_token(ayar)}", "Content-Type": "application/json"}
+    r = http("POST", f"{PZ_BASE}{yol}", json=govde, headers=h, timeout=120, tries=2)
+    if r.status_code == 401:  # token süresi dolmuş olabilir
+        _PZ_TOKEN["v"] = ""
+        h["Authorization"] = f"Bearer {pazarama_token(ayar, zorla=True)}"
+        r = http("POST", f"{PZ_BASE}{yol}", json=govde, headers=h, timeout=120, tries=1)
+    SON_YANIT["pazarama"] = {"yol": yol, "istek_ornek": (govde.get("items") or govde.get("products") or [])[:3], "kod": r.status_code, "yanit": (r.text or "")[:3000]}
+    ok = r.status_code in (200, 201, 202)
+    try:  # HTTP 200 olsa bile gövdede success=false olabilir
+        j = r.json()
+        if isinstance(j, dict) and j.get("success") is False:
+            ok = False
+    except Exception:
+        pass
+    return ok, yanit_ozet(r)
+
+
+def pazarama_guncelle(ayar, df, ilerleme=None):
+    kayit, atlanan, tukenen_atlanan = [], 0, 0
+    son = son_fiyatlar("pazarama")
+    for r in kayit_listesi(df):
+        kod = str(r["barkod"]).strip()
+        fiyat = fiyat_belirle(r, son)
+        stok = max(_i(r.get("stok")), 0)
+        if not kod:
+            atlanan += 1
+            continue
+        govde = {"code": kod, "stock": stok}
+        if fiyat > 0:  # fiyatı olmayan üründe yalnızca STOK gider (tükenen ürün satışta kalmasın)
+            govde["price"] = fiyat
+        else:
+            atlanan += 1
+            if stok == 0:
+                tukenen_atlanan += 1
+        kayit.append((kod, govde))
+
+    def gonder(grup):
+        stok_k = [{"code": g["code"], "stockCount": g["stock"]} for g in grup]
+        ok1, m1 = pazarama_istek(ayar, "/product/updateStock", {"items": stok_k})
+        if not ok1:
+            return False, "stok: " + m1
+        fiyat_k = [{"code": g["code"], "listPrice": g["price"], "salePrice": g["price"]} for g in grup if "price" in g]
+        if not fiyat_k:
+            return True, f"stok: {len(stok_k)} kayıt kuyruğa alındı. " + m1
+        time.sleep(10)  # Pazarama iki çağrı arasında ~10 sn bekletmeyi öneriyor
+        ok2, m2 = pazarama_istek(ayar, "/product/updatePrice", {"items": fiyat_k})
+        return ok2, (f"stok+fiyat: {len(stok_k)}/{len(fiyat_k)} kayıt kuyruğa alındı (Pazarama işlemi arka planda yapar). " + m2) if ok2 else "fiyat: " + m2
+
+    ok_k, hata_k, loglar = paketle(kayit, 1000, gonder, ilerleme, "Pazarama", bekle=10)
+    return _sonuc("pazarama", ok_k, hata_k, loglar, atlanan, tukenen_atlanan)
+
+
 GUNCELLEYICI = {
     "trendruum": trendruum_guncelle, "trendyol": trendyol_guncelle, "hb": hb_guncelle,
-    "n11": n11_guncelle, "idefix": idefix_guncelle, "ptt": ptt_guncelle,
+    "n11": n11_guncelle, "idefix": idefix_guncelle, "ptt": ptt_guncelle, "pazarama": pazarama_guncelle,
 }
 
 
@@ -3935,6 +4020,9 @@ def baglanti_testi(ayar, pid):
                      headers=n11_header(kimlik(ayar, "n11_key"), kimlik(ayar, "n11_secret")), timeout=30)
         elif pid == "idefix":
             r = http("GET", f"{ID_BASE}/pim/product-category", headers=idefix_header(ayar), timeout=60)
+        elif pid == "pazarama":
+            pazarama_token(ayar, zorla=True)
+            return True, "✅ Pazarama girişi (token alma) başarılı."
         else:
             return False, "Desteklenmiyor."
         if r.status_code == 200:
@@ -6366,13 +6454,13 @@ def siparis_stok_metni(u, stok_harita, onek):
 
 KUTU_RENK = {
     "hb": ("#ff5a1f", "#ff9a3c"), "trendyol": ("#f59e0b", "#fcd34d"), "n11": ("#5b21b6", "#8b5cf6"),
-    "idefix": ("#059669", "#34d399"), "ptt": ("#0369a1", "#38bdf8"), "trendruum": ("#db2777", "#f472b6"),
+    "idefix": ("#059669", "#34d399"), "ptt": ("#0369a1", "#38bdf8"), "trendruum": ("#db2777", "#f472b6"), "pazarama": ("#0284c7", "#7dd3fc"),
 }
 DURUM_RENK = {"yeni": "#2563eb", "hazir": "#ea580c", "kargoda": "#7c3aed", "teslim": "#16a34a", "iptal": "#dc2626"}
 PANEL_ADRES = {
     "hb": "https://merchant.hepsiburada.com/", "trendyol": "https://partner.trendyol.com/",
     "n11": "https://so.n11.com/", "trendruum": "https://www.trendruum.com/", "idefix": "https://merchant.idefix.com/",
-    "ptt": "https://merchant.pttavm.com/",
+    "ptt": "https://merchant.pttavm.com/", "pazarama": "https://isortagim.pazarama.com/",
 }
 SIPARIS_PAZARLARI = ("hb", "trendyol", "n11", "trendruum")
 
