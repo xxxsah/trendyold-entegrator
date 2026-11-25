@@ -6049,6 +6049,20 @@ def atlama_nedenleri(df, pid):
                 ekle("marka ID geçersiz/boş")
             if not sabit_barkod(str(r.get("barkod", "")).strip(), trendruum_ayar(ayarlar)[2]):
                 ekle("barkodu yok (geçici barkod kapalı)")
+        if pid == "idefix":
+            if not idefix_barkod(str(r.get("barkod", "")).strip(), ayarlar):
+                ekle("geçerli barkodu yok (8-14 haneli rakam değil; 'stok kodunu barkod yerine kullan' ayarı kapalı)")
+            if cat and not str(cat).strip().isdigit():
+                ekle("kategori ID sayı değil (İdefix kategori ID'si rakamdır)")
+            _bi = _i(tedarikci_marka(ayarlar, r.get("tedarikci"), "idefix", "brand_id", pa.get("brand_id")))
+            if _bi <= 0:
+                ekle("Marka ID boş (İdefix ayarlarında Marka ID girilmemiş)")
+        if pid == "pazarama":
+            _bp = tedarikci_marka(ayarlar, r.get("tedarikci"), "pazarama", "brand_id", pa.get("brand_id"))
+            if not guid_mi(_bp) and not guid_mi(pa.get("brand_id")):
+                ekle("Marka ID boş/geçersiz (Pazarama ayarlarında Marka ID girilmemiş)")
+            if cat and not guid_mi(cat):
+                ekle("kategori ID geçersiz (Pazarama kategori ID'si uzun kimlik kodu olmalı)")
     return ", ".join(f"{k}: {v}" for k, v in say.items())
 
 
